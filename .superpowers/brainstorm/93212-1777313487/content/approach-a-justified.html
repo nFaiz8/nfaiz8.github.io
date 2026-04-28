@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dark Room — Justified Grid</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0A0A0A;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #fff;
+    min-height: 100vh;
+  }
+
+  .site-header {
+    padding: 20px 24px 16px;
+  }
+  .site-logo {
+    font-size: 12px;
+    font-weight: 300;
+    letter-spacing: 0.3em;
+    color: #fff;
+    text-transform: uppercase;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+
+  /* ── JUSTIFIED GALLERY ──
+     Each row: images share the same height, natural aspect ratios,
+     total width fills 100%. Gap between all images = 3px.
+  */
+  .justified-gallery {
+    padding: 0 3px 3px 3px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .jg-row {
+    display: flex;
+    gap: 3px;
+    width: 100%;
+  }
+
+  .jg-photo {
+    flex: 1;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+    min-width: 0;
+  }
+
+  .jg-photo:hover .jg-overlay {
+    opacity: 1;
+  }
+
+  .jg-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.05);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  /* Each photo is a color block with a fixed height per row.
+     flex: the width ratio mirrors the photo's aspect ratio. */
+  .jg-inner {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* Row heights */
+  .row-h200 { height: 200px; }
+  .row-h180 { height: 180px; }
+  .row-h220 { height: 220px; }
+  .row-h195 { height: 195px; }
+
+  /* flex-grow values mirror aspect ratios of each photo in the row:
+     e.g. a 3:2 landscape = flex 1.5, a 2:3 portrait = flex 0.67, a 1:1 = flex 1 */
+
+  /* Row 1: portrait(2:3) + landscape(3:2) + landscape(4:3) */
+  .r1-p1 { flex: 0.67; background: #222; }
+  .r1-p2 { flex: 1.5;  background: #1c1c1c; }
+  .r1-p3 { flex: 1.33; background: #2a2a2a; }
+
+  /* Row 2: landscape(16:9) + portrait(3:4) + square(1:1) */
+  .r2-p1 { flex: 1.78; background: #1e1e1e; }
+  .r2-p2 { flex: 0.75; background: #282828; }
+  .r2-p3 { flex: 1.0;  background: #202020; }
+
+  /* Row 3: square + landscape(3:2) + portrait(2:3) + landscape(4:3) */
+  .r3-p1 { flex: 1.0;  background: #242424; }
+  .r3-p2 { flex: 1.5;  background: #1a1a1a; }
+  .r3-p3 { flex: 0.67; background: #2e2e2e; }
+  .r3-p4 { flex: 1.33; background: #212121; }
+
+  /* Row 4: landscape(3:2) + portrait(2:3) + landscape(16:9) */
+  .r4-p1 { flex: 1.5;  background: #272727; }
+  .r4-p2 { flex: 0.67; background: #1d1d1d; }
+  .r4-p3 { flex: 1.78; background: #232323; }
+
+  /* ── META ── */
+  .meta {
+    padding: 24px 24px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    border-top: 1px solid #1a1a1a;
+    margin-top: 12px;
+  }
+  .meta-item { display: flex; flex-direction: column; gap: 3px; }
+  .meta-key {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #444;
+    font-weight: 600;
+  }
+  .meta-val { font-size: 12px; color: #777; }
+</style>
+</head>
+<body>
+
+<div class="site-header">
+  <span class="site-logo">Faiz</span>
+</div>
+
+<div class="justified-gallery">
+
+  <!-- Row 1: portrait · landscape · landscape -->
+  <div class="jg-row row-h200">
+    <div class="jg-photo r1-p1"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r1-p2"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r1-p3"><div class="jg-overlay"></div></div>
+  </div>
+
+  <!-- Row 2: wide landscape · portrait · square -->
+  <div class="jg-row row-h180">
+    <div class="jg-photo r2-p1"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r2-p2"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r2-p3"><div class="jg-overlay"></div></div>
+  </div>
+
+  <!-- Row 3: square · landscape · portrait · landscape -->
+  <div class="jg-row row-h220">
+    <div class="jg-photo r3-p1"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r3-p2"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r3-p3"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r3-p4"><div class="jg-overlay"></div></div>
+  </div>
+
+  <!-- Row 4: landscape · portrait · wide landscape -->
+  <div class="jg-row row-h195">
+    <div class="jg-photo r4-p1"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r4-p2"><div class="jg-overlay"></div></div>
+    <div class="jg-photo r4-p3"><div class="jg-overlay"></div></div>
+  </div>
+
+</div>
+
+<div class="meta">
+  <div class="meta-item">
+    <span class="meta-key">Layout</span>
+    <span class="meta-val">Justified — natural aspect ratios, uniform row heights</span>
+  </div>
+  <div class="meta-item">
+    <span class="meta-key">Gap</span>
+    <span class="meta-val">3px everywhere</span>
+  </div>
+  <div class="meta-item">
+    <span class="meta-key">Hover</span>
+    <span class="meta-val">Subtle brightness lift</span>
+  </div>
+  <div class="meta-item">
+    <span class="meta-key">Click</span>
+    <span class="meta-val">Full-screen lightbox</span>
+  </div>
+</div>
+
+</body>
+</html>

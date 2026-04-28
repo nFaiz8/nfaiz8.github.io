@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approach Comparison</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #fff;
+    min-height: 100vh;
+  }
+
+  .page-header {
+    text-align: center;
+    padding: 32px 24px 24px;
+    border-bottom: 1px solid #333;
+  }
+  .page-header h1 {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: #aaa;
+  }
+  .page-header p {
+    font-size: 13px;
+    color: #666;
+    margin-top: 6px;
+  }
+
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 100px);
+  }
+
+  /* ── SHARED MOCKUP SHELL ── */
+  .mockup-shell {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #333;
+  }
+  .mockup-shell:last-child { border-right: none; }
+
+  .approach-label {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid #2a2a2a;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .approach-letter {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .letter-a { background: #fff; color: #000; }
+  .letter-b { background: #555; color: #fff; }
+
+  .approach-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .approach-tagline {
+    font-size: 11px;
+    color: #666;
+    margin-top: 2px;
+  }
+
+  .site-preview {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* ══════════════════════════
+     APPROACH A — DARK ROOM
+  ══════════════════════════ */
+  .preview-a {
+    background: #0A0A0A;
+    padding: 0;
+  }
+
+  .a-header {
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .a-logo {
+    font-size: 11px;
+    font-weight: 300;
+    letter-spacing: 0.25em;
+    color: #fff;
+    text-transform: uppercase;
+    font-family: Georgia, serif;
+  }
+
+  .a-grid {
+    padding: 4px 4px 4px 4px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3px;
+  }
+
+  .a-photo {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .a-photo:hover .a-hover-overlay {
+    opacity: 1;
+  }
+  .a-hover-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.06);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .a-photo img-placeholder {
+    display: block;
+    width: 100%;
+  }
+
+  /* Photo placeholders — simulating real DSCF photos with color variety */
+  .ph {
+    width: 100%;
+    display: block;
+  }
+
+  /* ══════════════════════════
+     APPROACH B — FILM NEGATIVE
+  ══════════════════════════ */
+  .preview-b {
+    background: #111;
+    position: relative;
+  }
+
+  /* Film grain overlay */
+  .preview-b::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 128px 128px;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.5;
+  }
+
+  .b-header {
+    padding: 18px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+    z-index: 2;
+  }
+  .b-logo {
+    font-size: 11px;
+    font-weight: 300;
+    letter-spacing: 0.25em;
+    color: #ccc;
+    text-transform: uppercase;
+    font-family: Georgia, serif;
+  }
+
+  .b-grid {
+    padding: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    position: relative;
+    z-index: 2;
+  }
+
+  .b-photo {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .b-photo:hover .b-caption {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .b-caption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 8px 8px;
+    background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%);
+    opacity: 0;
+    transform: translateY(4px);
+    transition: all 0.35s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .b-caption-loc {
+    font-size: 9px;
+    color: #fff;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  .b-caption-year {
+    font-size: 9px;
+    color: #aaa;
+  }
+
+  /* ── SHARED PHOTO MOSAIC ── */
+  /* Using SVG placeholders with different aspect ratios & grey tones */
+  .r1 { aspect-ratio: 3/4; }
+  .r2 { aspect-ratio: 1/1; }
+  .r3 { aspect-ratio: 4/3; }
+  .r4 { aspect-ratio: 2/3; }
+  .r5 { aspect-ratio: 3/2; }
+
+  .tone1 { background: #2a2a2a; }
+  .tone2 { background: #1e1e1e; }
+  .tone3 { background: #333; }
+  .tone4 { background: #252525; }
+  .tone5 { background: #3a3a3a; }
+  .tone6 { background: #1a1a1a; }
+
+  /* ── NOTES BELOW EACH ── */
+  .approach-notes {
+    padding: 14px 16px;
+    border-top: 1px solid #222;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: #0f0f0f;
+  }
+  .note-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .note-key {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #555;
+    min-width: 70px;
+    padding-top: 1px;
+    font-weight: 600;
+  }
+  .note-val {
+    font-size: 11px;
+    color: #888;
+    line-height: 1.4;
+  }
+
+  /* ── SELECT BUTTONS ── */
+  .select-bar {
+    padding: 12px 16px;
+    border-top: 1px solid #222;
+    background: #0a0a0a;
+  }
+  .select-btn {
+    width: 100%;
+    padding: 9px 16px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: transparent;
+    color: #aaa;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+  }
+  .select-btn:hover {
+    border-color: #fff;
+    color: #fff;
+    background: rgba(255,255,255,0.04);
+  }
+  .select-btn.chosen {
+    border-color: #fff;
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Approach Comparison — Faiz Portfolio</h1>
+  <p>Hover over the photos to see the interaction difference</p>
+</div>
+
+<div class="comparison">
+
+  <!-- ══ APPROACH A ══ -->
+  <div class="mockup-shell">
+    <div class="approach-label">
+      <div class="approach-letter letter-a">A</div>
+      <div>
+        <div class="approach-name">Dark Room</div>
+        <div class="approach-tagline">Pure black · Tight grid · Zero chrome</div>
+      </div>
+    </div>
+
+    <div class="site-preview preview-a">
+      <div class="a-header">
+        <span class="a-logo">Faiz</span>
+      </div>
+      <div class="a-grid">
+        <div class="a-photo r1 tone2"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r2 tone4"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r4 tone1"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r2 tone3"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r1 tone5"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r2 tone2"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r3 tone6"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r2 tone1"><div class="a-hover-overlay"></div></div>
+        <div class="a-photo r4 tone3"><div class="a-hover-overlay"></div></div>
+      </div>
+    </div>
+
+    <div class="approach-notes">
+      <div class="note-row">
+        <span class="note-key">Background</span>
+        <span class="note-val">#0A0A0A — pure black</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">Grid gap</span>
+        <span class="note-val">3px — photos nearly touch</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">Hover</span>
+        <span class="note-val">Subtle brightness lift only</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">Captions</span>
+        <span class="note-val">None visible — just the image</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">UI chrome</span>
+        <span class="note-val">Name only, top-left</span>
+      </div>
+    </div>
+
+    <div class="select-bar">
+      <button class="select-btn" onclick="choose('a', this)">Choose Dark Room →</button>
+    </div>
+  </div>
+
+  <!-- ══ APPROACH B ══ -->
+  <div class="mockup-shell">
+    <div class="approach-label">
+      <div class="approach-letter letter-b">B</div>
+      <div>
+        <div class="approach-name">Film Negative</div>
+        <div class="approach-tagline">Charcoal · Grain · Caption on hover</div>
+      </div>
+    </div>
+
+    <div class="site-preview preview-b">
+      <div class="b-header">
+        <span class="b-logo">Faiz</span>
+      </div>
+      <div class="b-grid">
+        <div class="b-photo r1 tone2">
+          <div class="b-caption">
+            <span class="b-caption-loc">Tokyo</span>
+            <span class="b-caption-year">2024</span>
+          </div>
+        </div>
+        <div class="b-photo r2 tone4">
+          <div class="b-caption">
+            <span class="b-caption-loc">Karachi</span>
+            <span class="b-caption-year">2023</span>
+          </div>
+        </div>
+        <div class="b-photo r4 tone1">
+          <div class="b-caption">
+            <span class="b-caption-loc">Istanbul</span>
+            <span class="b-caption-year">2024</span>
+          </div>
+        </div>
+        <div class="b-photo r2 tone3">
+          <div class="b-caption">
+            <span class="b-caption-loc">Dubai</span>
+            <span class="b-caption-year">2023</span>
+          </div>
+        </div>
+        <div class="b-photo r1 tone5">
+          <div class="b-caption">
+            <span class="b-caption-loc">London</span>
+            <span class="b-caption-year">2024</span>
+          </div>
+        </div>
+        <div class="b-photo r2 tone2">
+          <div class="b-caption">
+            <span class="b-caption-loc">Mumbai</span>
+            <span class="b-caption-year">2023</span>
+          </div>
+        </div>
+        <div class="b-photo r3 tone6">
+          <div class="b-caption">
+            <span class="b-caption-loc">NYC</span>
+            <span class="b-caption-year">2024</span>
+          </div>
+        </div>
+        <div class="b-photo r2 tone1">
+          <div class="b-caption">
+            <span class="b-caption-loc">Lahore</span>
+            <span class="b-caption-year">2022</span>
+          </div>
+        </div>
+        <div class="b-photo r4 tone3">
+          <div class="b-caption">
+            <span class="b-caption-loc">Paris</span>
+            <span class="b-caption-year">2024</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="approach-notes">
+      <div class="note-row">
+        <span class="note-key">Background</span>
+        <span class="note-val">#111 with CSS film grain</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">Grid gap</span>
+        <span class="note-val">8px — photos breathe more</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">Hover</span>
+        <span class="note-val">Caption fades in at bottom</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">Captions</span>
+        <span class="note-val">Location + year on hover</span>
+      </div>
+      <div class="note-row">
+        <span class="note-key">UI chrome</span>
+        <span class="note-val">Name + subtle grain texture</span>
+      </div>
+    </div>
+
+    <div class="select-bar">
+      <button class="select-btn" onclick="choose('b', this)">Choose Film Negative →</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function choose(option, btn) {
+  document.querySelectorAll('.select-btn').forEach(b => b.classList.remove('chosen'));
+  btn.classList.add('chosen');
+  if (window.__companion) {
+    window.__companion.record({ type: 'click', choice: option, text: btn.textContent.trim() });
+  }
+}
+</script>
+</body>
+</html>
