@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "editor": "node scripts/editor.mjs",
     "generate-data": "node scripts/generate-image-data.mjs",
     "generate-thumbnails": "node scripts/generate-thumbnails.mjs",
     "prebuild": "node scripts/generate-thumbnails.mjs"
@@ -29,6 +30,7 @@
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "exifr": "^7.1.3",
     "globals": "^17.5.0",
     "image-size": "^2.0.2",
     "sharp": "^0.34.5",

@@ -1,17 +1,26 @@
 import { imageSize } from 'image-size';
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, extname, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IMAGES_DIR = resolve(__dirname, '../public/images');
+const LIST_FILE = resolve(__dirname, '../src/image-list.json');
 const OUTPUT = resolve(__dirname, '../src/image-data.js');
 
 const VALID_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
-const filenames = readdirSync(IMAGES_DIR)
-  .filter(f => VALID_EXT.has(extname(f).toLowerCase()))
-  .sort();
+let filenames;
+if (existsSync(LIST_FILE)) {
+  const allFiles = new Set(
+    readdirSync(IMAGES_DIR).filter(f => VALID_EXT.has(extname(f).toLowerCase()))
+  );
+  filenames = JSON.parse(readFileSync(LIST_FILE, 'utf8')).filter(f => allFiles.has(f));
+} else {
+  filenames = readdirSync(IMAGES_DIR)
+    .filter(f => VALID_EXT.has(extname(f).toLowerCase()))
+    .sort();
+}
 
 const imageData = filenames.map(filename => {
   try {
