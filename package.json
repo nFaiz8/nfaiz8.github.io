@@ -1,6 +1,8 @@
 {
   "name": "portfolio-site",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,7 +12,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "generate-data": "node scripts/generate-image-data.mjs"
+    "generate-data": "node scripts/generate-image-data.mjs",
+    "generate-thumbnails": "node scripts/generate-thumbnails.mjs",
+    "prebuild": "node scripts/generate-thumbnails.mjs"
   },
   "dependencies": {
     "react": "^19.2.5",
@@ -27,6 +31,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "image-size": "^2.0.2",
+    "sharp": "^0.34.5",
     "vite": "^8.0.10",
     "vitest": "^4.1.5"
   }

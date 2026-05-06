@@ -98,6 +98,10 @@ export default function Gallery({ onImageClick }) {
   );
 }
 
+function thumbPath(src) {
+  return `/images/thumbs/${src.replace(/\.[^.]+$/, '.jpg')}`;
+}
+
 function GalleryItem({ src, width, height, onClick }) {
   const style = width !== undefined
     ? { width: `${width}px`, height: `${height}px` }
@@ -110,7 +114,7 @@ function GalleryItem({ src, width, height, onClick }) {
       aria-label={`View photo ${src}`}
     >
       <img
-        src={`/images/${src}`}
+        src={thumbPath(src)}
         alt=""
         loading="lazy"
         width={width}
