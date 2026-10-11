@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex">
+<title>Photo Shrinker</title>
+<link rel="icon" href="data:,">
+<style>
+  /* One column, a drop zone, then a ledger of files: name · before → after · what happened. */
+  :root {
+    --bg: #07080b;
+    --panel: #0d0f14;
+    --ink: #e9e4d8;
+    --mute: #8a877f;
+    --line: #2a2d36;
+    --ok: #9fc79a;
+    --warn: #e0b46a;
+    --bad: #e07a6a;
+    --accent: #ffce6e;
+    --mono: Menlo, "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 13px/1.5 var(--mono); padding-block: 32px; padding-inline: 16px; }
+  main { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 0.04em; }
+  h1 span { color: var(--mute); font-weight: 400; }
+  p { margin: 0; color: var(--mute); max-width: 68ch; }
+  .drop { border: 1px dashed var(--line); background: var(--panel); padding: 28px 20px; display: grid; gap: 12px; justify-items: start; }
+  .drop.over { border-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  button, .btn { font: inherit; color: var(--ink); background: none; border: 1px solid var(--line); padding: 6px 12px; cursor: pointer; }
+  button:hover, .btn:hover, button:focus-visible, .btn:focus-visible { border-color: var(--mute); outline: none; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  label { color: var(--mute); display: inline-flex; gap: 8px; align-items: center; }
+  input[type=number] { font: inherit; width: 6ch; color: var(--ink); background: var(--bg); border: 1px solid var(--line); padding: 4px 6px; }
+  input[type=file] { display: none; }
+  .summary { color: var(--mute); font-variant-numeric: tabular-nums; }
+  .ledger { border-top: 1px solid var(--line); }
+  .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sizes { color: var(--mute); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .note { grid-column: 1 / -1; color: var(--mute); font-size: 12px; }
+  .note.ok { color: var(--ok); } .note.warn { color: var(--warn); } .note.bad { color: var(--bad); }
+  @media (max-width: 520px) { .item { grid-template-columns: 1fr; } .sizes { text-align: left; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>photo shrinker <span>· for faiz.pics</span></h1>
+  <p>Makes photos small enough to upload to GitHub (under 25 MB each) and keeps their camera details.
+    Everything happens in this browser; nothing is uploaded. Files already under the limit are kept exactly as they are.</p>
+
+  <section class="drop" id="drop">
+    <div class="row">
+      <button class="primary" id="pick" type="button">Choose photos</button>
+      <button id="pick-folder" type="button">Choose a folder</button>
+      <span class="summary">or drop them here</span>
+    </div>
+    <div class="row">
+      <label for="limit">Max size <input id="limit" type="number" min="2" max="100" step="1" value="24"> MB</label>
+      <label for="edge">Longest side <input id="edge" type="number" min="0" step="100" value="0"> px <span>(0 = keep)</span></label>
+    </div>
+    <input id="files" type="file" accept="image/*,.heic,.heif,.tif,.tiff" multiple>
+    <input id="folder" type="file" webkitdirectory>
+  </section>
+
+  <div class="row">
+    <button class="primary" id="go" type="button" disabled>Shrink and save</button>
+    <span class="summary" id="summary">No photos chosen.</span>
+  </div>
+  <div class="ledger" id="ledger" aria-live="polite"></div>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MB = 1024 * 1024;
+  let queue = [];
+
+  const fmt = (n) => (n >= MB ? `${(n / MB).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+  const isImage = (f) => /^image\//.test(f.type) || /\.(jpe?g|png|webp|tiff?|heic|heif|avif)$/i.test(f.name);
+  const isJpeg = (f) => f.type === 'image/jpeg' || /\.jpe?g$/i.test(f.name);
+
+  function add(files) {
+    for (const f of files) if (isImage(f)) queue.push({ file: f, row: null });
+    render();
+  }
+
+  function render() {
+    const total = queue.reduce((s, q) => s + q.file.size, 0);
+    const big = queue.filter((q) => q.file.size > limit()).length;
+    $('summary').textContent = queue.length
+      ? `${queue.length} photos, ${fmt(total)} · ${big} over the limit`
+      : 'No photos chosen.';
+    $('go').disabled = !queue.length;
+    const ledger = $('ledger');
+    ledger.replaceChildren();
+    for (const q of queue) {
+      const row = document.createElement('div');
+      row.className = 'item';
+      row.innerHTML = '<span class="name"></span><span class="sizes"></span><span class="note"></span>';
+      row.querySelector('.name').textContent = q.file.webkitRelativePath || q.file.name;
+      row.querySelector('.sizes').textContent = fmt(q.file.size);
+      row.querySelector('.note').textContent = q.file.size > limit() ? 'will be shrunk' : 'already small enough';
+      q.row = row;
+      ledger.append(row);
+    }
+  }
+  const limit = () => Math.max(2, Number($('limit').value) || 24) * 1000 * 1000; // decimal MB, like GitHub
+  const set = (q, sizes, note, kind = '') => {
+    if (sizes) q.row.querySelector('.sizes').textContent = sizes;
+    const n = q.row.querySelector('.note');
+    n.textContent = note;
+    n.className = `note ${kind}`;
+  };
+
+  // ---------- JPEG metadata ----------
+  // Pull the EXIF and XMP segments out of a JPEG so they can go into the re-encoded file.
+  function metadataSegments(buf) {
+    const b = new Uint8Array(buf), out = [];
+    if (b[0] !== 0xff || b[1] !== 0xd8) return out;
+    let i = 2;
+    while (i + 4 < b.length && b[i] === 0xff) {
+      const marker = b[i + 1];
+      if (marker === 0xda || marker === 0xd9) break; // start of image data
+      const len = (b[i + 2] << 8) | b[i + 3];
+      const seg = b.slice(i, i + 2 + len);
+      if (marker === 0xe1) out.push(seg); // APP1: EXIF or XMP
+      i += 2 + len;
+    }
+    return out;
+  }
+
+  // The pixels are saved upright, so the EXIF orientation must say "normal"; colour is now sRGB.
+  function fixExif(seg) {
+    const b = seg;
+    const isExif = b[4] === 0x45 && b[5] === 0x78 && b[6] === 0x69 && b[7] === 0x66; // "Exif"
+    if (!isExif) {
+      // XMP: plain text; reset any orientation it carries too.
+      const text = new TextDecoder().decode(b);
+      if (!/tiff:Orientation/.test(text)) return b;
+      const fixed = text.replace(/tiff:Orientation="\d"/g, 'tiff:Orientation="1"').replace(/<tiff:Orientation>\d<\/tiff:Orientation>/g, '<tiff:Orientation>1</tiff:Orientation>');
+      const enc = new TextEncoder().encode(fixed);
+      return enc.length === b.length ? enc : b;
+    }
+    const t = 10; // TIFF header starts after FFE1 len "Exif\0\0"
+    const le = b[t] === 0x49;
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const u16 = (o) => dv.getUint16(t + o, le), u32 = (o) => dv.getUint32(t + o, le);
+    const setShort = (ifd, tag, value) => {
+      try {
+        const n = u16(ifd);
+        for (let k = 0; k < n; k++) {
+          const e = ifd + 2 + k * 12;
+          if (u16(e) === tag && u16(e + 2) === 3) dv.setUint16(t + e + 8, value, le);
+        }
+      } catch {}
+    };
+    const findLong = (ifd, tag) => {
+      try {
+        const n = u16(ifd);
+        for (let k = 0; k < n; k++) { const e = ifd + 2 + k * 12; if (u16(e) === tag) return u32(e + 8); }
+      } catch {}
+      return 0;
+    };
+    try {
+      const ifd0 = u32(4);
+      setShort(ifd0, 0x0112, 1); // Orientation
+      const exifIfd = findLong(ifd0, 0x8769);
+      if (exifIfd) setShort(exifIfd, 0xa001, 1); // ColorSpace: sRGB
+    } catch {}
+    return b;
+  }
+
+  // Insert segments right after SOI, dropping the encoder's own APP0 (JFIF) header.
+  function withMetadata(jpeg, segments) {
+    const b = new Uint8Array(jpeg);
+    let rest = 2;
+    if (b[2] === 0xff && b[3] === 0xe0) rest = 4 + ((b[4] << 8) | b[5]);
+    const parts = [b.slice(0, 2), ...segments, b.slice(rest)];
+    return new Blob(parts, { type: 'image/jpeg' });
+  }
+
+  // ---------- encoding ----------
+  // An <img> is turned upright from the EXIF orientation by every current browser, and drawing it
+  // to a canvas keeps that, so the saved pixels are the right way up.
+  async function upright(blob) {
+    const img = new Image();
+    img.src = URL.createObjectURL(blob);
+    await img.decode();
+    return { src: img.src, img, width: img.naturalWidth, height: img.naturalHeight };
+  }
+
+  async function encode(bitmap, scale, quality) {
+    const w = Math.max(1, Math.round(bitmap.width * scale)), h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap.img, 0, 0, w, h);
+    const blob = canvas.convertToBlob
+      ? await canvas.convertToBlob({ type: 'image/jpeg', quality })
+      : await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+    return { blob, w, h };
+  }
+
+  // Highest quality (then, if needed, largest size) that fits under the budget.
+  async function shrink(bitmap, budget, maxEdge) {
+    let scale = maxEdge > 0 ? Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height)) : 1;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      let lo = 0.6, hi = 0.97, best = null;
+      const top = await encode(bitmap, scale, hi);
+      if (top.blob.size <= budget) return { ...top, quality: hi };
+      for (let k = 0; k < 6; k++) {
+        const q = (lo + hi) / 2;
+        const r = await encode(bitmap, scale, q);
+        if (r.blob.size <= budget) { best = { ...r, quality: q }; lo = q; } else hi = q;
+      }
+      if (best) return best;
+      scale *= 0.85; // still too big at quality 0.6: make it a little smaller
+    }
+    throw new Error('could not get it under the limit');
+  }
+
+  // ---------- saving ----------
+  let dir = null;
+  async function save(name, blob) {
+    if (dir) {
+      const parts = name.split('/');
+      let d = dir;
+      for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
+      const fh = await d.getFileHandle(parts.at(-1), { create: true });
+      const w = await fh.createWritable();
+      await w.write(blob);
+      await w.close();
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name.split('/').pop();
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    await new Promise((r) => setTimeout(r, 250)); // let the browser start each download
+  }
+
+  async function run() {
+    $('go').disabled = true;
+    dir = null;
+    if (window.showDirectoryPicker) {
+      try { dir = await window.showDirectoryPicker({ id: 'shrunk', mode: 'readwrite' }); }
+      catch (e) { if (e.name === 'AbortError') { $('go').disabled = false; return; } }
+    }
+    const max = limit(), edge = Number($('edge').value) || 0;
+    let done = 0, before = 0, after = 0;
+    for (const q of queue) {
+      const f = q.file, rel = f.webkitRelativePath ? f.webkitRelativePath.split('/').slice(1).join('/') : f.name;
+      before += f.size;
+      try {
+        if (f.size <= max && !edge) {
+          await save(rel, f);
+          after += f.size;
+          set(q, `${fmt(f.size)} → same`, 'already small enough · copied unchanged', 'ok');
+        } else {
+          set(q, null, 'shrinking…');
+          const buf = await f.arrayBuffer();
+          const segments = isJpeg(f) ? metadataSegments(buf).map(fixExif) : [];
+          const meta = segments.reduce((s, x) => s + x.length, 0);
+          const bitmap = await upright(new Blob([buf], { type: f.type || 'image/jpeg' }));
+          const r = await shrink(bitmap, max - meta - 4096, edge);
+          URL.revokeObjectURL(bitmap.src);
+          const out = withMetadata(await r.blob.arrayBuffer(), segments);
+          const name = rel.replace(/\.[^./]+$/, '') + '.jpg';
+          await save(name, out);
+          after += out.size;
+          const kept = segments.length ? 'camera details kept' : 'no camera details to keep';
+          set(q, `${fmt(f.size)} → ${fmt(out.size)}`, `${r.w}×${r.h} · quality ${Math.round(r.quality * 100)} · ${kept}`, segments.length ? 'ok' : 'warn');
+        }
+      } catch (e) {
+        set(q, null, `couldn't shrink: ${e.message || e}${/hei[cf]/i.test(f.name) ? ' (this browser may not open HEIC; try Safari)' : ''}`, 'bad');
+      }
+      done++;
+      $('summary').textContent = `${done} of ${queue.length} done · ${fmt(before)} → ${fmt(after)}`;
+    }
+    $('summary').textContent = `Done: ${queue.length} photos, ${fmt(before)} → ${fmt(after)}${dir ? ', saved to the folder you picked' : ', saved to your downloads'}.`;
+    $('go').disabled = false;
+  }
+
+  $('pick').addEventListener('click', () => $('files').click());
+  $('pick-folder').addEventListener('click', () => $('folder').click());
+  $('files').addEventListener('change', (e) => add(e.target.files));
+  $('folder').addEventListener('change', (e) => add(e.target.files));
+  $('limit').addEventListener('change', render);
+  $('go').addEventListener('click', run);
+  const drop = $('drop');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); add(e.dataTransfer.files); });
+  window.__shrink = { add, run, get queue() { return queue; } };
+})();
+</script>
+</body>
+</html>

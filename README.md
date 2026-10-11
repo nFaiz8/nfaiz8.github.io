@@ -12,9 +12,13 @@ site. Black & white photos go to the darkroom.
 From the GitHub website: open the `photos` folder → **Add file** → **Upload files** → drag the
 images in → **Commit changes**. The site updates a few minutes later (watch the **Actions** tab).
 
+- Files must be under 25 MB to upload through the website. **faiz.pics/shrink/** shrinks photos
+  to fit and keeps their camera details; it runs in your browser and uploads nothing. Files
+  already under the limit are left exactly as they are. (It's also at `public/shrink/index.html`,
+  which you can open straight from your computer.)
 - JPEG, PNG, WebP, TIFF and AVIF work. Export from Lightroom or similar as JPEG.
-- The GitHub website takes files up to 25 MB, 100 at a time. A long edge of about 4000–6000 px
-  is plenty; the site's largest size is 4096 px.
+- The GitHub website takes up to 100 files at a time. The site's largest size is 4096 px, so
+  bigger originals don't show more detail.
 - To remove a photo, delete it from `photos/`. To hide one without deleting it, add its file name
   in lower case (e.g. `dscf7326`) to `EXCLUDE` in `src/config.js`.
 - The published copies carry no metadata, so no GPS location ever reaches the site. Photos have
