@@ -1,0 +1,96 @@
+:root {
+  --bg: #07080b;
+  --ink: #e9e4d8;
+  --dim: #77757080;
+  --mute: #8a877f;
+  --line: #2a2d36;
+  --mono: Menlo, "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; }
+body { font: 13px/1.4 var(--mono); }
+#stage { position: fixed; inset: 0; touch-action: none; cursor: crosshair; outline: none; }
+#stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.hud { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; pointer-events: none; }
+.hud-name { letter-spacing: 0.18em; text-transform: lowercase; color: var(--mute); }
+.hud-tools { display: flex; gap: 8px; }
+.hud-btn { pointer-events: auto; font: inherit; color: var(--mute); background: none; border: 1px solid var(--line);
+  padding: 4px 10px; cursor: pointer; }
+.hud-btn:hover, .hud-btn:focus-visible { color: var(--ink); border-color: var(--mute); outline: none; }
+
+.caption { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100vw - 32px);
+  padding: 6px 12px; background: #07080bd9; border: 1px solid var(--line); color: var(--ink); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+.caption.on { opacity: 1; }
+.caption .key { color: var(--mute); margin-left: 1ch; }
+
+.note { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--mute); opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+.note.on { opacity: 1; }
+
+.fatal { position: fixed; inset: 0; display: grid; place-items: center; white-space: pre; color: var(--mute); }
+.fatal a { color: var(--ink); }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Map */
+.map { position: fixed; inset: 0; z-index: 12; display: grid; place-items: center; padding: 16px; background: #050608d9; }
+.map[hidden] { display: none; }
+.map-panel { width: min(1100px, 100%); max-height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  background: var(--bg); border: 1px solid var(--line); }
+.map-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--mute); }
+.map-plan { position: relative; margin: 0 auto; }
+.map-plan canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.map-room { position: absolute; transform: translate(-50%, -50%); font: inherit; font-size: 12px; background: #07080be6;
+  border: 1px solid var(--line); padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+.map-room:hover, .map-room:focus-visible { border-color: currentColor; outline: none; }
+.map-room.here { border-color: currentColor; }
+.map-list { display: none; flex-wrap: wrap; gap: 6px; }
+.map-room-item { font: inherit; font-size: 12px; background: none; border: 1px solid var(--line); padding: 6px 10px; cursor: pointer; }
+.map-room-item:hover, .map-room-item:focus-visible { border-color: currentColor; outline: none; }
+.map-room-item.here::after { content: ' · here'; color: var(--mute); }
+@media (max-width: 600px) {
+  .map-room { display: none; }
+  .map-list { display: flex; }
+}
+.map-you { position: absolute; transform: translate(-50%, -50%); color: rgb(255 206 110); font-weight: bold;
+  text-shadow: 0 0 6px rgb(255 206 110 / 0.8); pointer-events: none; }
+
+/* Opening a photo: the resolve overlay, the load bar and the image that grows to full screen */
+.resolve, .flip { position: fixed; z-index: 5; pointer-events: none; }
+.flip { object-fit: fill; will-change: transform, opacity; }
+.resolve-progress { position: fixed; z-index: 5; color: var(--ink); background: var(--bg); padding: 0 4px; pointer-events: none; }
+
+.viewer { position: fixed; inset: 0; z-index: 10; background: #050608f2; }
+.viewer-stage { position: absolute; inset: 0 0 56px 0; overflow: hidden; touch-action: none; cursor: zoom-in; }
+.viewer-img { position: absolute; transform-origin: 0 0; user-select: none; -webkit-user-drag: none; }
+.viewer-bar { position: absolute; left: 0; right: 0; bottom: 0; min-height: 56px; display: flex; flex-wrap: wrap;
+  align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 16px; border-top: 1px solid var(--line);
+  background: var(--bg); }
+.viewer-title { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.vbtn { font: inherit; color: var(--mute); background: none; border: 1px solid var(--line); padding: 4px 10px; cursor: pointer; }
+.vbtn:hover, .vbtn:focus-visible { color: var(--ink); border-color: var(--mute); outline: none; }
+.vbtn:disabled { opacity: 0.35; cursor: default; }
+.vbtn[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+.viewer-info { position: absolute; top: 16px; right: 16px; width: min(320px, calc(100vw - 32px)); max-height: calc(100% - 104px);
+  overflow: auto; padding: 14px 16px; background: #07080bf0; border: 1px solid var(--line); }
+.viewer-info h2 { margin: 0 0 10px; font: inherit; color: var(--ink); }
+.viewer-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.viewer-info dt { color: var(--mute); }
+.viewer-info dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.viewer-error { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); color: var(--mute); text-align: center; }
+
+.debug { position: fixed; left: 16px; top: 52px; margin: 0; padding: 6px 10px; z-index: 20; color: var(--mute);
+  background: #07080bd9; border: 1px solid var(--line); font: 11px/1.4 var(--mono); pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .caption, .note { transition: none; }
+}
+
+@media (max-width: 600px) {
+  .viewer-tools .vbtn { padding: 6px 10px; }
+  .caption { bottom: 12px; font-size: 11px; white-space: normal; }
+}

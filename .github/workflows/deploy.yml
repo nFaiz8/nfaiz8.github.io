@@ -1,8 +1,11 @@
+# Build the gallery from photos/ and publish it to GitHub Pages (faiz.pics).
+# Runs on every push to main, or by hand from the Actions tab.
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,13 +19,22 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true' # Chrome is only for the local e2e checks
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
+      # Reuse the resized photos from the last build; only new or changed photos are processed.
+      - uses: actions/cache@v4
+        with:
+          path: public/photos
+          key: photos-${{ hashFiles('photos/**', 'scripts/prepare-photos.mjs', 'src/analyze.js') }}
+          restore-keys: photos-
+      - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

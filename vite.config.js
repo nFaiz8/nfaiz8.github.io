@@ -1,9 +1,7 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
 
+// Photos are prepared into public/photos by scripts/prepare-photos.mjs; Vite serves and copies them.
 export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: 'node',
-  },
+  base: './',
+  build: { target: 'es2022' },
 });

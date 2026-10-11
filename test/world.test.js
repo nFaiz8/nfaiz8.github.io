@@ -1,0 +1,87 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { indexData } from '../src/data.js';
+import { buildLayout, isWalkable } from '../src/layout.js';
+import { createWorld, step, walkTo, teleport, smoothPath } from '../src/world.js';
+import { findPath } from '../src/path.js';
+
+const SITE = { name: 'Faiz Nazeer', tagline: 'photographs', about: 'About.' };
+const map = buildLayout(indexData(JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)))), SITE);
+const run = (world, seconds, input) => { for (let t = 0; t < seconds; t += 1 / 60) step(world, 1 / 60, input); };
+
+test('walking into a wall stops at the wall instead of passing through', () => {
+  const w = createWorld(map);
+  run(w, 10, { x: 0, y: 1 }); // lobby south wall has a corridor door in the middle, so walk off-centre
+  const w2 = createWorld(map);
+  teleport(w2, map.rooms[0].x + 3.5, map.spawn.y);
+  run(w2, 10, { x: -1, y: 0 });
+  assert.ok(w2.player.x > map.rooms[0].x + 1, 'stayed inside the lobby');
+  assert.ok(w2.player.x < map.rooms[0].x + 1.5, 'reached the wall');
+});
+
+test('walkTo follows a path to a frame and calls back on arrival', () => {
+  const w = createWorld(map);
+  const f = map.frames[0];
+  let arrived = false;
+  assert.ok(walkTo(w, f.stand.x, f.stand.y, () => { arrived = true; }));
+  run(w, 60, { x: 0, y: 0 });
+  assert.ok(arrived);
+  assert.equal(Math.floor(w.player.x), f.stand.x);
+  assert.equal(Math.floor(w.player.y), f.stand.y);
+  assert.equal(w.focus && w.focus.id, f.id, 'the frame you walked to is in focus');
+});
+
+test('keyboard input cancels a path', () => {
+  const w = createWorld(map);
+  walkTo(w, map.frames[0].stand.x, map.frames[0].stand.y);
+  step(w, 1 / 60, { x: 1, y: 0 });
+  assert.equal(w.path, null);
+});
+
+test('camera eases toward the player, or snaps with reduced motion', () => {
+  const w = createWorld(map);
+  teleport(w, map.spawn.x, map.spawn.y);
+  w.player.x += 5;
+  step(w, 1 / 60, { x: 0, y: 0 });
+  assert.ok(w.cam.x > map.spawn.x && w.cam.x < map.spawn.x + 5);
+  const r = createWorld(map, { reducedMotion: true });
+  r.player.x += 5;
+  step(r, 1 / 60, { x: 0, y: 0 });
+  assert.equal(r.cam.x, r.player.x);
+});
+
+test('movement accelerates and glides to a stop instead of starting and stopping instantly', () => {
+  const w = createWorld(map);
+  const x0 = w.player.x;
+  step(w, 1 / 60, { x: 1, y: 0 });
+  const firstStep = w.player.x - x0;
+  assert.ok(firstStep > 0 && firstStep < 12 / 60 * 0.5, 'the first frame is slower than full speed');
+  run(w, 0.4, { x: 1, y: 0 });
+  assert.ok(w.player.vx > 11, 'reaches full speed quickly');
+  const xRelease = w.player.x;
+  run(w, 0.5, { x: 0, y: 0 });
+  assert.ok(w.player.x > xRelease + 0.2, 'carries on a little after letting go');
+  assert.equal(w.player.vx, 0, 'and comes to rest');
+});
+
+test('walking into the edge of a doorway slides you through it', () => {
+  const lobby = map.rooms[0];
+  const y = lobby.y + lobby.h - 1;
+  let left = -1;
+  for (let x = lobby.x; x < lobby.x + lobby.w; x++) if (isWalkable(map, x, y)) { left = x; break; }
+  assert.ok(left > 0, 'the lobby has a south door');
+  const w = createWorld(map);
+  teleport(w, left - 0.05, y - 3.5); // the player's box overlaps the door frame by a third of a cell
+  run(w, 2, { x: 0, y: 1 });
+  assert.ok(w.player.y > y + 1, 'went through the door instead of snagging on its edge');
+});
+
+test('click paths are pulled straight: few legs, each one walkable', () => {
+  const w = createWorld(map);
+  const f = map.frames[0];
+  const cells = findPath(map.W, map.H, (x, y) => isWalkable(map, x, y), Math.floor(w.player.x), Math.floor(w.player.y), f.stand.x, f.stand.y);
+  const legs = smoothPath(map, w.player, cells);
+  assert.ok(legs.length < cells.length / 4, `${legs.length} legs for ${cells.length} cells`);
+  assert.deepEqual(legs.at(-1), { x: f.stand.x + 0.5, y: f.stand.y + 0.5 });
+});

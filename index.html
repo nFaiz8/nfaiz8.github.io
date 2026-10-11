@@ -1,18 +1,26 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Faiz</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Archivo:wght@300;400&display=swap"
-      rel="stylesheet"
-    />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Faiz · photographs</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <div id="stage" tabindex="0" aria-label="Gallery map. Use the arrow keys or WASD to walk, E to open a photo." role="application"></div>
+    <header class="hud">
+      <span class="hud-name" id="hud-name"></span>
+      <span class="hud-tools">
+        <button class="hud-btn" id="map-btn" type="button" title="Map (M)">[M] map</button>
+        <button class="hud-btn" id="renderer-btn" type="button" title="Switch renderer (R)"></button>
+      </span>
+    </header>
+    <div class="caption" id="caption" aria-live="polite"></div>
+    <div class="note" id="note" role="status"></div>
+    <pre class="debug" id="debug" hidden></pre>
+    <nav class="sr-only" id="photo-links" aria-label="All photographs"></nav>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>
