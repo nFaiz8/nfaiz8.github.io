@@ -19,7 +19,7 @@ test('hue helpers', () => {
   assert.ok(Math.abs(meanHue([350, 10]) % 360) < 1 || Math.abs(meanHue([350, 10]) - 360) < 1);
 });
 
-test('rooms group by colour: reds together, blues together, greys in darkroom/silver', () => {
+test('rooms group by colour: reds together, blues together, black & white in silver', () => {
   const ps = [
     ...Array.from({ length: 12 }, (_, i) => photo(`r${i}`, ['#000000', `#${(0xc0 + i).toString(16)}2010`])),
     ...Array.from({ length: 12 }, (_, i) => photo(`b${i}`, ['#000000', `#1030${(0xc0 + i).toString(16)}`])),
@@ -30,7 +30,7 @@ test('rooms group by colour: reds together, blues together, greys in darkroom/si
   assert.equal(new Set(ps.filter((p) => p.id[0] === 'r').map((p) => where(p.id))).size, 1);
   assert.equal(new Set(ps.filter((p) => p.id[0] === 'b').map((p) => where(p.id))).size, 1);
   assert.notEqual(where('r0'), where('b0'));
-  assert.equal(where('g0'), 'darkroom', 'darkest neutral goes to the darkroom');
+  assert.equal(where('g0'), 'silver', 'black & white digital goes to silver');
   assert.equal(where('g9'), 'silver');
 });
 
@@ -51,7 +51,8 @@ test('indexData rejects malformed manifests', () => {
 test('captions leave out missing fields; film says film', () => {
   assert.equal(captionText(photo('x', [], { lens: null, aperture: null, shutter: '1/250s', iso: 160, location: 'Bukhara' })),
     'Fujifilm X-H2S · 1/250s · ISO 160 · Bukhara, 2024');
-  assert.equal(plaqueText(photo('f', [], { category: 'film', camera: null })), '35mm film · 2024');
+  assert.equal(plaqueText(photo('f', [], { category: 'film', camera: null })), 'film · 2024');
+  assert.equal(captionText(photo('f', [], { category: 'film', camera: null, scanner: 'Noritsu', lens: null, iso: null })), 'film · Noritsu scan · 2024');
 });
 
 test('photos never show a title or file name', () => {

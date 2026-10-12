@@ -73,7 +73,9 @@ export function roomColor(h) {
 
 // photos → rooms [{ id, name, subtitle, wing, hue, photos }]
 export function groupByColor(photos, perRoom = 12) {
-  const tagged = photos.map((p) => ({ p, c: photoColor(p) }));
+  // Film always hangs in the darkroom; everything else is sorted by colour.
+  const film = photos.filter((p) => p.category === 'film');
+  const tagged = photos.filter((p) => p.category !== 'film').map((p) => ({ p, c: photoColor(p) }));
   const colored = tagged.filter((t) => t.c.score >= NEUTRAL);
   const neutral = tagged.filter((t) => t.c.score < NEUTRAL);
 
@@ -107,12 +109,10 @@ export function groupByColor(photos, perRoom = 12) {
     r.subtitle = `${r.photos.length} photographs`;
   });
 
-  // Colourless photos: the darkest go to the darkroom, the rest to a silver room at the end of the cool wing.
+  // Black & white digital photos get a silver room at the end of the cool wing.
   neutral.sort((a, b) => a.c.lum - b.c.lum);
-  const darkCount = neutral.length < 8 ? neutral.length : Math.ceil(neutral.length / 2);
-  const dark = neutral.slice(0, darkCount).map((t) => t.p);
-  const silver = neutral.slice(darkCount).map((t) => t.p);
+  const silver = neutral.map((t) => t.p);
   if (silver.length) rooms.push({ id: 'silver', name: 'Silver', subtitle: `${silver.length} photographs · black & white`, wing: 'south', hue: null, photos: silver });
-  if (dark.length) rooms.push({ id: 'darkroom', name: 'Darkroom', subtitle: `${dark.length} prints · safelight on`, wing: 'east', hue: 0, photos: dark });
+  if (film.length) rooms.push({ id: 'darkroom', name: 'Darkroom', subtitle: `${film.length} film prints · safelight on`, wing: 'east', hue: 0, photos: film });
   return rooms;
 }

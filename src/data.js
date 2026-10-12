@@ -28,13 +28,13 @@ export function describe(p) {
 
 // "Camera · Year" for plaques.
 export function plaqueText(p) {
-  const kit = p.category === 'film' ? (p.filmStock || '35mm film') : (p.camera || '');
+  const kit = p.category === 'film' ? (p.filmStock || 'film') : (p.camera || '');
   return [kit, p.year].filter(Boolean).join(' · ');
 }
 
 // Full caption for the focus bar. Null fields are left out.
 export function captionText(p) {
-  const kit = p.category === 'film' ? (p.filmStock || '35mm film · Noritsu scan') : p.camera;
+  const kit = p.category === 'film' ? [p.filmStock || 'film', p.scanner && `${p.scanner} scan`].filter(Boolean).join(' · ') : p.camera;
   const f = p.aperture ? `f/${String(p.aperture).replace(/^f\//, '')}` : null;
   const place = [p.location, p.year].filter(Boolean).join(', ');
   return [kit, p.lens, p.focalLength, f, p.shutter, p.iso ? `ISO ${p.iso}` : null, place]

@@ -7,7 +7,9 @@ photos hung on the walls as coloured characters. Walk up to one and press E to o
 
 Put image files in the `photos/` folder and push. That's it: the GitHub Action makes the web
 sizes, reads the camera details, sorts every photo into a room by its colour, and publishes the
-site. Black & white photos go to the darkroom.
+site. Film scans go to the darkroom: the build recognises lab scanners (Noritsu, Frontier,
+Epson…) and lab-numbered files like `000091570014.jpg`; anything in `photos/film/` counts as
+film too. Black & white digital photos get their own room.
 
 From the GitHub website: open the `photos` folder → **Add file** → **Upload files** → drag the
 images in → **Commit changes**. The site updates a few minutes later (watch the **Actions** tab).
