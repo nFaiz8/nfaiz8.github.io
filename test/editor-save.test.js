@@ -35,7 +35,11 @@ function memoryGitHub(files, editsText) {
     commit: async (sha) => g.commits.get(sha),
     tree: async (sha) => g.trees.get(sha),
     blobText: async (sha) => g.blobs.get(sha),
-    createBlob: async (b64) => { g.calls.push('blob'); return put(`base64:${b64}`); },
+    createBlob: async (b64) => {
+      g.calls.push('blob');
+      const text = `base64:${b64}`;
+      return [...g.blobs].find(([, t]) => t === text)?.[0] || put(text);
+    },
     createTree: async (base, entries) => mkTree(base, entries),
     createCommit: async (message, tree, parent) => {
       const c = { sha: `c${++n}`, message, tree: { sha: tree }, parent, committer: { date: '2026-10-13T12:00:00Z' } };
@@ -106,4 +110,28 @@ test('other errors (e.g. an expired token) pass straight through', async () => {
   g.failRef = Object.assign(new Error('Bad credentials'), { status: 401 });
   await assert.rejects(save({ gh: g, ops, readBase64 }), (e) => e.status === 401);
   assert.equal(g.head, 'c0', 'nothing landed on main');
+});
+
+test('if main moved but the reply was lost, a retry does not refuse its own uploads', async () => {
+  const g = memoryGitHub(['photos/a.jpg', 'photos/b.jpg'], null);
+  const realRef = g.updateRef;
+  g.updateRef = async (sha) => {
+    await realRef(sha);
+    g.updateRef = realRef;
+    throw Object.assign(new Error('Network error: Failed to fetch'), { status: 0 });
+  };
+  await assert.rejects(save({ gh: g, ops, readBase64 }), (e) => e.status === 0);
+  await save({ gh: g, ops, readBase64 });
+  assert.equal(g.file('photos/new.jpg'), 'base64:data-of-k1');
+  assert.deepEqual(JSON.parse(g.file('photos/edits.json')), { a: { hidden: true }, new: { film: true } });
+});
+
+test('edits for a photo that is gone by save time are dropped, not orphaned', async () => {
+  const g = memoryGitHub(['photos/a.jpg'], '{"keep":{"lens":"50mm"}}');
+  const edits = [
+    { type: 'edit', id: 'a', field: 'hidden', value: true },
+    { type: 'edit', id: 'gone', field: 'film', value: true },
+  ];
+  await save({ gh: g, ops: edits, readBase64 });
+  assert.deepEqual(JSON.parse(g.file('photos/edits.json')), { a: { hidden: true }, keep: { lens: '50mm' } });
 });

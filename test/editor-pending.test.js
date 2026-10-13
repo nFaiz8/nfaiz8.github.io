@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  uniqueName, addEdit, addUpload, addDelete, undo, applyOps, summary, count, commitMessage, describeOp,
+  uniqueName, addEdit, setFilm, addUpload, addDelete, undo, applyOps, summary, count, commitMessage, describeOp,
 } from '../src/editor/pending.js';
 
 test('uniqueName leaves free names alone and never reuses an id', () => {
@@ -69,4 +69,15 @@ test('describeOp reads like a change list', () => {
   assert.equal(describeOp({ type: 'edit', id: 'a', field: 'hidden', value: null }), 'a: hidden off');
   assert.equal(describeOp({ type: 'edit', id: 'a', field: 'stock', value: 'Portra 400' }), 'a: stock → Portra 400');
   assert.equal(describeOp({ type: 'edit', id: 'a', field: 'date', value: null }), "a: date → photo's own");
+});
+
+test('setFilm: off clears the stock, back on restores what was saved', () => {
+  const saved = { a: { film: true, stock: 'Gold 200' } };
+  const off = setFilm([], saved, 'a', false);
+  assert.deepEqual(applyOps(saved, off), {});
+  assert.deepEqual(setFilm(off, saved, 'a', true), []);
+  assert.deepEqual(setFilm([], {}, 'b', true, 'HP5'), [
+    { type: 'edit', id: 'b', field: 'film', value: true },
+    { type: 'edit', id: 'b', field: 'stock', value: 'HP5' },
+  ]);
 });

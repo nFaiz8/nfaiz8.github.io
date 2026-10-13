@@ -24,6 +24,14 @@ export function addEdit(ops, saved, id, field, value) {
   return v === (saved[id]?.[field] ?? null) ? rest : [...rest, { type: 'edit', id, field, value: v }];
 }
 
+// Film off also clears the stock; film back on drops that pending clear, so a saved stock survives.
+export function setFilm(ops, saved, id, on, stock) {
+  const out = addEdit(ops, saved, id, 'film', on);
+  if (!on) return addEdit(out, saved, id, 'stock', null);
+  const kept = out.filter((o) => !(o.type === 'edit' && o.id === id && o.field === 'stock' && o.value == null));
+  return stock ? addEdit(kept, saved, id, 'stock', stock) : kept;
+}
+
 export const addUpload = (ops, op) => [...ops, { type: 'upload', ...op }];
 
 export function addDelete(ops, id, path) {

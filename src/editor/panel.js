@@ -11,7 +11,7 @@ export function panel({ item, S, actions }) {
   const reset = (field) => e[field] != null && h('button', { type: 'button', class: 'reset', 'aria-label': `reset ${field}`, onclick: () => actions.edit(item.id, field, null) }, '×');
   const src = thumb(item, S, 'hi');
   const confirming = S.confirm === `delete:${item.id}`;
-  return h('aside', { class: 'panel', 'aria-label': `Edit ${item.id}` },
+  return h('aside', { class: 'panel', 'data-id': item.id, 'aria-label': `Edit ${item.id}` },
     h('header', {},
       h('span', { class: 'pid' }, item.path.replace(/^photos\//, '')),
       h('button', { type: 'button', class: 'btn quiet', id: 'close-panel', onclick: actions.close }, 'close')),

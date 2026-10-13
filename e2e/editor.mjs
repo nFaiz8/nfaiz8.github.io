@@ -86,7 +86,8 @@ await withBrowser(async ({ page, url, errors }) => {
       const p = u.slice(apiBase.length).replace('/repos/nFaiz8/nfaiz8.github.io', '').replace(/\?.*$/, '');
       const body = req.postData() ? JSON.parse(req.postData()) : null;
       const [status, json] = gh.handle(req.method(), p, body, req.headers().authorization);
-      return req.respond({ status, contentType: 'application/json', body: JSON.stringify(json) });
+      const reply = () => req.respond({ status, contentType: 'application/json', body: JSON.stringify(json) });
+      return gh.blobDelay && p === '/git/blobs' ? setTimeout(reply, gh.blobDelay) : reply();
     }
     if (/\/photos\/(raw|photos)\.json/.test(u)) return req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(manifest) });
     if (/\/photos\/(low|hi|xl)\//.test(u)) return req.respond({ status: 200, contentType: 'image/png', body: PNG });
@@ -119,6 +120,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.waitForSelector('#f-stock:not([disabled])');
     await page.type('#f-stock', 'Portra 400');
     await page.keyboard.press('Tab');
+    await page.waitForSelector('button[aria-label="reset stock"]'); // the stock edit has rendered
     await waitText(page, '#pending-count', /^1 change$/);
     assert.equal(await page.$eval('#f-stock', (e) => e.value), 'Portra 400');
   });
@@ -180,6 +182,75 @@ await withBrowser(async ({ page, url, errors }) => {
     await waitText(page, '.token .error', /expired/);
     await signIn('rotated');
     await waitText(page, '#pending-count', /^1 change$/);
+  });
+  await check('moving between text fields keeps the focus', async () => {
+    await page.click('.tile[data-id="img-1003"]');
+    // keyboard.type, not page.type: page.type would focus the field itself and hide the bug.
+    await page.click('#f-camera');
+    await page.keyboard.type('Nikon FM2');
+    await page.tap('#f-lens');
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 100))); // let the camera edit render
+    await page.keyboard.type('50mm');
+    assert.equal(await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName), 'f-lens');
+    assert.equal(await page.$eval('#f-lens', (e) => e.value), '50mm');
+    await page.keyboard.press('Tab');
+    await page.click('#f-hidden'); // a non-text control: the panel rebuilds with both edits
+    await page.waitForSelector('button[aria-label="reset lens"]');
+    assert.equal(await page.$eval('#f-camera', (e) => e.value), 'Nikon FM2');
+  });
+  await check('fields are at least 16px, so iOS does not zoom on tap', async () => {
+    for (const sel of ['#f-place', '#f-date', '#f-stock']) {
+      assert.ok(parseFloat(await page.$eval(sel, (e) => getComputedStyle(e).fontSize)) >= 16, sel);
+    }
+  });
+  const closePanel = async () => { if (await page.$('#close-panel')) await page.click('#close-panel'); };
+  await check('select mode keeps the typed stock while tiles are tapped', async () => {
+    await closePanel();
+    await page.click('#select-btn');
+    await page.type('#bulk-stock', 'HP5');
+    await page.click('.tile[data-id="img-1006"]');
+    await page.click('.tile[data-id="img-1007"]');
+    await page.click('[data-bulk="film"]');
+    await page.click('.tile[data-id="img-1007"]');
+    assert.equal(await page.$eval('#f-stock', (e) => e.value), 'HP5');
+    await page.click('#close-panel');
+  });
+  await check('changes made while a save is running are kept for the next save', async () => {
+    await closePanel();
+    if (await page.$('#bulk-stock')) await page.click('#select-btn');
+    gh.blobDelay = 2000;
+    await (await page.$('#add-input')).uploadFile(tiny);
+    await page.waitForSelector('.tile[data-id="tiny-2"] img');
+    await page.click('#save-btn');
+    await waitText(page, '#save-btn', /Uploading/);
+    await page.click('.tile[data-id="img-1008"]');
+    await page.click('#f-hidden');
+    await waitText(page, '.bar', /building/, 20000).catch(async () => { throw new Error(`bar: ${await text(page, '.bar')}`); });
+    gh.blobDelay = 0;
+    await waitText(page, '#pending-count', /^1 change$/).catch(async (e) => { throw new Error(`bar: ${await text(page, '.bar')}`); });
+    await page.click('#close-panel');
+  });
+  await check('adding photos while editing loses neither the edit nor the photo', async () => {
+    // Slow the first IndexedDB open so the edit lands while the photo is still being stored.
+    await page.evaluateOnNewDocument(() => {
+      const realOpen = indexedDB.open.bind(indexedDB);
+      indexedDB.open = (...a) => {
+        const real = realOpen(...a);
+        const fake = { get result() { return real.result; }, get error() { return real.error; } };
+        real.onupgradeneeded = () => fake.onupgradeneeded?.();
+        real.onsuccess = () => setTimeout(() => fake.onsuccess?.(), 1500);
+        real.onerror = () => fake.onerror?.();
+        return fake;
+      };
+    });
+    await page.reload();
+    await page.waitForSelector('.tile[data-id="img-1009"]');
+    await (await page.$('#add-input')).uploadFile(clash);
+    await page.click('.tile[data-id="img-1009"]');
+    await page.click('#f-hidden');
+    await waitText(page, '#pending-count', /^3 changes$/).catch(async (e) => { throw new Error(`bar: ${await text(page, '.bar')}`); });
+    await page.waitForSelector('.tile[data-id="img-1000-3"] img');
+    await page.click('#close-panel');
   });
   await check('no page errors', async () => {
     // A 401 on purpose shows up as a "Failed to load resource" console line; that one is expected.

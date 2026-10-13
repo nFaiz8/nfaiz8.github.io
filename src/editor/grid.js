@@ -26,7 +26,7 @@ export function toolbar({ S, total, actions }) {
 }
 
 export function selectBar({ S, actions }) {
-  const stock = h('input', { type: 'text', id: 'bulk-stock', placeholder: 'stock (optional)', list: 'stocks' });
+  const stock = h('input', { type: 'text', id: 'bulk-stock', placeholder: 'stock (optional)', list: 'stocks', value: S.bulkStock, oninput: (ev) => { S.bulkStock = ev.target.value; } });
   const n = S.selected.size;
   const btn = (kind, label) => h('button', { type: 'button', class: 'btn', 'data-bulk': kind, disabled: !n, onclick: () => actions.bulk(kind, stock.value.trim()) }, label);
   return h('div', { class: 'selectbar' },

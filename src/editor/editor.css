@@ -27,7 +27,8 @@ h1 { font-size: 16px; font-weight: normal; letter-spacing: 0.12em; color: var(--
 label.btn { display: inline-flex; align-items: center; }
 
 input[type="text"], input[type="password"], input[type="date"] {
-  width: 100%; min-height: 36px; padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); color-scheme: dark;
+  width: 100%; min-height: 36px; padding: 6px 8px; font-size: 16px; /* under 16px iOS zooms in on focus */
+  background: var(--panel); border: 1px solid var(--line); color-scheme: dark;
 }
 input:disabled { opacity: 0.5; }
 

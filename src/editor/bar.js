@@ -16,6 +16,7 @@ export function bar({ S, actions }) {
       h('button', { type: 'button', class: 'btn quiet', 'data-undo': i, onclick: () => actions.undo(i) }, 'undo')))),
     h('div', { class: 'row' },
       h('span', { class: 'count', id: 'pending-count', role: 'status' }, n ? `${n} change${n === 1 ? '' : 's'}` : status || 'no changes'),
+      n > 0 && status && !S.saving && h('span', { class: 'status' }, status),
       n > 0 && !S.saving && h('button', { type: 'button', class: 'btn quiet', id: 'review-btn', onclick: actions.review }, S.reviewing ? 'hide list' : 'review'),
       n > 0 && !S.saving && h('button', { type: 'button', class: 'btn quiet', id: 'discard-btn', onclick: actions.discard }, S.confirm === 'discard' ? 'tap again to discard' : 'discard'),
       n > 0 && h('button', { type: 'button', class: 'btn primary', id: 'save-btn', disabled: S.saving || !!S.remote.editsError, onclick: actions.save }, S.saving ? S.progress : 'save')));

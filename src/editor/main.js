@@ -3,7 +3,7 @@
 import { h } from './dom.js';
 import { createGitHub } from './github.js';
 import { loadRemote, buildItems, matches, stockSuggestions, isLive } from './model.js';
-import { addEdit, addDelete, addUpload, undo, uniqueName } from './pending.js';
+import { addEdit, addDelete, addUpload, setFilm, undo, uniqueName } from './pending.js';
 import { save } from './save.js';
 import { loadToken, saveToken, clearToken, loadOps, saveOps, putFile, getFile, pruneFiles, readBase64 } from './store.js';
 import { idOf } from '../edits.js';
@@ -16,7 +16,8 @@ import { bar } from './bar.js';
 const app = document.getElementById('app');
 const S = {
   gh: null, remote: null, manifest: null, ops: loadOps(),
-  filter: 'all', selecting: false, selected: new Set(), open: null, confirm: null,
+  filter: 'all', selecting: false, selected: new Set(), bulkStock: '', open: null, confirm: null,
+  adding: new Set(), // keys of files still being stored by addFiles
   previews: new Map(), notice: null, error: null,
   saving: false, progress: null, reviewing: false, live: null,
 };
@@ -26,25 +27,37 @@ function render() {
   if (!S.remote) return;
   const items = buildItems({ manifest: S.manifest, files: S.remote.files, saved: S.remote.edits, ops: S.ops });
   const openItem = S.open && items.find((it) => it.id === S.open);
-  app.replaceChildren(...[
+  // The panel has its own slot so it can be left in place: typing in one field and tapping the
+  // next must not rebuild (or even move) the panel under the finger, which drops focus and
+  // closes the phone keyboard. It is rebuilt on the next change made outside a text field.
+  let view = app.querySelector(':scope > .view'), slot = app.querySelector(':scope > .panel-slot');
+  if (!view || !slot) app.replaceChildren(view = h('div', { class: 'view' }), slot = h('div', { class: 'panel-slot' }));
+  const old = slot.firstElementChild;
+  const typing = document.activeElement?.matches?.('.panel input[type="text"], .panel input[type="date"]');
+  if (!(old && typing && openItem && old.dataset.id === openItem.id)) {
+    slot.replaceChildren(...(openItem ? [panel({ item: openItem, S, actions })] : []));
+  }
+  view.replaceChildren(...[
     toolbar({ S, total: items.length, actions }),
     S.remote.editsError && h('p', { class: 'banner error' }, `photos/edits.json in the repo is not valid (${S.remote.editsError}). Fix it on GitHub; saving is off until then.`),
     S.notice && h('p', { class: 'banner', onclick: () => { S.notice = null; render(); } }, S.notice),
     S.selecting && selectBar({ S, actions }),
     grid({ items: items.filter((it) => matches(it, S.filter)), S, actions }),
-    openItem && panel({ item: openItem, S, actions }),
     h('datalist', { id: 'stocks' }, stockSuggestions(S.remote.edits, S.ops).map((s) => h('option', { value: s }))),
     bar({ S, actions }),
   ].filter(Boolean));
 }
 
-function setOps(ops) {
+// later: render on the next tick instead. A field edit commits on blur, before a tap on the next
+// field has moved focus there; waiting lets render() see the user is still typing in the panel.
+function setOps(ops, later = false) {
   S.ops = ops;
   saveOps(ops);
-  const keys = new Set(ops.filter((o) => o.type === 'upload').map((o) => o.key));
+  const keys = new Set([...ops.filter((o) => o.type === 'upload').map((o) => o.key), ...S.adding]);
   for (const [k, url] of S.previews) if (!keys.has(k)) { URL.revokeObjectURL(url); S.previews.delete(k); }
   pruneFiles(keys);
-  render();
+  if (later) setTimeout(render);
+  else render();
 }
 
 const saved = () => S.remote.edits;
@@ -58,9 +71,7 @@ const actions = {
   },
   close() { S.open = null; S.confirm = null; render(); },
   edit(id, field, value) {
-    let ops = addEdit(S.ops, saved(), id, field, value);
-    if (field === 'film' && !value) ops = addEdit(ops, saved(), id, 'stock', null);
-    setOps(ops);
+    setOps(field === 'film' ? setFilm(S.ops, saved(), id, value) : addEdit(S.ops, saved(), id, field, value), true);
   },
   remove(id, path) {
     if (S.confirm !== `delete:${id}`) { S.confirm = `delete:${id}`; render(); return; }
@@ -68,17 +79,17 @@ const actions = {
     S.open = null;
     setOps(addDelete(S.ops, id, path));
   },
-  toggleSelecting() { S.selecting = !S.selecting; S.selected.clear(); S.open = null; render(); },
+  toggleSelecting() { S.selecting = !S.selecting; S.selected.clear(); S.bulkStock = ''; S.open = null; render(); },
   bulk(kind, stock) {
     let ops = S.ops;
     for (const id of S.selected) {
-      if (kind === 'film') { ops = addEdit(ops, saved(), id, 'film', true); if (stock) ops = addEdit(ops, saved(), id, 'stock', stock); }
-      if (kind === 'digital') { ops = addEdit(ops, saved(), id, 'film', null); ops = addEdit(ops, saved(), id, 'stock', null); }
+      if (kind === 'film' || kind === 'digital') ops = setFilm(ops, saved(), id, kind === 'film', stock);
       if (kind === 'hide') ops = addEdit(ops, saved(), id, 'hidden', true);
       if (kind === 'unhide') ops = addEdit(ops, saved(), id, 'hidden', null);
     }
     S.selecting = false;
     S.selected.clear();
+    S.bulkStock = '';
     setOps(ops);
   },
   addFiles,
@@ -97,8 +108,8 @@ const actions = {
 async function addFiles(files) {
   const taken = new Set([...S.remote.files, ...S.ops.filter((o) => o.type === 'upload').map((o) => o.path)]);
   const notes = [];
-  let ops = S.ops;
-  for (const file of files) {
+  const added = [];
+  for (const [i, file] of files.entries()) {
     if (!UPLOADABLE.test(file.name)) { notes.push(`${file.name}: only JPEG, PNG or WebP can be uploaded here.`); continue; }
     if (file.size > MAX_BYTES) { notes.push(`${file.name}: over 100 MB, which GitHub won't accept.`); continue; }
     if (file.size > WARN_BYTES) notes.push(`${file.name}: over 25 MB. It will upload, but a smaller export is quicker.`);
@@ -107,12 +118,17 @@ async function addFiles(files) {
     const path = PHOTOS_DIR + name;
     taken.add(path);
     const key = crypto.randomUUID();
+    S.adding.add(key);
+    S.notice = `adding ${i + 1} of ${files.length}…`;
+    render();
     await putFile(key, file);
     S.previews.set(key, URL.createObjectURL(file));
-    ops = addUpload(ops, { id: idOf(name), path, name, key, size: file.size });
+    added.push({ id: idOf(name), path, name, key, size: file.size });
   }
+  // Append to whatever S.ops is now: the user may have edited while the files were being stored.
+  for (const k of added) S.adding.delete(k.key);
   S.notice = notes.join('\n') || null;
-  setOps(ops);
+  setOps(added.reduce(addUpload, S.ops));
 }
 
 function explain(e) {
@@ -185,9 +201,10 @@ async function doSave() {
   S.progress = 'starting…';
   render();
   try {
-    const res = await save({ gh: S.gh, ops: S.ops, readBase64, onProgress: (t) => { S.progress = t; render(); } });
+    const sent = S.ops;
+    const res = await save({ gh: S.gh, ops: sent, readBase64, onProgress: (t) => { S.progress = t; render(); } });
     S.saving = false;
-    setOps([]);
+    setOps(S.ops.filter((o) => !sent.includes(o))); // changes made while saving wait for the next save
     watchLive(res.date);
     await refresh();
   } catch (e) {
