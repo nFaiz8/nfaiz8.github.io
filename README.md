@@ -15,8 +15,8 @@ images in → **Commit changes**. The site updates a few minutes later (watch th
 - JPEG, PNG, WebP, TIFF and AVIF work. Export from Lightroom or similar as JPEG.
 - The GitHub website takes files up to 25 MB, 100 at a time. A long edge of about 4000–6000 px
   is plenty; the site's largest size is 4096 px.
-- To remove a photo, delete it from `photos/`. To hide one without deleting it, add its file name
-  in lower case (e.g. `dscf7326`) to `EXCLUDE` in `src/config.js`.
+- To remove a photo, delete it from `photos/`. To hide one without deleting it, mark it hidden on the
+  edit page (see below), which records it in `photos/edits.json`.
 - The published copies carry no metadata, so no GPS location ever reaches the site. Photos have
   no titles; opening one shows its camera, lens, aperture, shutter, ISO and date.
 

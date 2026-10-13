@@ -12,22 +12,26 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import exifr from 'exifr';
 import { analyzePixels } from '../src/analyze.js';
+import { IMAGE, idOf, parseEdits, applyEdits } from '../src/edits.js';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SRC = path.join(root, 'photos');
 const OUT = path.join(root, 'public/photos');
 const force = process.argv.includes('--force');
 const SIZES = [['low', 512, 72], ['hi', 2560, 84], ['xl', 4096, 86]];
-const IMAGE = /\.(jpe?g|png|webp|tiff?|heic|heif|avif)$/i;
 
 fs.mkdirSync(SRC, { recursive: true });
 for (const [dir] of SIZES) fs.mkdirSync(path.join(OUT, dir), { recursive: true });
 
+// The cache is the un-edited manifest, so removing an edit really removes it.
+// (Builds from before raw.json existed fall back to photos.json, which had no edits then.)
 let previous = {};
-try { for (const p of JSON.parse(fs.readFileSync(path.join(OUT, 'photos.json'), 'utf8')).photos) previous[p.id] = p; } catch {}
-
-// "Holiday 2024/DSCF7438.JPG" → "holiday-2024-dscf7438"; ids stay unique and URL-safe.
-const idOf = (rel) => rel.replace(IMAGE, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+for (const name of ['raw.json', 'photos.json']) {
+  try {
+    for (const p of JSON.parse(fs.readFileSync(path.join(OUT, name), 'utf8')).photos) previous[p.id] = p;
+    break;
+  } catch {}
+}
 
 function walk(dir, base = '') {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -123,8 +127,23 @@ for (const [dir] of SIZES) {
   for (const f of fs.readdirSync(path.join(OUT, dir))) if (!seen.has(f.replace(/\.webp$/, ''))) fs.rmSync(path.join(OUT, dir, f));
 }
 
-photos.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.id.localeCompare(b.id));
-fs.writeFileSync(path.join(OUT, 'photos.json'), JSON.stringify({ generated: new Date().toISOString(), photos }, null, 1));
-const bw = photos.filter((p) => p.analysis && p.analysis.score < 0.12).length;
-console.log(`\rphotos: ${photos.length} ready (${made} new or changed, ${kept} unchanged${failed ? `, ${failed} skipped` : ''}); ${bw} black & white`);
-if (!photos.length) console.log('photos: photos/ is empty; add images there and run again');
+// photos/edits.json (written by the /edit/ page) overrides film, stock, hidden, date, camera, lens and place.
+let edits = {};
+const editsFile = path.join(SRC, 'edits.json');
+if (fs.existsSync(editsFile)) {
+  try {
+    edits = parseEdits(fs.readFileSync(editsFile, 'utf8'));
+  } catch (e) {
+    console.error(`photos: photos/edits.json is not valid (${e.message})`);
+    process.exit(1);
+  }
+}
+const generated = new Date().toISOString();
+fs.writeFileSync(path.join(OUT, 'raw.json'), JSON.stringify({ generated, photos }, null, 1));
+const { photos: edited, unmatched } = applyEdits(photos, edits);
+for (const id of unmatched) console.warn(`photos: edits.json has an entry for "${id}" but no such photo`);
+edited.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.id.localeCompare(b.id));
+fs.writeFileSync(path.join(OUT, 'photos.json'), JSON.stringify({ generated, photos: edited }, null, 1));
+const bw = edited.filter((p) => p.analysis && p.analysis.score < 0.12).length;
+console.log(`\rphotos: ${edited.length} ready (${made} new or changed, ${kept} unchanged${failed ? `, ${failed} skipped` : ''}); ${bw} black & white`);
+if (!edited.length) console.log('photos: photos/ is empty; add images there and run again');

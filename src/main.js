@@ -1,4 +1,4 @@
-import { SITE, EXCLUDE } from './config.js';
+import { SITE } from './config.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
@@ -192,7 +192,7 @@ function loop(now) {
 async function boot() {
   let data;
   try {
-    data = await loadData(undefined, EXCLUDE);
+    data = await loadData();
   } catch (err) {
     fatal(err);
     return;
