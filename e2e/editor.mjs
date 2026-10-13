@@ -285,6 +285,28 @@ await withBrowser(async ({ page, url, errors }) => {
     await closePanel();
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   });
+  await check('arrow keys move between photos while one is open', async () => {
+    await closePanel();
+    const order = await page.$$eval('.tile', (ts) => ts.map((t) => t.dataset.id));
+    const i = order.indexOf('img-1004');
+    await page.click('.tile[data-id="img-1004"]');
+    await page.keyboard.press('ArrowRight');
+    await page.waitForFunction((id) => document.querySelector('.panel')?.dataset.id === id, { timeout: 3000 }, order[i + 1]);
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForFunction((id) => document.querySelector('.panel')?.dataset.id === id, { timeout: 3000 }, order[i]);
+    await page.click('#f-hidden'); // a ticked checkbox keeps focus; arrows must still work
+    await page.waitForSelector(`.tile[data-id="${order[i]}"] .badge.hidden`);
+    await page.click('#f-hidden');
+    await page.waitForFunction((id) => !document.querySelector(`.tile[data-id="${id}"] .badge.hidden`), {}, order[i]);
+    await page.keyboard.press('ArrowRight');
+    await page.waitForFunction((id) => document.querySelector('.panel')?.dataset.id === id, { timeout: 3000 }, order[i + 1]);
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForFunction((id) => document.querySelector('.panel')?.dataset.id === id, { timeout: 3000 }, order[i]);
+    await page.click('#f-camera'); // typing: arrows move the cursor, not the photo
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.$eval('.panel', (p) => p.dataset.id), order[i]);
+    await page.click('#close-panel');
+  });
   await check('no page errors', async () => {
     // A 401 on purpose shows up as a "Failed to load resource" console line; that one is expected.
     assert.deepEqual(errors.filter((e) => !/Failed to load resource/.test(e)), []);

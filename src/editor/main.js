@@ -26,6 +26,8 @@ let liveTimer = null;
 function render() {
   if (!S.remote) return;
   const items = buildItems({ manifest: S.manifest, files: S.remote.files, saved: S.remote.edits, ops: S.ops });
+  const shown = items.filter((it) => matches(it, S.filter));
+  S.order = shown.map((it) => it.id); // what the arrow keys step through
   const openItem = S.open && items.find((it) => it.id === S.open);
   // The panel has its own slot so it can be left in place: typing in one field and tapping the
   // next must not rebuild (or even move) the panel under the finger, which drops focus and
@@ -47,7 +49,7 @@ function render() {
     S.remote.editsError && h('p', { class: 'banner error' }, `photos/edits.json in the repo is not valid (${S.remote.editsError}). Fix it on GitHub; saving is off until then.`),
     S.notice && h('p', { class: 'banner', onclick: () => { S.notice = null; render(); } }, S.notice),
     S.selecting && selectBar({ S, actions }),
-    grid({ items: items.filter((it) => matches(it, S.filter)), S, actions }),
+    grid({ items: shown, S, actions }),
     h('datalist', { id: 'stocks' }, stockSuggestions(S.remote.edits, S.ops).map((s) => h('option', { value: s }))),
     bar({ S, actions }),
   ].filter(Boolean));
@@ -77,6 +79,14 @@ const actions = {
     render();
   },
   close() { S.open = null; S.confirm = null; render(); },
+  step(by) {
+    const next = S.order?.[S.order.indexOf(S.open) + by];
+    if (!next) return;
+    S.open = next;
+    S.confirm = null;
+    render();
+    document.querySelector(`.tile[data-id="${CSS.escape(next)}"]`)?.scrollIntoView({ block: 'nearest' });
+  },
   edit(id, field, value) {
     setOps(field === 'film' ? setFilm(S.ops, saved(), id, value, '', autoFilm(id)) : addEdit(S.ops, saved(), id, field, value), true);
   },
@@ -237,6 +247,18 @@ function watchLive(since) {
     render();
   }, 20e3);
 }
+
+// ← / → step through the photos in grid order while one is open (not while typing in a field).
+document.addEventListener('keydown', (ev) => {
+  if (!S.open || S.selecting || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  if (ev.target.closest?.('input, textarea, select')) return;
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+    ev.preventDefault();
+    actions.step(ev.key === 'ArrowRight' ? 1 : -1);
+  } else if (ev.key === 'Escape') {
+    actions.close();
+  }
+});
 
 const token = loadToken();
 if (token) {
