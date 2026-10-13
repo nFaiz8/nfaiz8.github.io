@@ -20,6 +20,25 @@ images in → **Commit changes**. The site updates a few minutes later (watch th
 - The published copies carry no metadata, so no GPS location ever reaches the site. Photos have
   no titles; opening one shows its camera, lens, aperture, shutter, ISO and date.
 
+## Editing from any browser
+
+Open **faiz.pics/edit/** (it is not linked from the gallery). The first time on a device, it asks for
+a GitHub token:
+
+1. GitHub → Settings → Developer settings → [Fine-grained tokens](https://github.com/settings/personal-access-tokens/new).
+2. Repository access: **Only select repositories** → `nfaiz8.github.io`.
+3. Repository permissions: **Contents → Read and write**. Nothing else.
+4. Paste it into the page. It stays in that browser; **sign out** removes it.
+
+Then tap a photo to mark it film (and name the stock), hide it, delete it, or correct its date,
+camera, lens or place. **Select** applies film/digital/hide/unhide to several photos at once, which is
+handy for a whole roll. **+ add photos** uploads from your camera roll or computer. Nothing is sent
+until **save**, which makes one commit; the site rebuilds a few minutes later and the page shows
+**live ✓** when it has.
+
+Edits are stored in `photos/edits.json`, keyed by photo id (the file name in lower case). You can
+also edit that file by hand; the build applies it every time.
+
 ## Working on it locally
 
 ```
