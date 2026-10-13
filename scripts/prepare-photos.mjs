@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import exifr from 'exifr';
 import { analyzePixels } from '../src/analyze.js';
 import { IMAGE, idOf, parseEdits, applyEdits } from '../src/edits.js';
+import { filmInfo } from '../src/film.js';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SRC = path.join(root, 'photos');
@@ -56,7 +57,7 @@ function shutter(t) {
   return `1/${Math.round(1 / t)}s`;
 }
 
-async function details(file) {
+async function details(file, rel) {
   let x = {};
   try {
     x = (await exifr.parse(file, { gps: false, xmp: false, iptc: false, icc: false,
@@ -65,7 +66,11 @@ async function details(file) {
   const date = x.DateTimeOriginal || x.CreateDate;
   const d = date instanceof Date && !isNaN(date) ? date : null;
   return {
-    camera: cameraName(x.Make, x.Model),
+    ...(() => {
+      const f = filmInfo(rel, x.Make, x.Model);
+      // A scanner isn't a camera; film shows as film.
+      return f.film ? { category: 'film', camera: null, scanner: f.scanner } : { category: 'digital', camera: cameraName(x.Make, x.Model) };
+    })(),
     lens: x.LensModel ? String(x.LensModel).trim() : null,
     focalLength: x.FocalLength ? `${Math.round(x.FocalLength)}mm` : null,
     aperture: x.FNumber ? String(Math.round(x.FNumber * 10) / 10) : null,
@@ -109,9 +114,9 @@ for (const rel of files) {
     }
     const { data } = await sharp(out('low')).resize({ width: 160 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const analysis = analyzePixels(data);
-    const info = await details(file);
+    const info = await details(file, rel);
     photos.push({
-      id, hash, category: 'digital', ...info, width, height, aspect: Math.round((width / height) * 1000) / 1000,
+      id, hash, ...info, width, height, aspect: Math.round((width / height) * 1000) / 1000,
       analysis, palette: [], title: null, hidden: false, variants: [], src,
     });
     made++;

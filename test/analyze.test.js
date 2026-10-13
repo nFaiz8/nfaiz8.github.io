@@ -33,7 +33,7 @@ test('measured colour decides the room, not the palette', () => {
   const moody = Array.from({ length: 6 }, (_, i) => p(`m${i}`, { hue: 5 + i, sat: 0.5, score: 0.6, lum: 0.1 }));
   const bw = Array.from({ length: 3 }, (_, i) => p(`g${i}`, { hue: 0, sat: 0, score: 0, lum: 0.2 + i * 0.1 }));
   const rooms = groupByColor([...moody, ...bw]);
-  const dark = rooms.find((r) => r.id === 'darkroom');
+  const dark = rooms.find((r) => r.id === 'silver');
   assert.deepEqual(dark.photos.map((x) => x.id).sort(), ['g0', 'g1', 'g2']);
-  assert.ok(rooms.some((r) => r.hue != null && r.id !== 'darkroom' && r.photos.some((x) => x.id === 'm0')));
+  assert.ok(rooms.some((r) => r.hue != null && r.id !== 'silver' && r.photos.some((x) => x.id === 'm0')));
 });
