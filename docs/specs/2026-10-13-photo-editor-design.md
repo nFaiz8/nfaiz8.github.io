@@ -114,8 +114,9 @@ ignored. The file is written with stable key order (ids sorted, fields in the ta
 
 ### Loading
 
-- Live `photos/photos.json` (same origin) gives thumbnails (`low/`), dimensions and the
-  pipeline's details for built photos.
+- Live `photos/raw.json` (same origin, the un-edited manifest from section 3) gives thumbnails
+  (`low/`), dimensions and the files' own details for built photos, so placeholders show EXIF, not
+  earlier edits. `photos/photos.json` is only polled for its `generated` time after a save.
 - From the API: the tree of `photos/` on `main` (file list + blob shas) and `photos/edits.json`
   contents. These are the source of truth for what exists and what is edited, so the page is
   correct even before a rebuild.
