@@ -35,7 +35,12 @@ function render() {
   const old = slot.firstElementChild;
   const typing = document.activeElement?.matches?.('.panel input[type="text"], .panel input[type="date"]');
   if (!(old && typing && openItem && old.dataset.id === openItem.id)) {
-    slot.replaceChildren(...(openItem ? [panel({ item: openItem, S, actions })] : []));
+    // Same photo, new panel (e.g. delete asking for a second tap): stay where the user was.
+    // Read before the swap: a detached element reports scrollTop 0.
+    const scroll = openItem && old?.dataset.id === openItem.id ? old.scrollTop : 0;
+    const next = openItem && panel({ item: openItem, S, actions });
+    slot.replaceChildren(...(next ? [next] : []));
+    if (next) next.scrollTop = scroll;
   }
   view.replaceChildren(...[
     toolbar({ S, total: items.length, actions }),

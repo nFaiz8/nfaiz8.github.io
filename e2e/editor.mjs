@@ -267,6 +267,24 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.click('#review-btn');
     assert.match(await text(page, '.review'), /img-1018: film off/);
   });
+  await check('the panel keeps its scroll position when delete asks for a second tap', async () => {
+    await closePanel();
+    if (await page.$('.review')) await page.click('#review-btn');
+    await page.setViewport({ width: 390, height: 600, deviceScaleFactor: 1 });
+    await page.click('.tile[data-id="img-1010"]');
+    await page.waitForFunction(() => document.querySelector('.panel .preview')?.complete); // full height first
+    const scrolled = await page.$eval('.panel', (p) => { p.scrollTop = p.scrollHeight; return { top: p.scrollTop, room: p.scrollHeight - p.clientHeight }; });
+    assert.ok(scrolled.room > 100, `panel should scroll on a small phone (room ${scrolled.room})`);
+    await page.click('#delete-btn');
+    await waitText(page, '#delete-btn', /tap again/);
+    const top = await page.$eval('.panel', (p) => p.scrollTop);
+    assert.ok(Math.abs(top - scrolled.top) < 2, `scrollTop ${top}, was ${scrolled.top}`);
+    await page.click('#f-hidden'); // a toggle low in the panel: same thing
+    await page.waitForSelector('.tile[data-id="img-1010"] .badge.hidden'); // the toggle has rendered
+    assert.ok(await page.$eval('.panel', (p) => p.scrollTop) > 0, 'still scrolled after a toggle');
+    await closePanel();
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  });
   await check('no page errors', async () => {
     // A 401 on purpose shows up as a "Failed to load resource" console line; that one is expected.
     assert.deepEqual(errors.filter((e) => !/Failed to load resource/.test(e)), []);
