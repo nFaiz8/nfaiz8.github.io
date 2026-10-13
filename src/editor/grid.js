@@ -38,7 +38,7 @@ export function grid({ items, S, actions }) {
   return h('ul', { class: 'grid' }, items.map((it) => {
     const src = thumb(it, S);
     const badges = [
-      it.edits.film && 'film', it.edits.hidden && 'hidden', Object.keys(it.saved).length > 0 && 'edited',
+      it.film && 'film', it.edits.hidden && 'hidden', Object.keys(it.saved).length > 0 && 'edited',
       it.isNew && 'new', it.deleting && 'delete',
     ].filter(Boolean);
     const cls = ['tile', S.selected.has(it.id) && 'selected', it.pending && 'pending', it.deleting && 'deleting'].filter(Boolean).join(' ');

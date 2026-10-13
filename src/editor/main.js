@@ -61,6 +61,8 @@ function setOps(ops, later = false) {
 }
 
 const saved = () => S.remote.edits;
+// What the build detects (raw.json), so a film choice that matches it is stored as no override.
+const autoFilm = (id) => S.manifest?.photos?.some((p) => p.id === id && p.category === 'film') || false;
 
 const actions = {
   filter(f) { S.filter = f; render(); },
@@ -71,7 +73,7 @@ const actions = {
   },
   close() { S.open = null; S.confirm = null; render(); },
   edit(id, field, value) {
-    setOps(field === 'film' ? setFilm(S.ops, saved(), id, value) : addEdit(S.ops, saved(), id, field, value), true);
+    setOps(field === 'film' ? setFilm(S.ops, saved(), id, value, '', autoFilm(id)) : addEdit(S.ops, saved(), id, field, value), true);
   },
   remove(id, path) {
     if (S.confirm !== `delete:${id}`) { S.confirm = `delete:${id}`; render(); return; }
@@ -83,7 +85,7 @@ const actions = {
   bulk(kind, stock) {
     let ops = S.ops;
     for (const id of S.selected) {
-      if (kind === 'film' || kind === 'digital') ops = setFilm(ops, saved(), id, kind === 'film', stock);
+      if (kind === 'film' || kind === 'digital') ops = setFilm(ops, saved(), id, kind === 'film', stock, autoFilm(id));
       if (kind === 'hide') ops = addEdit(ops, saved(), id, 'hidden', true);
       if (kind === 'unhide') ops = addEdit(ops, saved(), id, 'hidden', null);
     }

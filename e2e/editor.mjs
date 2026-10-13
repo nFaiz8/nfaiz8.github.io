@@ -115,7 +115,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal((await page.$$('.tile')).length, files.length);
   });
   await check('marks a photo as film with a stock', async () => {
-    await page.click('.tile[data-id="img-1000"]');
+    await page.click('.tile[data-id="img-1004"]'); // digital: img-1000 is detected as film
     await page.click('#f-film');
     await page.waitForSelector('#f-stock:not([disabled])');
     await page.type('#f-stock', 'Portra 400');
@@ -133,7 +133,7 @@ await withBrowser(async ({ page, url, errors }) => {
   });
   await check('the Pending filter shows only changed photos', async () => {
     await page.click('.chip[data-filter="pending"]');
-    assert.deepEqual(await page.$$eval('.tile', (ts) => ts.map((t) => t.dataset.id).sort()), ['img-1000', 'img-1001']);
+    assert.deepEqual(await page.$$eval('.tile', (ts) => ts.map((t) => t.dataset.id).sort()), ['img-1001', 'img-1004']);
     await page.click('.chip[data-filter="all"]');
   });
   await check('adds photos, renaming a clash', async () => {
@@ -168,8 +168,8 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(gh.file('photos/Tiny.jpg') && gh.file('photos/IMG_1000-2.jpg'), 'both uploads committed');
     assert.ok(gh.file('photos/IMG_1000.jpg'), 'the existing photo was not overwritten');
     assert.deepEqual(JSON.parse(gh.file('photos/edits.json')), {
-      'img-1000': { film: true, stock: 'Portra 400' },
       'img-1001': { hidden: true },
+      'img-1004': { film: true, stock: 'Portra 400' },
       'img-1005': { place: 'Elsewhere' },
     });
   });
@@ -215,20 +215,23 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await page.$eval('#f-stock', (e) => e.value), 'HP5');
     await page.click('#close-panel');
   });
+  // While a save runs, progress updates and the refresh after it re-render the page; click in one
+  // step (find and click together) so the element can't be replaced in between.
+  const clickNow = (sel) => page.waitForSelector(sel).then(() => page.evaluate((x) => document.querySelector(x).click(), sel));
   await check('changes made while a save is running are kept for the next save', async () => {
     await closePanel();
     if (await page.$('#bulk-stock')) await page.click('#select-btn');
     gh.blobDelay = 2000;
     await (await page.$('#add-input')).uploadFile(tiny);
     await page.waitForSelector('.tile[data-id="tiny-2"] img');
-    await page.click('#save-btn');
+    await clickNow('#save-btn');
     await waitText(page, '#save-btn', /Uploading/);
-    await page.click('.tile[data-id="img-1008"]');
-    await page.click('#f-hidden');
+    await clickNow('.tile[data-id="img-1008"]');
+    await clickNow('#f-hidden');
     await waitText(page, '.bar', /building/, 20000).catch(async () => { throw new Error(`bar: ${await text(page, '.bar')}`); });
     gh.blobDelay = 0;
     await waitText(page, '#pending-count', /^1 change$/).catch(async (e) => { throw new Error(`bar: ${await text(page, '.bar')}`); });
-    await page.click('#close-panel');
+    await clickNow('#close-panel');
   });
   await check('adding photos while editing loses neither the edit nor the photo', async () => {
     // Slow the first IndexedDB open so the edit lands while the photo is still being stored.
@@ -251,6 +254,18 @@ await withBrowser(async ({ page, url, errors }) => {
     await waitText(page, '#pending-count', /^3 changes$/).catch(async (e) => { throw new Error(`bar: ${await text(page, '.bar')}`); });
     await page.waitForSelector('.tile[data-id="img-1000-3"] img');
     await page.click('#close-panel');
+  });
+  await check('detected film shows as film and can be switched off', async () => {
+    await closePanel();
+    assert.match(await text(page, '.tile[data-id="img-1018"] .badges'), /film/);
+    await page.click('.tile[data-id="img-1018"]');
+    assert.equal(await page.$eval('#f-film', (e) => e.checked), true);
+    assert.equal(await page.$eval('#f-stock', (e) => e.disabled), false);
+    await page.click('#f-film');
+    await waitText(page, '#pending-count', /^4 changes$/);
+    await closePanel();
+    await page.click('#review-btn');
+    assert.match(await text(page, '.review'), /img-1018: film off/);
   });
   await check('no page errors', async () => {
     // A 401 on purpose shows up as a "Failed to load resource" console line; that one is expected.

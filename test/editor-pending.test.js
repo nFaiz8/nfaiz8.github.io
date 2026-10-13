@@ -20,20 +20,21 @@ test('addEdit keeps one op per field and drops ones that match what is saved', (
   ops = addEdit(ops, saved, 'a', 'stock', 'Portra 160');
   assert.deepEqual(ops, [{ type: 'edit', id: 'a', field: 'stock', value: 'Portra 160' }]);
   assert.deepEqual(addEdit(ops, saved, 'a', 'stock', 'Gold 200'), []);
-  assert.deepEqual(addEdit([], saved, 'a', 'film', false), [{ type: 'edit', id: 'a', field: 'film', value: null }]);
+  assert.deepEqual(addEdit([], saved, 'a', 'film', false), [{ type: 'edit', id: 'a', field: 'film', value: false }]);
+  assert.deepEqual(addEdit([], saved, 'b', 'hidden', false), []);
   assert.deepEqual(addEdit([], saved, 'b', 'place', ''), []);
 });
 
 test('applyOps replays edits onto saved edits and drops deleted photos', () => {
   const ops = [
-    { type: 'edit', id: 'a', field: 'film', value: null }, // film off: its stock goes too
+    { type: 'edit', id: 'a', field: 'film', value: false }, // film off: its stock goes too
     { type: 'edit', id: 'b', field: 'place', value: 'Lisbon' },
     { type: 'edit', id: 'c', field: 'hidden', value: true },
     { type: 'delete', id: 'c', path: 'photos/c.jpg' },
   ];
   assert.deepEqual(
     applyOps({ a: { film: true, stock: 'Gold 200' }, z: { lens: '50mm' } }, ops),
-    { b: { place: 'Lisbon' }, z: { lens: '50mm' } },
+    { a: { film: false }, b: { place: 'Lisbon' }, z: { lens: '50mm' } },
   );
 });
 
@@ -73,11 +74,21 @@ test('describeOp reads like a change list', () => {
 
 test('setFilm: off clears the stock, back on restores what was saved', () => {
   const saved = { a: { film: true, stock: 'Gold 200' } };
-  const off = setFilm([], saved, 'a', false);
+  const off = setFilm([], saved, 'a', false); // detected as digital: off means no override
   assert.deepEqual(applyOps(saved, off), {});
   assert.deepEqual(setFilm(off, saved, 'a', true), []);
   assert.deepEqual(setFilm([], {}, 'b', true, 'HP5'), [
     { type: 'edit', id: 'b', field: 'film', value: true },
     { type: 'edit', id: 'b', field: 'stock', value: 'HP5' },
   ]);
+});
+
+test('setFilm records a choice only when it differs from what the build detects', () => {
+  // Detected as film; switching it off is an override, switching back on removes the override.
+  const off = setFilm([], {}, 's', false, '', true);
+  assert.deepEqual(off, [{ type: 'edit', id: 's', field: 'film', value: false }]);
+  assert.deepEqual(setFilm(off, {}, 's', true, '', true), []);
+  assert.deepEqual(setFilm([], { s: { film: false } }, 's', true, '', true), [{ type: 'edit', id: 's', field: 'film', value: null }]);
+  assert.deepEqual(describeOp({ type: 'edit', id: 's', field: 'film', value: false }), 's: film off');
+  assert.deepEqual(describeOp({ type: 'edit', id: 's', field: 'film', value: null }), 's: film automatic');
 });

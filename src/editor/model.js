@@ -34,6 +34,8 @@ export function buildItems({ manifest, files, saved, ops }) {
   return base
     .map((it) => ({
       ...it,
+      autoFilm: it.photo?.category === 'film', // raw.json: the build's own detection
+      film: edits[it.id]?.film ?? it.photo?.category === 'film',
       edits: edits[it.id] || {},
       saved: saved[it.id] || {},
       building: !it.isNew && !it.photo,
@@ -45,8 +47,8 @@ export function buildItems({ manifest, files, saved, ops }) {
 
 export function matches(item, filter) {
   switch (filter) {
-    case 'film': return !!item.edits.film;
-    case 'digital': return !item.edits.film;
+    case 'film': return item.film;
+    case 'digital': return !item.film;
     case 'hidden': return !!item.edits.hidden;
     case 'pending': return item.pending;
     default: return true;

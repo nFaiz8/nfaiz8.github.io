@@ -94,7 +94,9 @@ for (const rel of files) {
   const out = (dir) => path.join(OUT, dir, `${id}.webp`);
   const prev = previous[id];
   if (!force && prev && prev.hash === hash && fs.existsSync(out('low')) && fs.existsSync(out('hi'))) {
-    photos.push(prev);
+    // Only the resizing is cached; the details are re-read so changes to how they are read
+    // (e.g. film detection) reach photos that were already built.
+    photos.push({ ...prev, ...(await details(file, rel)) });
     kept++;
     continue;
   }

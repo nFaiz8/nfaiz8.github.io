@@ -14,11 +14,12 @@ test('normalizeEdits keeps known, meaningful fields in a fixed order', () => {
   const out = normalizeEdits({
     b: { place: ' Lisbon ', film: true, stock: 'Portra 400', junk: 1 },
     a: { hidden: true },
-    c: { film: false, stock: 'Gold 200', camera: '' }, // stock without film is dropped
+    c: { film: false, stock: 'Gold 200', camera: '' }, // not film: no stock
     d: { date: '2025-8-2' }, // not YYYY-MM-DD
+    e: { stock: 'HP5' }, // for a photo the build detects as film
   });
-  assert.deepEqual(out, { a: { hidden: true }, b: { film: true, stock: 'Portra 400', place: 'Lisbon' } });
-  assert.deepEqual(Object.keys(out), ['a', 'b']);
+  assert.deepEqual(out, { a: { hidden: true }, b: { film: true, stock: 'Portra 400', place: 'Lisbon' }, c: { film: false }, e: { stock: 'HP5' } });
+  assert.deepEqual(Object.keys(out), ['a', 'b', 'c', 'e']);
   assert.deepEqual(Object.keys(out.b), ['film', 'stock', 'place']);
 });
 
@@ -61,4 +62,17 @@ test('film without a stock still counts as film', () => {
   const [p] = applyEdits([{ id: 'a', category: 'digital' }], { a: { film: true } }).photos;
   assert.equal(p.category, 'film');
   assert.equal(p.filmStock, undefined);
+});
+
+test("film edits override the build's own film detection both ways", () => {
+  const raw = [
+    { id: 'scan', category: 'film', camera: null, scanner: 'Noritsu' },
+    { id: 'scan2', category: 'film', camera: null, scanner: 'Noritsu' },
+    { id: 'dig', category: 'digital', camera: 'X-T5' },
+  ];
+  const { photos } = applyEdits(raw, { scan: { film: false }, scan2: { stock: 'Portra 400' }, dig: { stock: 'HP5' } });
+  assert.equal(photos[0].category, 'digital');
+  assert.equal(photos[1].category, 'film');
+  assert.equal(photos[1].filmStock, 'Portra 400');
+  assert.equal(photos[2].filmStock, undefined, 'a stock alone does not make a digital photo film');
 });

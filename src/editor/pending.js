@@ -19,14 +19,16 @@ export function uniqueName(name, takenPaths) {
 
 // Setting a field back to what is already saved removes the pending change instead of adding one.
 export function addEdit(ops, saved, id, field, value) {
-  const v = value === '' || value === false || value == null ? null : value;
+  // false means "no" only for film, where it overrides detection; elsewhere it clears the field.
+  const v = value === '' || value == null || (value === false && field !== 'film') ? null : value;
   const rest = ops.filter((o) => !(o.type === 'edit' && o.id === id && o.field === field));
   return v === (saved[id]?.[field] ?? null) ? rest : [...rest, { type: 'edit', id, field, value: v }];
 }
 
 // Film off also clears the stock; film back on drops that pending clear, so a saved stock survives.
-export function setFilm(ops, saved, id, on, stock) {
-  const out = addEdit(ops, saved, id, 'film', on);
+// auto is what the build detects for the photo; a choice that matches it is stored as no override.
+export function setFilm(ops, saved, id, on, stock, auto = false) {
+  const out = addEdit(ops, saved, id, 'film', on === auto ? null : on);
   if (!on) return addEdit(out, saved, id, 'stock', null);
   const kept = out.filter((o) => !(o.type === 'edit' && o.id === id && o.field === 'stock' && o.value == null));
   return stock ? addEdit(kept, saved, id, 'stock', stock) : kept;
@@ -76,6 +78,7 @@ export function commitMessage(ops) {
 export function describeOp(o) {
   if (o.type === 'upload') return `add ${o.name}`;
   if (o.type === 'delete') return `delete ${o.id}`;
+  if (o.field === 'film' && o.value == null) return `${o.id}: film automatic`;
   if (o.field === 'film' || o.field === 'hidden') return `${o.id}: ${o.field} ${o.value ? 'on' : 'off'}`;
   return `${o.id}: ${o.field} → ${o.value == null ? "photo's own" : o.value}`;
 }

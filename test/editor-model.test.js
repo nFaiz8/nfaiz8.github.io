@@ -27,10 +27,11 @@ test('buildItems: repo files are the truth, pending uploads first, then newest',
 });
 
 test('filters', () => {
-  const it = (edits, extra = {}) => ({ edits, pending: false, ...extra });
+  const it = (edits, extra = {}) => ({ edits, film: !!edits.film, pending: false, ...extra });
   assert.ok(matches(it({ film: true }), 'film'));
   assert.ok(!matches(it({ film: true }), 'digital'));
   assert.ok(matches(it({}), 'digital'));
+  assert.ok(matches(it({}, { film: true }), 'film'), 'detected film counts as film');
   assert.ok(matches(it({ hidden: true }), 'hidden'));
   assert.ok(matches(it({}, { pending: true }), 'pending'));
   assert.ok(!matches(it({}), 'pending'));
@@ -67,4 +68,13 @@ test('loadRemote lists photo files and reads edits.json', async () => {
   assert.deepEqual(r, { head: 'c1', files: ['photos/A.jpg'], edits: { a: { hidden: true } }, editsError: null });
   gh.blobText = async () => '{ broken';
   assert.match((await loadRemote(gh)).editsError, /JSON/);
+});
+
+test('buildItems: film is the edit if there is one, else what the build detected', () => {
+  const m = { photos: [{ id: 'scan', category: 'film' }, { id: 'scan2', category: 'film' }, { id: 'dig', category: 'digital' }] };
+  const items = buildItems({ manifest: m, files: ['photos/scan.jpg', 'photos/scan2.jpg', 'photos/dig.jpg'], saved: { scan2: { film: false } }, ops: [] });
+  const by = Object.fromEntries(items.map((i) => [i.id, i]));
+  assert.deepEqual([by.scan.film, by.scan.autoFilm], [true, true]);
+  assert.deepEqual([by.scan2.film, by.scan2.autoFilm], [false, true]);
+  assert.deepEqual([by.dig.film, by.dig.autoFilm], [false, false]);
 });

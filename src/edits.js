@@ -7,6 +7,7 @@ export const IMAGE = /\.(jpe?g|png|webp|tiff?|heic|heif|avif)$/i;
 export const idOf = (rel) => rel.replace(IMAGE, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 // The order fields are written in. A missing field means "use what the photo file says".
+// film: true or false overrides the build's own film detection (src/film.js); missing = detected.
 export const FIELDS = ['film', 'stock', 'hidden', 'date', 'camera', 'lens', 'place'];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -14,8 +15,8 @@ const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 function cleanOne(e) {
   if (!e || typeof e !== 'object' || Array.isArray(e)) return null;
   const out = {};
-  if (e.film === true) out.film = true;
-  if (out.film && text(e.stock)) out.stock = text(e.stock);
+  if (typeof e.film === 'boolean') out.film = e.film;
+  if (out.film !== false && text(e.stock)) out.stock = text(e.stock); // kept for detected film too
   if (e.hidden === true) out.hidden = true;
   if (typeof e.date === 'string' && DATE.test(e.date)) out.date = e.date;
   for (const f of ['camera', 'lens', 'place']) if (text(e[f])) out[f] = text(e[f]);
@@ -50,10 +51,8 @@ export function applyEdits(photos, edits) {
     const e = clean[p.id];
     if (!e) return p;
     const q = { ...p };
-    if (e.film) {
-      q.category = 'film';
-      if (e.stock) q.filmStock = e.stock;
-    }
+    if (e.film != null) q.category = e.film ? 'film' : 'digital';
+    if (e.stock && q.category === 'film') q.filmStock = e.stock;
     if (e.hidden) q.hidden = true;
     if (e.date) {
       q.date = e.date;
