@@ -343,6 +343,7 @@ try {
         };
         requestAnimationFrame(tick);
       }));
+      track.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
       await a.keyboard.down('KeyJ');
       try { await b.waitForFunction(() => !window.__ascii.pvp().me.alive, { timeout: 6000 }); } finally { await a.keyboard.up('KeyJ'); }
       await a.waitForFunction(() => /you 1/.test(document.getElementById('fight-board').textContent), { timeout: 2000 });
@@ -381,11 +382,13 @@ try {
         };
         requestAnimationFrame(tick);
       }), ids.b);
+      seen.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
       const own = b.evaluate(() => new Promise((resolve) => {
         const p = window.__ascii.world.player, out = [], t0 = performance.now();
         const tick = () => { out.push(p.y); if (performance.now() - t0 < 1800) requestAnimationFrame(tick); else resolve(out); };
         requestAnimationFrame(tick);
       }));
+      own.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
       await sleep(150);
       await b.focus('#stage');
       await b.keyboard.down('Space'); await sleep(400); await b.keyboard.up('Space');
@@ -442,6 +445,7 @@ try {
         const tick = () => { out.push({ x: p.x, rollT: p.rollT }); if (performance.now() - t0 < 1500) requestAnimationFrame(tick); else resolve(out); };
         requestAnimationFrame(tick);
       }));
+      own.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
       await a.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       const bAt = await meOn(b), seen0 = (await bodyOn(b, ids.a)).x;
       await a.focus('#stage');
@@ -457,19 +461,15 @@ try {
       assert.ok(aEnd > bAt.x + 1 && seen1 > bNow.x + 1 && bSeen < aEnd - 1, 'through B, on both screens');
       assert.ok(Math.abs(bNow.x - bAt.x) < 0.05, 'B was not pushed');
     });
-    await check('stopping the server leaves both galleries walkable', async () => {
+    // Last of the live checks: it kills wrangler dev.
+    await check('stopping the server (wrangler dev is killed here) mid-fight: both get the dummy, and both stay walkable', async () => {
+      for (const p of [a, b]) assert.equal(await p.evaluate(() => window.__ascii.mode()), 'side', 'in the arena as it stops');
       dev.kill();
-      await sleep(1500);
+      for (const p of [a, b]) await p.waitForFunction(() => { const P = window.__ascii.pvp(); return P.entered && !P.online && P.bodies(performance.now()).some((x) => x.dummy); }, { timeout: 8000 });
       await a.focus('#stage');
       const before = await a.evaluate(() => window.__ascii.world.player.x);
       await a.keyboard.down('ArrowRight'); await sleep(500); await a.keyboard.up('ArrowRight');
       assert.notEqual(await a.evaluate(() => window.__ascii.world.player.x), before);
-    });
-    await check('stopping the server mid-fight: both get the dummy', async () => {
-      for (const p of [a, b]) {
-        assert.equal(await p.evaluate(() => window.__ascii.mode()), 'side', 'in the arena when it stopped');
-        await p.waitForFunction(() => { const P = window.__ascii.pvp(); return P.entered && !P.online && P.bodies(performance.now()).some((x) => x.dummy); }, { timeout: 8000 });
-      }
     });
     await check('when the connection is lost the other person fades out and the count goes', async () => {
       await a.waitForFunction(() => window.__ascii.live().peers.count() === 0, { timeout: 5000 });

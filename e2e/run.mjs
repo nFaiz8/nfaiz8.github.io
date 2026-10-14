@@ -2,6 +2,7 @@
 import { withBrowser, ready, sleep, SHOTS } from './lib.mjs';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
+import { GUNS } from '../src/fight.js';
 
 const results = [];
 const check = async (name, fn) => {
@@ -284,7 +285,12 @@ await withBrowser(async ({ page, url, errors }) => {
   // The train level (train level addendum): the side view is two subway cars in a tunnel, drawn as glyphs.
   for (const r of ['canvas', 'gl']) {
     await check(`${r}: the arena is the train, seen from outside too; inside, the floor you stand on is warm white over the lit car; no photo drawn`, async () => {
+      // The train held at one moment, a station lamp over the floor strip measured below: the passing lamps
+      // move the light along the floor (its 95th percentile went from 164 to 239 across the cycle), so an
+      // unheld train made this check pass or fail by when it looked.
+      const HELD = 6500;
       await page.goto(`${url}?r=${r}`); await ready(page);
+      await page.evaluate((t) => window.__ascii.freezeTrain(t), HELD);
       const a = await arenaInfo(page);
       await page.evaluate((d) => window.__ascii.teleport(d.x + 4.5, d.y + 1.5), a.door);
       await sleep(1500);
@@ -293,6 +299,7 @@ await withBrowser(async ({ page, url, errors }) => {
       const lit = outside.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
       await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 8000 });
+      await page.evaluate((t) => window.__ascii.freezeTrain(t), HELD);
       await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 60.5, a.floorY - 1.5); });
       await sleep(1500);
       const L = await page.evaluate(() => window.__ascii.map.arena.level.door.r + 1); // the floor's top row
@@ -656,9 +663,16 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.waitForFunction(() => { const P = window.__ascii.pvp(); return P.entered && !window.__ascii.tilting() && P.bodies(performance.now()).some((b) => b.dummy); }, { timeout: 8000 });
     return page.evaluate(() => {
       const A = window.__ascii, P = A.pvp(), fx = P.fx, log = window.__fight = { shots: [], hits: [] };
-      const shot = fx.shot, hit = fx.hit;
-      fx.shot = (s) => { log.shots.push({ id: s.id, x: s.x, y: s.y, angle: s.angle, gun: s.gun, mine: s.mine, at: s.at }); return shot(s); };
-      fx.hit = (h) => { log.hits.push({ d: h.d, hs: !!h.hs, at: h.at, hp: P.dummy.rec ? P.dummy.rec.hp : null }); return hit(h); };
+      const shot = fx.shot, hit = fx.hit, assign = fx.assign;
+      fx.shot = (s) => { log.shots.push({ id: s.id, n: s.n, x: s.x, y: s.y, angle: s.angle, gun: s.gun, mine: s.mine, at: s.at }); return shot(s); };
+      // My shot gets its bullet number right after it is fired (offline, from the local referee), as fx does.
+      fx.assign = (n) => { const q = log.shots.find((x) => x.mine && x.n == null); if (q) q.n = n; return assign(n); };
+      // A hit carries its bullet's number (offline): so, the gun that fired it.
+      fx.hit = (h) => {
+        const q = h.n == null ? null : log.shots.findLast((x) => x.mine && x.n === h.n);
+        log.hits.push({ d: h.d, hs: !!h.hs, at: h.at, hp: P.dummy.rec ? P.dummy.rec.hp : null, gun: q ? q.gun : null });
+        return hit(h);
+      };
       const a = A.map.arena, L = a.level, ox = a.x + 1, oy = a.y + 1, top = L.door.r + 1; // the floor's top row
       const pk = (gun) => { const q = L.pickups.find((p) => p.gun === gun); return { x: q.x + ox, y: q.y + oy }; };
       const d = P.dummy.body;
@@ -681,14 +695,18 @@ await withBrowser(async ({ page, url, errors }) => {
     try { await page.waitForFunction(fn, { timeout, polling: 'raf' }, arg); } finally { await page.keyboard.up(key); }
   };
   // My x and roll every frame for ms; the roll's length: from the frame before it to the frame it ended.
-  const rollFrames = (ms) => page.evaluate((ms) => new Promise((resolve) => {
-    const p = window.__ascii.world.player, P = window.__ascii.pvp(), out = [], t0 = performance.now();
-    const tick = () => {
-      out.push({ x: p.x, rollT: p.rollT, act: P.bodies(performance.now()).find((b) => b.me).state.act });
-      if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out);
-    };
-    requestAnimationFrame(tick);
-  }), ms);
+  const rollFrames = (ms) => {
+    const q = page.evaluate((ms) => new Promise((resolve) => {
+      const p = window.__ascii.world.player, P = window.__ascii.pvp(), out = [], t0 = performance.now();
+      const tick = () => {
+        out.push({ x: p.x, rollT: p.rollT, act: P.bodies(performance.now()).find((b) => b.me).state.act });
+        if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out);
+      };
+      requestAnimationFrame(tick);
+    }), ms);
+    q.catch(() => {}); // awaited by the caller; a check failing first mustn't leave it unhandled
+    return q;
+  };
   // Two frames go by (so a sampler started just before has its first frame in hand).
   const twoFrames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   const rollOf = (fr) => {
@@ -709,6 +727,7 @@ await withBrowser(async ({ page, url, errors }) => {
       };
       requestAnimationFrame(tick);
     }));
+    track.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
     await holdUntil('KeyJ', () => !window.__ascii.pvp().dummy.rec.alive, 5000);
     const out = await track, { hits } = await fightLog();
     const died = out.findIndex((q) => !q.alive), back = out.findIndex((q, i) => i > died && q.alive), x0 = out[0].x;
@@ -772,6 +791,7 @@ await withBrowser(async ({ page, url, errors }) => {
       };
       requestAnimationFrame(tick);
     }), s.sniper);
+    watch.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
     await place(s.sniper.x - 4, s.floor, 1);
     await sleep(200);
     await holdUntil('ArrowRight', () => window.__ascii.pvp().me.gun === 'sniper', 3000);
@@ -790,6 +810,10 @@ await withBrowser(async ({ page, url, errors }) => {
     const sn = shots.filter((q) => q.mine && q.gun === 'sniper');
     console.log(`  sniper: ${sn.length} shots, hits ${hits.map((h) => `-${h.d}→${h.hp}`).join(' ')}`);
     assert.equal(sn.length, 5, 'five rounds');
+    // Held, it fires once a cooldown (the rules' own), give or take a frame.
+    const gaps = sn.slice(1).map((q, i) => q.at - sn[i].at), cool = GUNS.sniper.cooldown * 1000;
+    console.log(`  sniper: shots ${gaps.map((g) => g.toFixed(0)).join(', ')} ms apart (cooldown ${cool} ms)`);
+    assert.ok(gaps.every((g) => g >= cool * 0.92 && g <= cool + 200), `a shot every ${cool} ms (${gaps.map((g) => g.toFixed(0)).join(', ')})`);
     assert.ok(hits.length >= 2 && hits.every((h) => h.d === 70 && !h.hs) && hits[0].hp === 30, 'a sniper body shot does 70');
     assert.equal(await page.evaluate(() => window.__ascii.pvp().me.ammo), -1);
     await page.waitForFunction(() => /^hp [█░]{10} \d+$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
@@ -799,7 +823,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(seen[0].there === true && taken, 'there, then taken');
     assert.ok(back && back.t - taken.t > 9500 && back.t - taken.t < 10800, `back ${back && (back.t - taken.t).toFixed(0)} ms after it was taken`);
   });
-  await check('arena PvP alone: the rifle gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (at most 2.6 a second); 9 a rifle hit, 25 a deagle hit', async () => {
+  await check('arena PvP alone: the rifle gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (2 to 2.6 a second); 9 a rifle hit, 25 a deagle hit', async () => {
     const s = await enterFight();
     await place(s.rifle.x - 4, s.rifle.y, 1); // on car A's roof
     await sleep(200);
@@ -812,19 +836,27 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.keyboard.down('KeyJ');
     try {
       await page.waitForFunction(() => window.__ascii.pvp().me.gun === 'deagle', { timeout: 7000 });
-      await sleep(1700); // and on with the deagle
+      // On with the deagle for 1.7 s at least, and until one of its bullets has hit (the dummy may be popped
+      // and gone for 2 s just then).
+      const t0 = Date.now();
+      await page.waitForFunction(() => window.__fight.hits.some((h) => h.gun === 'deagle'), { timeout: 4500 });
+      await sleep(Math.max(0, 1700 - (Date.now() - t0)));
     } finally { await page.keyboard.up('KeyJ'); }
     const { shots, hits } = await fightLog();
     const rifle = shots.filter((q) => q.mine && q.gun === 'rifle'), deagle = shots.filter((q) => q.mine && q.gun === 'deagle');
     const rate = (l) => (l.length - 1) / ((l.at(-1).at - l[0].at) / 1000);
-    const rifleHits = hits.filter((h) => h.at <= rifle.at(-1).at + 150), deagleHits = hits.filter((h) => deagle.length && h.at > deagle[0].at);
-    console.log(`  rifle: ${rifle.length} shots at ${rate(rifle).toFixed(2)}/s, then ${deagle.length} deagle at ${deagle.length > 1 ? rate(deagle).toFixed(2) : '?'}/s; hits ${hits.map((h) => h.d).join(' ')}`);
+    // Each hit by the gun of the bullet that made it (its number, from the hit log).
+    const rifleHits = hits.filter((h) => h.gun === 'rifle'), deagleHits = hits.filter((h) => h.gun === 'deagle');
+    // Held, each gun fires at its cooldown (the rules' own): a little under it for frames lost, never over.
+    const per = (gun) => 1 / GUNS[gun].cooldown;
+    console.log(`  rifle: ${rifle.length} shots at ${rate(rifle).toFixed(2)}/s, then ${deagle.length} deagle at ${deagle.length > 1 ? rate(deagle).toFixed(2) : '?'}/s; hits ${hits.map((h) => `${h.gun} ${h.d}`).join(', ')}`);
     assert.equal(rifle.length, 40, 'forty rounds');
-    assert.ok(rate(rifle) > 8 && rate(rifle) <= 10.5, `about 10 a second (${rate(rifle).toFixed(2)})`);
+    assert.ok(rate(rifle) > 0.8 * per('rifle') && rate(rifle) <= 1.05 * per('rifle'), `about ${per('rifle')} a second (${rate(rifle).toFixed(2)})`);
     assert.ok(deagle.length >= 3 && deagle[0].at > rifle.at(-1).at, 'then the deagle');
-    assert.ok(rate(deagle) <= 2.6, `the deagle at most 2.6 a second (${rate(deagle).toFixed(2)})`);
+    assert.ok(rate(deagle) > 0.8 * per('deagle') && rate(deagle) <= 1.04 * per('deagle'), `the deagle 2 to 2.6 a second (${rate(deagle).toFixed(2)})`);
+    assert.equal(rifleHits.length + deagleHits.length, hits.length, 'every hit traced to its gun');
     assert.ok(rifleHits.length >= 10 && rifleHits.every((h) => h.d === 9 && !h.hs), `9 a rifle hit (${rifleHits.map((h) => h.d).join(' ')})`);
-    assert.ok(deagleHits.every((h) => h.d === 25 && !h.hs), `25 a deagle hit (${deagleHits.map((h) => h.d).join(' ')})`);
+    assert.ok(deagleHits.length > 0 && deagleHits.every((h) => h.d === 25 && !h.hs), `25 a deagle hit (${deagleHits.map((h) => h.d).join(' ')})`);
   });
   await check('arena PvP alone: a double-tap of D rolls about 14 cells; a bullet reaching the dummy inside its roll\'s dodge window passes through it (rules and screen)', async () => {
     const s = await enterFight();
@@ -864,6 +896,7 @@ await withBrowser(async ({ page, url, errors }) => {
       };
       requestAnimationFrame(tick);
     }), before.length);
+    run.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
     await holdUntil('KeyJ', (n0) => window.__fight.shots.length > n0, 2000, before.length);
     const { out, rollAt } = await run, { shots, hits } = await fightLog();
     const k = out.findIndex((f, i) => i > 0 && f.bx >= f.x && out[i - 1].bx < out[i - 1].x); // the bullet passes its centre
@@ -892,6 +925,7 @@ await withBrowser(async ({ page, url, errors }) => {
         };
         requestAnimationFrame(tick);
       }));
+      frames.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
       if (roll) await page.keyboard.press('KeyD');
       await page.keyboard.down('KeyD');
       await sleep(100);
@@ -938,8 +972,10 @@ await withBrowser(async ({ page, url, errors }) => {
       if (air) {
         await page.waitForFunction(() => window.__ascii.world.player.vy > -3, { timeout: 1500, polling: 'raf' }); // at the top
         await page.keyboard.up('Space');
-        await twoFrames(); // a frame without it
-        await page.keyboard.down('Space'); // a fresh press in the air: the air jump
+        // Pressed again as soon as the body has stepped once without it (a fresh press is the air jump), so
+        // little height is lost to the wait even at a low frame rate.
+        await page.waitForFunction(() => !window.__ascii.world.player.prevJump, { timeout: 1000, polling: 'raf' });
+        await page.keyboard.down('Space');
       }
       await page.waitForFunction(() => window.__ascii.world.player.onGround, { timeout: 3000, polling: 'raf' });
       await page.keyboard.up('Space');
