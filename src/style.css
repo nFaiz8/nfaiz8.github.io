@@ -145,15 +145,37 @@ body { font: 13px/1.4 var(--mono); }
 /* Our own focus style for the text boxes, in place of the browser's blue ring. */
 .chat-form input:focus, .name-form input:focus { outline: none; border-color: var(--mute); }
 
-/* Arena controls on touch screens: run on the left, jump on the right. */
+/* Arena controls on touch screens: run on the left; on the right HIT ▼ above FIRE JUMP (FIRE beside JUMP, so
+   a thumb rolls between them). A 35% dark fill, so a figure under a button at the room's edge stays visible. */
 .pad { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; justify-content: space-between; align-items: flex-end;
   padding: 0 max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); pointer-events: none; }
 .pad[hidden] { display: none; }
 .pad button { pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-  font: inherit; color: var(--ink); background: rgb(7 8 11 / 0.55); border: 1px solid var(--line); min-width: 64px; min-height: 64px; }
+  font: inherit; color: var(--ink); background: rgb(7 8 11 / 35%); border: 1px solid var(--line); min-width: 64px; min-height: 64px; }
 .pad button.on { border-color: var(--ink); }
 .pad-run { display: flex; gap: 12px; }
-.pad-act { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.pad-act { display: grid; grid-template-columns: auto auto; gap: 10px; align-items: end; justify-items: end; }
+.pad.no-fight .pad-act { grid-template-columns: auto; } /* ARENA.pvp off: ▼ above JUMP */
 .pad .pad-jump { min-width: 96px; }
-.pad .pad-drop { min-width: 56px; min-height: 56px; }
+.pad .pad-drop, .pad .pad-hit { min-width: 56px; min-height: 56px; }
 body.pad-on .chat-log { bottom: 100px; }
+/* On a phone in the arena the camera keeps the floor at the bottom, where the caption would cover me (and
+   there's no E to press): the pad's screen goes without it. */
+body.pad-on .caption { display: none; }
+
+/* In the arena's side view the top bar's muted text sits over the sky: give it a dark scrim. */
+body.side .hud { background: linear-gradient(#07080bcc, transparent); }
+
+/* The fight HUD: my hp, the scoreboard and the kill feed, just under the HUD at the top right. */
+.fight { position: fixed; top: 48px; right: 16px; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  pointer-events: none; color: var(--ink); white-space: pre; }
+.fight[hidden], .fight [hidden] { display: none; }
+.fight-hp, .fight-board, .fight-feed { margin: 0; padding: 3px 8px; list-style: none; background: #07080bcc; border: 1px solid var(--line); }
+.fight-board:empty, .fight-feed:empty { display: none; }
+.fight-board li { color: var(--mute); }
+.fight-board li.me { color: var(--ink); }
+.fight-feed { color: var(--mute); }
+@media (max-height: 500px) {
+  .fight { top: 44px; font-size: 11px; gap: 3px; }
+  .fight-hp, .fight-board, .fight-feed { padding: 2px 6px; }
+}

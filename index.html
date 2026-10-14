@@ -21,6 +21,11 @@
         <button class="hud-btn" id="renderer-btn" type="button" title="Switch renderer (R)"></button>
       </span>
     </header>
+    <div class="fight" id="fight" hidden aria-hidden="true">
+      <div class="fight-hp" id="fight-hp"></div>
+      <ol class="fight-board" id="fight-board"></ol>
+      <ol class="fight-feed" id="fight-feed"></ol>
+    </div>
     <div class="emote-bar" id="emote-bar" hidden></div>
     <form class="chat-form" id="chat-form" hidden>
       <input id="chat-input" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Say something" placeholder="say something…" />
@@ -34,7 +39,9 @@
         <button type="button" data-code="ArrowRight" aria-label="Run right">▶</button>
       </div>
       <div class="pad-act">
+        <button type="button" class="pad-hit" data-code="Hit" aria-label="Punch or kick">HIT</button>
         <button type="button" class="pad-drop" data-code="Drop" aria-label="Drop through a platform">▼</button>
+        <button type="button" class="pad-fire" data-code="Fire" aria-label="Shoot">FIRE</button>
         <button type="button" class="pad-jump" data-code="Jump" aria-label="Jump">JUMP</button>
       </div>
     </div>

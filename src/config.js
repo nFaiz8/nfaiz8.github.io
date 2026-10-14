@@ -10,5 +10,6 @@ export const SITE = {
 export const MULTIPLAYER = { enabled: true, url: 'wss://faiz-live.faiz-live.workers.dev' };
 
 // The arena, west of the lobby: one photo as its back wall (a photo id from photos.json). Change the id and
-// push to change it; enabled: false removes the room.
-export const ARENA = { enabled: true, photo: 'dscf9139' };
+// push to change it; enabled: false removes the room. pvp: false turns the fight off (no guns, no dummy, no
+// scoreboard): the arena is then just a room to run and jump in.
+export const ARENA = { enabled: true, photo: 'dscf9139', pvp: true };

@@ -1,6 +1,9 @@
 import { SITE, ARENA } from './config.js';
 import levelText from './arena.txt?raw';
 import { parseLevel } from './arena.js';
+import { levelHash } from './level.js';
+import { createPvp } from './pvp.js';
+import { createFightHud } from './fighthud.js';
 import { createLive, peerEntities, heartEntities, localEcho, peerColor } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
 import { cleanName, cleanText } from '../server/rules.js';
@@ -30,13 +33,15 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
 const padEl = document.getElementById('pad');
 let hintOn = false;
+const PVP = ARENA.enabled && ARENA.pvp !== false;
+const DUMMY_COLOR = [150, 150, 150];
 const debug = new URLSearchParams(location.search).has('debug');
 const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 // ?bots=30 (localhost only): that many local stickmen in the arena, cycling through every act.
 const botCount = onLocalhost ? Math.min(100, Math.max(0, parseInt(new URLSearchParams(location.search).get('bots'), 10) || 0)) : 0;
 const RENDERERS = { canvas: createCanvasRenderer, gl: createGlRenderer };
 
-let map, world, renderer, input, viewer, mapView, grid;
+let map, world, renderer, input, viewer, mapView, grid, pvp = null, fightHud = null;
 
 function note(text, ms = 3000) {
   noteEl.textContent = text;
@@ -228,15 +233,49 @@ function applyRoute(route) {
 let last = performance.now();
 const stats = { frames: 0, times: [] };
 const NO_INPUT = { x: 0, y: 0, run: false, jump: false, down: false };
+// Away (a photo, the map, the grid): no movement, and strikes or rolls pressed meanwhile don't wait for the return.
+function idle() { input.takeStrikes(); input.takeRoll(); return NO_INPUT; }
+// This frame's input. In the fight pvp.js turns it into movement, shots and strikes (PvP spec §3).
+function controls(t) {
+  const s = input.state();
+  if (!pvp || world.mode !== 'side') return s;
+  const m = input.mouse;
+  return pvp.control({ ...s, strikes: input.takeStrikes(), roll: input.takeRoll(), aimUp: s.jump, aimDown: s.down,
+    mouse: m.on ? { on: true, ...renderer.pointAt(world, m.px, m.py) } : null }, t);
+}
+// In the fight while the side view is up and nothing covers it (PvP spec §8). The tilt out, a photo, the map,
+// the grid or a hidden tab take me out (al); coming back puts me in again (ae, with fresh health).
+let keysNoted = false, linkUp = false; // linkUp: this connection's welcome came (so fightOk is its own)
+const fightOnline = () => !!live && linkUp && live.state === 'live' && live.fightOk;
+function syncFight(t) {
+  const want = world.mode === 'side' && !tilting && !world.want && !viewer.isOpen && !mapView.isOpen && !grid.isOpen && !document.hidden;
+  if (want && !pvp.entered) {
+    // A last p first, from in here: arriving by a link or teleport, the last one went out somewhere else,
+    // and the gallery would keep drawing me there while I fight.
+    if (live) live.tick(world.player);
+    pvp.enter(t, fightOnline());
+    if (!touch && !keysNoted) { keysNoted = true; note('J shoot · K hit · mouse aims', 4000); }
+  } else if (!want && pvp.entered) leaveFight(t);
+}
+function leaveFight(t) {
+  pvp.leave(t);
+  if (live) live.leftArena(); // my position goes out again, as p
+}
 function loop(now) {
   // Real per-frame dt, capped so a background tab doesn't teleport you on return.
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
-  step(world, dt, viewer.isOpen || mapView.isOpen || grid.isOpen ? NO_INPUT : input.state());
+  const t = performance.now(); // the fight's clock, the same as its messages'
+  const away = viewer.isOpen || mapView.isOpen || grid.isOpen;
+  if (pvp) syncFight(t);
+  step(world, dt, away ? idle() : controls(t));
+  if (pvp) { syncFight(t); pvp.frame(dt, t); } // through the door: out of the fight as the tilt starts
   if (world.want) tilt();
   world.lighting = world.mode === 'side' ? lightingSide : lightingTop;
   if (world.mode !== lastMode) {
     lastMode = world.mode;
+    input.clear(); // nothing held, no strike or roll carried in or out of the arena
+    document.body.classList.toggle('side', world.mode === 'side');
     if (world.mode === 'side') meEntry++; // a fresh motion-memory entry: my fly-in plays on every entry
     if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
   }
@@ -260,12 +299,16 @@ function loop(now) {
   // In the arena's side view people are stick figures (world.bodies → world.figures); top-down they are @.
   const side = world.mode === 'side' && !!map.arena;
   const bodies = [];
+  // In the fight, pvp.js knows everyone fighting (me, the others, the dummy) and how they move; the
+  // others get their name, chat and emote from live.
+  const fight = side && pvp && pvp.entered ? pvp.bodies(t) : [];
+  const list = live ? live.peers.list(t) : [];
+  for (const b of fight) if (!b.me && !b.dummy) bodies.push(fighterBody(b, list.find((p) => p.id === b.id)));
   // Hearts: top-down they're entities; in the side view they're labels, drawn over every figure.
   const hearts = side ? [] : world.entities;
   if (live) {
-    const now = performance.now();
+    const now = t;
     live.tick(world.player);
-    const list = live.peers.list(now);
     world.others = list.filter((p) => p.alpha === 1);
     // People in the arena are drawn only in its side view, and the side view shows only them.
     const inside = (p) => inArena(map, p.x, p.y);
@@ -280,9 +323,14 @@ function loop(now) {
         if (c) walkTo(world, c.x, c.y);
       }
     }
-    const posOf = (id) => list.find((p) => p.id === id) || null;
-    if (side) for (const p of shown) bodies.push(peerBody(p));
-    else world.entities.push(...peerEntities(shown, { reducedMotion, muted }));
+    let posOf = (id) => list.find((p) => p.id === id) || null;
+    if (side) {
+      // Anyone else inside (an old page, or no fight with the server) from their positions alone.
+      const fighting = new Set(bodies.map((b) => b.id));
+      for (const p of shown) if (!fighting.has(p.id)) bodies.push(peerBody(p));
+      const at = new Map(bodies.map((b) => [b.id, b.state]));
+      posOf = (id) => at.get(id) || null;
+    } else world.entities.push(...peerEntities(shown, { reducedMotion, muted }));
     hearts.push(...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion, posOf }));
   }
   if (side) {
@@ -293,13 +341,18 @@ function loop(now) {
       // Every fourth bot hearts the arena photo, a heart every 2 s.
       if (i % 4 === 3 && map.arena.backdrop) hearts.push(...heartEntities([{ f: map.arena.backdrop.id, id: b.id, age: ((now / 1000 + i * 0.37) % 2) / 2 }], map.frames, { reducedMotion, posOf: () => b.state }));
     }
-    bodies.push(myBody(now));
+    const dummy = fight.find((b) => b.dummy);
+    if (dummy) bodies.push({ id: 'dummy', state: dummy.state, color: DUMMY_COLOR, name: '', label: 'dummy', alpha: 1 });
+    const meFighting = fight.find((b) => b.me);
+    bodies.push(myBody(now, meFighting ? meFighting.state : null));
     pruneHearts(now);
     const my = mine.hearts.map((h) => ({ f: h.f, id: 'me', age: (now - h.at) / MY_HEART_MS }));
     hearts.push(...heartEntities(my, map.frames, { reducedMotion, posOf: () => world.player }));
     const m = renderer.metrics, cols = innerWidth / m.cw, rows = innerHeight / m.ch;
     world.figures = figureGlyphs(bodies, { t: now / 1000, reducedMotion, phone: touch, memory,
       view: { left: world.cam.x - cols / 2, top: world.cam.y - rows / 2, cols, rows }, ceiling: map.arena.y + 1 });
+    // Bullets, sparks, damage numbers, hp bars, pickups and sniper lines, over the figures.
+    if (fight.length) pvp.glyphs(t, world.figures);
     // Hearts last: the label layer, over every figure (stickman spec §5 draw order), with the outline.
     for (const h of hearts) world.figures.push({ x: h.x, y: h.y, ch: h.glyph, color: h.color, a: 1, bold: false, strip: false });
   } else {
@@ -308,6 +361,7 @@ function loop(now) {
     world.figures = [];
   }
   world.bodies = bodies;
+  if (fightHud) fightHud.render(fight.length ? pvp.hud(t) : null);
   if (renderer.lost) {
     note('WebGL context lost, switched to the canvas renderer');
     setRenderer('canvas');
@@ -398,15 +452,23 @@ const memory = {
     return s;
   },
 };
-function myBody(now) {
+// fight: my state from pvp.js, when I'm in the fight.
+function myBody(now, fight = null) {
   const p = world.player;
-  const state = { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, act: 'idle', gun: 'deagle', ...posePin };
+  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, act: 'idle', gun: 'deagle' };
+  // A pinned pose is drawn as pinned: unprotected unless `safe` is pinned too.
+  const state = posePin ? { ...own, safe: false, ...posePin } : { ...own };
   const emoting = mine.emote && now - mine.emoteAt < MY_EMOTE_MS;
   return { id: 'me', me: true, state, color: C.player, name: '', alpha: 1,
     say: mine.say && now - mine.sayAt < MY_SAY_MS ? mine.say : null,
     emote: emoting ? mine.emote : null, emoteAge: emoting ? (now - mine.emoteAt) / MY_EMOTE_MS : 0 };
 }
-// Someone inside, from their positions alone until PvP sends their state.
+// Someone fighting: pvp.js's state, with their name, chat and emote from live.
+function fighterBody(b, p) {
+  return { id: b.id, state: b.state, color: peerColor(b.id), name: (p && p.name) || '', say: p && p.say && !muted.has(b.id) ? p.say : null,
+    emote: p ? p.emote : null, emoteAge: p ? p.emoteAge : 0, alpha: 1 };
+}
+// Someone inside who isn't fighting (an old page, or no fight with the server), from their positions alone.
 function peerBody(p) {
   return { id: p.id, state: { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: p.ground, act: 'idle' },
     color: peerColor(p.id), name: p.name, say: p.say && !muted.has(p.id) ? p.say : null,
@@ -449,7 +511,35 @@ async function boot() {
   lightingTop = createLighting(map);
   lightingSide = map.arena ? createArenaLighting(map) : null;
   world.lighting = lightingTop;
-  input = createInput(stage, { onTap, onKey });
+  input = createInput(stage, { onTap, onKey, arena: () => !!pvp && world.mode === 'side' });
+  if (PVP && map.arena) {
+    const myId = () => (live && live.peers.myId) || 'me';
+    pvp = createPvp({
+      world, map, level: map.arena.level, reducedMotion, myId,
+      send: (m) => !!live && live.send(m),
+      rtt: () => (live && live.rtt) || 100,
+      colorOf: (id) => (id === myId() ? C.player : peerColor(id)),
+      nameOf: (id) => (live && live.peers.get(id)?.name) || '',
+      onNote: (text) => note(text, 3000),
+      onFeed: (text) => {
+        fightHud.line(text);
+        captionEl.setAttribute('aria-live', 'polite');
+        note(text);
+      },
+    });
+    fightHud = createFightHud({
+      root: document.getElementById('fight'), hp: document.getElementById('fight-hp'),
+      board: document.getElementById('fight-board'), feed: document.getElementById('fight-feed'),
+      rows: touch ? 3 : 5, // a landscape phone shows the top 3
+      nameOf: (id) => (live && live.peers.get(id)?.name) || '',
+      colorOf: (id, me) => (me ? C.player : peerColor(id)),
+    });
+    // The tab hidden: out of the fight now (the loop stops while hidden); it puts me back in on return.
+    addEventListener('visibilitychange', () => { if (document.hidden && pvp.entered) leaveFight(performance.now()); });
+  } else {
+    padEl.classList.add('no-fight');
+    for (const b of padEl.querySelectorAll('.pad-fire, .pad-hit')) b.hidden = true;
+  }
   for (const b of padEl.querySelectorAll('button')) {
     const set = (on) => { input.press(b.dataset.code, on); b.classList.toggle('on', on); };
     b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); set(true); });
@@ -596,11 +686,22 @@ async function boot() {
   });
   chatInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeChat(); } });
   const hereEl = document.getElementById('hud-here');
+  // The fight runs online once this connection's welcome agrees on the level (fightOk); otherwise offline.
+  const syncOnline = () => { if (pvp && live) pvp.setOnline(fightOnline(), performance.now()); };
   live = createLive({
     version: data.generated,
+    fightHash: pvp ? levelHash(levelText) : '',
+    inArena: () => !!pvp && pvp.entered && pvp.online, // the arena stream replaces my position messages
+    onArena: (m) => { if (pvp) pvp.onMessage(m, performance.now()); },
+    onState: () => { linkUp = false; syncOnline(); },
     getPos: () => world.player,
     getName: () => { try { return localStorage.getItem('faiz-live-name') || ''; } catch { return ''; } },
-    onCount: (n) => { hereEl.hidden = !n; hereEl.textContent = `${n} here`; },
+    onCount: (n) => {
+      hereEl.hidden = !n;
+      hereEl.textContent = `${n} here`;
+      // Also called on the welcome, just after it set fightOk.
+      if (live && live.state === 'live') { linkUp = true; syncOnline(); }
+    },
     onAnnounce: (kind, m) => {
       // Only people in your room are announced, to keep screen readers quiet.
       if (roomAt(map, m.x, m.y) !== roomAt(map, world.player.x, world.player.y)) return;
@@ -635,6 +736,8 @@ async function boot() {
     open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; } };
   // Pins fields of my side-view state (act, actT, aim, x, y, landT, spawnT…) until called with null.
   if (onLocalhost) window.__ascii.pose = (state) => { posePin = state ? { ...state } : null; };
+  window.__ascii.pvp = () => pvp;
+  window.__ascii.input = () => input;
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 

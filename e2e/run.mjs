@@ -352,6 +352,15 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.waitForFunction(() => !document.getElementById('pad').hidden, { timeout: 3000 });
     const rects = await page.$$eval('#pad button', (bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { code: b.dataset.code, x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; }));
     for (const r of rects) assert.ok(r.w >= 56 && r.h >= 56, `${r.code} is ${r.w}×${r.h}`);
+    // PvP: FIRE and HIT join the right-hand cluster (HIT ▼ on top, FIRE JUMP below); FIRE and JUMP are 64 px.
+    for (const sel of ['.pad-fire', '.pad-hit']) {
+      const b = await page.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return { shown: !!e.offsetParent && r.width > 0, w: r.width, h: r.height, x: r.x, y: r.y }; });
+      assert.ok(b.shown && b.w >= 56 && b.h >= 56, `${sel} shown and at least 56 px (${b.w}×${b.h})`);
+    }
+    const box = (sel) => page.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+    const [hit, drop, fire, jump] = await Promise.all(['.pad-hit', '.pad-drop', '.pad-fire', '.pad-jump'].map(box));
+    assert.ok(hit.y + hit.h <= fire.y && drop.y + drop.h <= jump.y && hit.x + hit.w <= drop.x && fire.x + fire.w <= jump.x, 'HIT ▼ above FIRE JUMP');
+    assert.ok(fire.w >= 64 && fire.h >= 64 && jump.w >= 64 && jump.h >= 64, `FIRE ${fire.w}×${fire.h}, JUMP ${jump.w}×${jump.h}`);
     const at = (code) => rects.find((r) => r.code === code);
     const hold = async (code, ms, sample) => {
       await page.touchscreen.touchStart(at(code).x, at(code).y);
@@ -395,7 +404,10 @@ await withBrowser(async ({ page, url, errors }) => {
       const top = await cellsClip(page, a.x, a.y - 8, 1, 8);
       const y = Math.max(0, top.y), height = Math.floor(top.y + top.height - y);
       if (height >= 4) {
+        // The drawing only: the fight HUD and the note are DOM boxes up there.
+        await page.evaluate(() => { for (const id of ['fight', 'note']) document.getElementById(id).style.visibility = 'hidden'; });
         const { data } = await sharp(await page.screenshot({ clip: { x: 0, y, width: w, height } })).greyscale().raw().toBuffer({ resolveWithObject: true });
+        await page.evaluate(() => { for (const id of ['fight', 'note']) document.getElementById(id).style.visibility = ''; });
         const p99 = [...data].sort((m, n) => m - n)[Math.floor(data.length * 0.99)];
         assert.ok(p99 < 20, `${w}×${h}: above the ceiling is dark (p99 ${p99})`);
       }
@@ -443,6 +455,53 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.waitForFunction(() => window.__ascii.viewer.state === 'closed', { timeout: 20000 });
     assert.equal(await page.evaluate(() => window.__ascii.mode()), 'top');
     assert.ok(await page.evaluate(() => !!window.__ascii.world.focus && !window.__ascii.world.focus.backdrop), 'standing at a gallery photo');
+  });
+  await check('arena PvP: the fight HUD shows hp in the side view, and the pad has FIRE and HIT on a phone', async () => {
+    await page.goto('about:blank');
+    await page.goto(url); await ready(page);
+    assert.equal(await page.$eval('#fight', (e) => e.hidden), true, 'hidden in the gallery');
+    await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.entry.x + 0.5 - 30, a.floorY - 1.5); });
+    await page.waitForFunction(() => window.__ascii.mode() === 'side');
+    await page.waitForFunction(() => !document.getElementById('fight').hidden);
+    assert.match(await page.$eval('#fight-hp', (e) => e.textContent), /^hp █{10} 100/);
+    // Alone: the dummy, and only the hp line (no scoreboard, no feed).
+    assert.equal(await page.$eval('#fight-board', (e) => getComputedStyle(e).display), 'none', 'a scoreboard alone');
+    assert.ok(await page.evaluate(() => window.__ascii.world.bodies.some((b) => b.label === 'dummy')), 'the dummy');
+    // The HUD bar gets its dark scrim in the side view only.
+    assert.match(await page.$eval('.hud', (e) => getComputedStyle(e).backgroundImage), /gradient/);
+    await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+    await page.waitForFunction(() => document.getElementById('fight').hidden, { timeout: 3000 });
+    assert.equal(await page.$eval('.hud', (e) => getComputedStyle(e).backgroundImage), 'none', 'a scrim top-down');
+  });
+  await check('arena PvP: the first entry notes the keys; a photo, the map or a hidden tab takes me out of the fight, and coming back puts me in', async () => {
+    await page.goto('about:blank');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    const entered = () => page.evaluate(() => window.__ascii.pvp().entered);
+    await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
+    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · mouse aims');
+    // A photo.
+    await page.keyboard.press('KeyE');
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });
+    assert.equal(await entered(), false, 'in the fight with a photo open');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'closed', { timeout: 20000 });
+    await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
+    // The map.
+    await page.keyboard.press('KeyM');
+    await page.waitForFunction(() => !window.__ascii.pvp().entered, { timeout: 3000 });
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
+    // The tab hidden, then shown.
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); });
+    assert.equal(await entered(), false, 'in the fight with the tab hidden');
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange', { bubbles: true })); });
+    await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
+    // Back in on a fresh visit's second entry: no note again.
+    await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+    await page.waitForFunction(() => !window.__ascii.pvp().entered, { timeout: 3000 });
+    await page.evaluate(() => { document.getElementById('note').textContent = ''; const e = window.__ascii.map.arena.entry; window.__ascii.teleport(e.x + 0.5, e.y + 0.5); });
+    await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
+    assert.equal(await page.$eval('#note', (e) => e.textContent), '', 'the note once a visit');
   });
   // The stickman (stickman spec §8): my figure in every pose, pinned with __ascii.pose, with each renderer,
   // on a computer and on a landscape phone, over the brightest part of the arena photo.
@@ -551,6 +610,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await check(`${r}: running, the figure glides (it moves one way, mostly by fractions of a cell); top-down I'm still @`, async () => {
       await page.goto('about:blank');
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      await sleep(1500); // past the protection on entering, whose pulse dims the figure off amber
       await page.keyboard.down('ArrowLeft');
       await sleep(400);
       // Each frame, just after it's drawn: the centre of the amber pixels around me, in map cells.
@@ -600,10 +660,10 @@ await withBrowser(async ({ page, url, errors }) => {
       await sleep(2000);
       const t = await page.evaluate(() => window.__ascii.stats.times.slice());
       const sorted = [...t].sort((a, b) => a - b), avg = t.reduce((a, b) => a + b, 0) / t.length;
-      const info = await page.evaluate(() => ({ bodies: window.__ascii.world.bodies.length, glyphs: window.__ascii.world.figures.length }));
+      const info = await page.evaluate(() => ({ bodies: window.__ascii.world.bodies.filter((b) => b.label !== 'dummy').length, glyphs: window.__ascii.world.figures.length }));
       console.log(`  ${r} with 30 bots: ${info.bodies} bodies, ${info.glyphs} glyphs, ${(avg * 1000).toFixed(1)} ms a frame, p95 ${(sorted[Math.floor(sorted.length * 0.95)] * 1000).toFixed(1)} ms`);
       await page.screenshot({ path: `${SHOTS}/stick-${r}-bots30.png` });
-      assert.equal(info.bodies, 31);
+      assert.equal(info.bodies, 31); // me and the bots (the practice dummy stands there too)
     });
   }
   await check('leaving the arena and coming back within 5 s plays my fly-in again', async () => {
@@ -617,7 +677,8 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate((e) => window.__ascii.teleport(e.x + 0.5, e.y + 0.5), entry);
     await page.waitForFunction(() => window.__ascii.mode() === 'side' && window.__ascii.world.figures.some((g) => g.bold), { timeout: 3000 });
     assert.ok(await page.evaluate(() => window.__ascii.world.figures.some((g) => g.bold && g.a < 1)), 'flying in');
-    await sleep(700);
+    // Past the fly-in (0.45 s) and the 1.5 s of protection on entering, whose pulse dims the figure too.
+    await sleep(1800);
     assert.ok(await page.evaluate(() => window.__ascii.world.figures.filter((g) => g.bold).every((g) => g.a === 1)), 'in place after 0.45 s');
   });
   await check('side view: hearts are labels over every figure, not entities under them', async () => {

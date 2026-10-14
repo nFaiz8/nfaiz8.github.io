@@ -147,7 +147,8 @@ try {
       await a.evaluate((e) => window.__ascii.teleport(e.x - 20 + 0.5, e.y + 0.5), entry);
       await b.evaluate((e) => window.__ascii.teleport(e.x - 10 + 0.5, e.y + 0.5), entry);
       assert.equal(await a.evaluate(() => window.__ascii.mode()), 'side');
-      await a.waitForFunction(() => { const a = window.__ascii.map.arena; return window.__ascii.live().peers.list(performance.now()).some((p) => p.x > a.x && p.x < a.x + a.w && p.y > a.y && p.y < a.y + a.h); }, { timeout: 5000 });
+      // Inside, B is a fighter: the arena stream replaces B's position messages.
+      await a.waitForFunction(() => (window.__ascii.world.bodies || []).some((x) => !x.me && x.label !== 'dummy'), { timeout: 5000 });
       // B is a stick figure in B's colour on A's screen, not an @, with B's name centred above the head.
       const bId = await b.evaluate(() => window.__ascii.live().peers.myId);
       const bodyOf = (id) => a.evaluate((id) => {
@@ -180,10 +181,11 @@ try {
       assert.equal(seen.chat.map((g) => g.ch).join(''), 'hifrombo', `B's chat line (body at ${seen.y.toFixed(2)}; labels ${labels})`);
       assert.ok(seen.chat[0].y < seen.name[0].y && seen.strips >= 12, 'the chat line above the name, on its strip');
       await a.screenshot({ path: `${SHOTS}/stick-multiplayer.png` });
-      const y0 = (await peersOf(a))[0].y;
+      const yOf = async () => (await bodyOf(bId)).y;
+      const y0 = await yOf();
       await b.keyboard.down('Space'); await sleep(400); await b.keyboard.up('Space');
       let top = y0;
-      for (let i = 0; i < 15; i++) { top = Math.min(top, (await peersOf(a))[0].y); await sleep(60); }
+      for (let i = 0; i < 15; i++) { top = Math.min(top, await yOf()); await sleep(60); }
       assert.ok(top < y0 - 2, `the jump is seen (${y0} → ${top})`);
       await a.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
       await sleep(300);
