@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import exifr from 'exifr';
 import { analyzePixels } from '../src/analyze.js';
 import { IMAGE, idOf, parseEdits, applyEdits } from '../src/edits.js';
+import { parsePrints, applyPrints } from '../src/prints.js';
 import { filmInfo } from '../src/film.js';
 
 const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -147,8 +148,22 @@ if (fs.existsSync(editsFile)) {
 }
 const generated = new Date().toISOString();
 fs.writeFileSync(path.join(OUT, 'raw.json'), JSON.stringify({ generated, photos }, null, 1));
-const { photos: edited, unmatched } = applyEdits(photos, edits);
+const { photos: edited0, unmatched } = applyEdits(photos, edits);
 for (const id of unmatched) console.warn(`photos: edits.json has an entry for "${id}" but no such photo`);
+
+// photos/prints.json maps photo ids to their Darkroom product numbers, for the viewer's "buy print" link.
+let prints = {};
+const printsFile = path.join(SRC, 'prints.json');
+if (fs.existsSync(printsFile)) {
+  try {
+    prints = parsePrints(fs.readFileSync(printsFile, 'utf8'));
+  } catch (e) {
+    console.error(`photos: photos/prints.json is not valid (${e.message})`);
+    process.exit(1);
+  }
+}
+const { photos: edited, unmatched: unsold } = applyPrints(edited0, prints);
+for (const id of unsold) console.warn(`photos: prints.json has an entry for "${id}" but no such photo`);
 edited.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || a.id.localeCompare(b.id));
 fs.writeFileSync(path.join(OUT, 'photos.json'), JSON.stringify({ generated, photos: edited }, null, 1));
 const bw = edited.filter((p) => p.analysis && p.analysis.score < 0.12).length;

@@ -103,12 +103,18 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
   const infoBtn = btn('[I] info', null, 'Show photo details');
   const altBtn = btn('alt edit', null, 'Show the alternate edit');
   const copyBtn = btn('copy link', null, 'Copy a link to this photo');
+  // A print of this photo for sale on Darkroom (photos/prints.json), when there is one.
+  const buyBtn = el('a', 'vbtn vbuy', 'buy print');
+  buyBtn.target = '_blank';
+  buyBtn.rel = 'noopener';
+  buyBtn.title = 'Buy a print of this photo';
+  buyBtn.setAttribute('aria-label', 'Buy a print of this photo (opens Darkroom)');
   const closeBtn = btn('[esc] ×', null, 'Close');
   // An optional extra action for some photos (the arena's photo: go there).
   const extraBtn = extra ? btn(extra.label, extra.key, extra.aria) : null;
   if (extraBtn) extraBtn.addEventListener('click', () => extra.onClick(cur));
   const tools = el('div', 'viewer-tools');
-  tools.append(prevBtn, nextBtn, infoBtn, altBtn, copyBtn, ...(extraBtn ? [extraBtn] : []), closeBtn);
+  tools.append(prevBtn, nextBtn, infoBtn, altBtn, copyBtn, buyBtn, ...(extraBtn ? [extraBtn] : []), closeBtn);
   bar1.append(title, tools);
   root.append(stageEl, err, info, bar1);
   document.body.append(overlay, progress, flip, root);
@@ -193,6 +199,9 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
     altBtn.textContent = photo !== cur.photo ? 'original' : 'alt edit';
     img.alt = describe(photo);
     if (extraBtn) extraBtn.hidden = !extra.show(cur);
+    const print = photo.print || cur.photo.print;
+    buyBtn.hidden = !print;
+    if (print) buyBtn.href = print;
     renderInfo();
   }
 

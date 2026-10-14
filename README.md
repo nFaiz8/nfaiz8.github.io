@@ -22,6 +22,14 @@ images in → **Commit changes**. The site updates a few minutes later (watch th
 - The published copies carry no metadata, so no GPS location ever reaches the site. Photos have
   no titles; opening one shows its camera, lens, aperture, shutter, ISO and date.
 
+## Prints
+
+Opening a photo (from a wall or the grid) shows a **buy print** button when that photo is for sale on
+[Darkroom](https://faiz.darkroom.com). `photos/prints.json` maps each photo id (its file name in lower
+case, as in `edits.json`) to its Darkroom product number, the number at the end of
+`faiz.darkroom.com/products/…`. Add a line there when you list a new print; a photo with no line has no
+button. The build warns about lines whose photo no longer exists.
+
 ## Editing from any browser
 
 Open **faiz.pics/edit/** (it is not linked from the gallery). The first time on a device, it asks for

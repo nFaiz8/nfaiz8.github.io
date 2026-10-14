@@ -83,7 +83,7 @@ body { font: 13px/1.4 var(--mono); }
   background: var(--bg); }
 .viewer-title { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 6px; }
-.vbtn { font: inherit; color: var(--mute); background: none; border: 1px solid var(--line); padding: 4px 10px; cursor: pointer; }
+.vbtn { font: inherit; color: var(--mute); background: none; border: 1px solid var(--line); padding: 4px 10px; cursor: pointer; text-decoration: none; }
 .vbtn:hover, .vbtn:focus-visible { color: var(--ink); border-color: var(--mute); outline: none; }
 .vbtn:disabled { opacity: 0.35; cursor: default; }
 .vbtn[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
