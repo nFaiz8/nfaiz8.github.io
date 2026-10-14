@@ -51,3 +51,141 @@ test('parseLevel: ═ is a platform, ▓ is solid, anything else is air, and sho
   assert.deepEqual([...L.cells.slice(0, 4)], [PLATFORM, SOLID, AIR, AIR]);
   assert.equal(L.cells[49 * 240 + 239], AIR);
 });
+
+import { newBody, stepBody, sideCamera, coverCrop } from '../src/arena.js';
+
+// A small test room, 40 × 20: floor below row 19, walls left and right, a platform at row 15 (cols 10–19, 5 rows up),
+// a solid block at rows 16–19 (cols 30–33) and a low ▓ ceiling at row 15 (cols 0–5).
+const kindAt = (c, r) => {
+  if (c < 0 || c >= 40 || r >= 20) return SOLID;
+  if (r < 0) return AIR;
+  if (r === 15 && c >= 10 && c <= 19) return PLATFORM;
+  if (r >= 16 && c >= 30 && c <= 33) return SOLID;
+  if (r === 15 && c <= 5) return SOLID;
+  return AIR;
+};
+const IDLE = { x: 0, run: false, jump: false, down: false };
+const sim = (b, seconds, input = IDLE, dt = 1 / 60, each = () => {}) => {
+  for (let t = 0; t < seconds - 1e-9; t += dt) { stepBody(b, dt, typeof input === 'function' ? input(t) : input, kindAt); each(b, t); }
+};
+
+test('falling lands on the floor', () => {
+  const b = newBody(7.5, 3.5);
+  sim(b, 2);
+  assert.equal(b.y, 19.5);
+  assert.equal(b.onGround, true);
+});
+
+test('a full jump rises about 6 rows and is about 0.6 s in the air', () => {
+  const b = newBody(7.5, 19.5);
+  sim(b, 0.2);
+  let top = b.y, air = 0;
+  sim(b, 1.2, { ...IDLE, jump: true }, 1 / 60, (s) => { top = Math.min(top, s.y); if (!s.onGround) air += 1 / 60; });
+  assert.ok(Math.abs(19.5 - top - 6) <= 0.5, `rose ${19.5 - top}`);
+  assert.ok(Math.abs(air - 0.6) <= 0.06, `air ${air}`);
+});
+
+test('letting go of jump early makes a short hop', () => {
+  const b = newBody(7.5, 19.5);
+  sim(b, 0.2);
+  let top = b.y;
+  sim(b, 1, (t) => ({ ...IDLE, jump: t < 0.03 }), 1 / 60, (s) => { top = Math.min(top, s.y); });
+  assert.ok(19.5 - top < 4, `rose ${19.5 - top}`);
+});
+
+test('you jump up through ═, stand on it, and ↓ drops you back through', () => {
+  const b = newBody(14.5, 19.5);
+  sim(b, 0.2);
+  sim(b, 1.5, (t) => ({ ...IDLE, jump: t < 0.5 }));
+  assert.equal(b.y, 14.5, 'standing on the platform');
+  assert.equal(b.onPlatform, true);
+  sim(b, 0.05, { ...IDLE, down: true });
+  sim(b, 1);
+  assert.equal(b.y, 19.5, 'back on the floor');
+});
+
+test('▓ blocks from the side, from above and from below; ↓ on ▓ does nothing', () => {
+  const b = newBody(25.5, 19.5);
+  sim(b, 2, { ...IDLE, x: 1, run: true });
+  assert.ok(b.x <= 30 - 0.3 + 1e-9 && b.x > 29, `stopped at the block (${b.x})`);
+  const top = newBody(31.5, 5.5);
+  sim(top, 2);
+  assert.equal(top.y, 15.5, 'lands on top');
+  sim(top, 0.5, { ...IDLE, down: true });
+  assert.equal(top.y, 15.5, 'no dropping through ▓');
+  const under = newBody(3.5, 19.5);
+  sim(under, 0.2);
+  let high = under.y;
+  sim(under, 1, { ...IDLE, jump: true }, 1 / 60, (s) => { high = Math.min(high, s.y); });
+  assert.equal(high, 16.5, 'head stops under the ceiling');
+});
+
+test('nothing tunnels at 20 fps', () => {
+  const b = newBody(14.5, 0.5);
+  sim(b, 3, IDLE, 1 / 20);
+  assert.equal(b.y, 14.5, 'a long fall still lands on a one-row platform');
+  const r = newBody(20.5, 19.5);
+  sim(r, 3, { ...IDLE, x: 1, run: true }, 1 / 20);
+  assert.ok(r.x < 30, 'sprinting at 20 fps still stops at the block');
+});
+
+test('coyote time: a jump just after running off a ledge still works, a late one does not', () => {
+  const offEdge = (lateFrames) => {
+    const b = newBody(17.5, 14.5);
+    sim(b, 0.1);
+    let left = -1, frame = 0, jumped = false, landed = false;
+    sim(b, 1, () => ({ ...IDLE, x: 1, jump: left >= 0 && frame - left >= lateFrames }), 1 / 60, (s) => {
+      frame++;
+      if (left < 0 && !s.onGround) left = frame;
+      if (left >= 0 && s.onGround) landed = true; // a press held into the landing is the jump buffer's, not coyote time's
+      if (!landed && s.vy < -20) jumped = true;
+    });
+    return jumped;
+  };
+  assert.equal(offEdge(3), true, '0.05 s late');
+  assert.equal(offEdge(10), false, '0.17 s late');
+});
+
+test('jump buffer: pressing just before landing jumps on landing; too early does nothing', () => {
+  const land = () => { const b = newBody(7.5, 9.5); let f = 0; while (!b.onGround) { stepBody(b, 1 / 60, IDLE, kindAt); f++; } return f; };
+  const L = land();
+  const pressAt = (early) => {
+    const b = newBody(7.5, 9.5);
+    let f = 0, top = 99;
+    sim(b, 1.5, () => ({ ...IDLE, jump: f >= L - early && f < L + 1 }), 1 / 60, (s) => { f++; if (f > L) top = Math.min(top, s.y); });
+    return 19.5 - top;
+  };
+  assert.ok(pressAt(4) > 1, 'buffered jump fired');
+  assert.ok(pressAt(12) < 0.01, 'a press 0.2 s early is forgotten');
+});
+
+test('a held jump never fires again by itself, and entering with jump held does not jump', () => {
+  const b = newBody(7.5, 19.5);
+  b.prevJump = true; // as on arrival through the door with W held
+  let top = 19.5;
+  sim(b, 1, { ...IDLE, jump: true }, 1 / 60, (s) => { top = Math.min(top, s.y); });
+  assert.equal(top, 19.5);
+});
+
+test('the side camera leads, clamps to the room, and keeps the floor in view', () => {
+  const a = { x: 100, y: 10, w: 242, h: 52 };
+  const view = { cols: 150, rows: 32 };
+  const floor = { x: 200, y: a.y + a.h - 1.5 };
+  const c = sideCamera(a, view, floor, 8);
+  assert.equal(c.x, 208);
+  assert.equal(c.y + view.rows / 2, a.y + a.h, 'floor wall is the bottom row');
+  const left = sideCamera(a, view, { x: a.x + 2, y: floor.y });
+  assert.equal(left.x - view.cols / 2, a.x, 'clamped at the west wall');
+  const high = sideCamera(a, view, { x: 200, y: a.y + 3 });
+  assert.equal(high.y - view.rows / 2, a.y, 'clamped at the ceiling');
+  const tall = sideCamera(a, { cols: 150, rows: 60 }, floor);
+  assert.equal(tall.y, a.y + a.h / 2, 'a tall view shows the whole room, centred');
+});
+
+test('coverCrop keeps the middle of the image at the room shape (cells are twice as tall as wide)', () => {
+  assert.deepEqual(coverCrop(2400, 500, 240, 50), { sx: 600, sy: 0, sw: 1200, sh: 500 });
+  const wide = coverCrop(5066, 2075, 240, 50);
+  assert.ok(Math.abs(wide.sw / wide.sh - 2.4) < 1e-9 && wide.sy === 0 && Math.abs(wide.sx - (5066 - wide.sw) / 2) < 1e-9);
+  const tall = coverCrop(1000, 1000, 240, 50);
+  assert.ok(Math.abs(tall.sw / tall.sh - 2.4) < 1e-9 && tall.sx === 0 && tall.sy > 0);
+});
