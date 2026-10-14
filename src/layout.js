@@ -247,19 +247,27 @@ export function buildLayout(data, site) {
   wrap(site.about || '', Math.min(56, lobby.w - 10)).forEach((line, k) =>
     labels.push({ x: lobby.x + Math.floor((lobby.w - line.length) / 2), y: nameY + 9 + k, text: line, role: 'about' }));
 
-  // A kiosk in the lobby's south-west corner opens every photo as a grid.
-  const kText = '[ view all photos ]';
-  const kiosk = { x: lobby.x + 5, y: lobby.y + lobby.h - 6, w: kText.length + 4, h: 3 };
+  // An information desk under the name, with an attendant behind it: it opens every photo as a grid.
+  const lobbyText = labels.filter((l) => ['name', 'tagline', 'about'].includes(l.role));
+  const top = Math.max(...lobbyText.map((l) => l.y)) + 2;
+  const kText = 'view all photos';
+  const kw = kText.length + 8;
+  const kiosk = { x: lobby.x + Math.round((lobby.w - kw) / 2), y: top + 2, w: kw, h: 3 };
   kiosk.stand = { x: kiosk.x + Math.floor(kiosk.w / 2), y: kiosk.y + kiosk.h };
-  const kRows = ['┌' + '─'.repeat(kiosk.w - 2) + '┐', '│' + ' '.repeat(kiosk.w - 2) + '│', '└' + '─'.repeat(kiosk.w - 2) + '┘'];
+  kiosk.attendant = { x: kiosk.stand.x, y: kiosk.y - 1 };
+  const kRows = ['╔' + '═'.repeat(kw - 2) + '╗', '║' + ' '.repeat(kw - 2) + '║', '╚' + '═'.repeat(kw - 2) + '╝'];
   kRows.forEach((line, dy) => [...line].forEach((ch, dx) => {
     const i = at(kiosk.x + dx, kiosk.y + dy);
     tiles[i] = T.PROP;
     if (ch !== ' ') glyphs.set(i, { ch, role: 'prop' });
   }));
-  labels.push({ x: kiosk.x + 2, y: kiosk.y + 1, text: kText, role: 'kiosk' });
+  tiles[at(kiosk.attendant.x, kiosk.attendant.y)] = T.PROP;
+  labels.push({ x: kiosk.x + 4, y: kiosk.y + 1, text: kText, role: 'kiosk' });
+  const sign = '· information ·';
+  labels.push({ x: kiosk.x + Math.round((kw - sign.length) / 2), y: top, text: sign, role: 'sign' });
 
-  const spawn = { x: lobby.x + cx + 0.5, y: lobby.y + lobby.h - 6 + 0.5 };
+  // You start just below the desk, facing it.
+  const spawn = { x: lobby.x + cx + 0.5, y: Math.min(lobby.y + lobby.h - 3, Math.max(lobby.y + lobby.h - 6, kiosk.stand.y + 3)) + 0.5 };
   return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk };
 }
 

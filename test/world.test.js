@@ -138,7 +138,8 @@ test('standing at the lobby kiosk is noticed; walking away is too', () => {
   teleport(w, map.kiosk.stand.x + 0.5, map.kiosk.stand.y + 0.5);
   step(w, 1 / 60, { x: 0, y: 0 });
   assert.equal(w.atKiosk, true);
-  teleport(w, map.spawn.x, map.spawn.y);
+  const away = map.rooms.find((r) => r.entry).entry;
+  teleport(w, away.x + 0.5, away.y + 0.5);
   step(w, 1 / 60, { x: 0, y: 0 });
   assert.equal(w.atKiosk, false);
 });

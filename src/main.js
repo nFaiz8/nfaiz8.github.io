@@ -86,7 +86,7 @@ function updateCaption() {
   if (f === lastFocus) return;
   lastFocus = f;
   if (f) {
-    captionEl.replaceChildren(f === 'kiosk' ? 'every photo, by colour' : captionText(f.photo));
+    captionEl.replaceChildren(f === 'kiosk' ? 'information · every photo, by colour' : captionText(f.photo));
     const k = document.createElement('span');
     k.className = 'key';
     k.textContent = '[E] open';
@@ -184,6 +184,10 @@ function loop(now) {
   last = now;
   step(world, dt, viewer.isOpen || mapView.isOpen || grid.isOpen ? NO_INPUT : input.state());
   world.people = [];
+  const att = map.kiosk.attendant;
+  world.people.push({ x: att.x + 0.5, y: att.y + 0.5, glyph: '☺', color: [240, 204, 140] });
+  // The attendant looks up when you come to the desk.
+  if (world.atKiosk) world.people.push({ x: att.x + 1.5, y: att.y + 0.5, glyph: '!', color: [240, 204, 140] });
   for (const v of world.visitors) {
     world.people.push({ x: v.x, y: v.y, glyph: v.glyph, color: v.color });
     if (v.looking && v.wait > 0) world.people.push({ x: v.x, y: v.y - 1, glyph: '·', color: v.color });

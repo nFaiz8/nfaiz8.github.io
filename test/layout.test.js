@@ -72,6 +72,15 @@ test('the lobby has an "all photos" kiosk you can walk up to', () => {
   const sx = Math.floor(map.spawn.x), sy = Math.floor(map.spawn.y);
   assert.ok(isWalkable(map, sx, sy), 'spawn still free');
   assert.ok(findPath(map.W, map.H, (x, y) => isWalkable(map, x, y), sx, sy, k.stand.x, k.stand.y), 'reachable');
+  // An information desk centred under the name, with an attendant behind it, above where you start.
+  const name = map.labels.filter((l) => l.role === 'name');
+  const nameBottom = Math.max(...name.map((l) => l.y));
+  assert.ok(k.y > nameBottom, 'below the name');
+  assert.ok(Math.abs(k.x + k.w / 2 - (lobby.x + lobby.w / 2)) <= 1, 'centred');
+  assert.ok(k.stand.y < Math.floor(map.spawn.y), 'you start below the desk');
+  assert.equal(k.attendant.y, k.y - 1, 'attendant stands behind the desk');
+  assert.equal(map.tiles[k.attendant.y * map.W + k.attendant.x], T.PROP, 'nobody walks through the attendant');
+  assert.ok(map.labels.some((l) => /information/.test(l.text) && l.y < k.y + k.h && l.y >= k.attendant.y - 1), 'a sign says information');
   for (const l of map.labels.filter((l) => l.role === 'about' || l.role === 'name' || l.role === 'tagline'))
     assert.ok(l.y < k.y || l.y >= k.y + k.h || l.x + l.text.length <= k.x || l.x >= k.x + k.w, `doesn't cover "${l.text}"`);
 });
