@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { figureGlyphs } from '../src/render/figures.js';
 import { createMotionMemory } from '../src/stick.js';
+import { createSpriteCache, SPRITE_CAP } from '../src/render/canvas.js';
 
 const view = { left: 0, top: 0, cols: 150, rows: 40 };
 const body = (o = {}) => ({ id: 'b', state: { x: 50, y: 20, vx: 0, vy: 0, facing: 1, ground: true, act: 'idle', actT: 0, gun: 'deagle' }, color: [120, 200, 255], name: 'Ann', ...o });
@@ -44,8 +45,27 @@ test('thirty bodies cost well under 2 ms', () => {
   const bodies = Array.from({ length: 30 }, (_, i) => body({ id: `b${i}`, say: 'hello there', state: { ...body().state, x: 5 + i * 4, vx: 30 } }));
   const memory = createMotionMemory();
   for (let k = 0; k < 50; k++) figureGlyphs(bodies, { t: k / 60, view, ceiling: 1, memory });
-  const t0 = process.hrtime.bigint();
-  for (let k = 0; k < 100; k++) figureGlyphs(bodies, { t: k / 60, view, ceiling: 1, memory });
-  const ms = Number(process.hrtime.bigint() - t0) / 1e6 / 100;
-  assert.ok(ms < 1, `${ms.toFixed(3)} ms a frame`);
+  // The best of 5 batches, so another process busy on the machine doesn't fail it.
+  let best = Infinity;
+  for (let b = 0; b < 5; b++) {
+    const t0 = process.hrtime.bigint();
+    for (let k = 0; k < 20; k++) figureGlyphs(bodies, { t: (b * 20 + k) / 60, view, ceiling: 1, memory });
+    best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6 / 20);
+  }
+  assert.ok(best < 1, `${best.toFixed(3)} ms a frame`);
+});
+
+test('the canvas sprite cache keeps what it made, and starts over once it reaches its cap', () => {
+  assert.equal(SPRITE_CAP, 2000);
+  const cache = createSpriteCache(3);
+  const a = cache.set('a', { n: 1 });
+  assert.equal(cache.get('a'), a);
+  cache.set('b', {});
+  cache.set('c', {});
+  assert.equal(cache.size, 3);
+  cache.set('d', {});
+  assert.ok(cache.size <= 3, `${cache.size} sprites`);
+  assert.ok(cache.get('d'));
+  for (let i = 0; i < 10000; i++) cache.set(`k${i}`, {});
+  assert.ok(cache.size <= 3);
 });

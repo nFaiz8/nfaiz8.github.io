@@ -606,6 +606,28 @@ await withBrowser(async ({ page, url, errors }) => {
       assert.equal(info.bodies, 31);
     });
   }
+  await check('leaving the arena and coming back within 5 s plays my fly-in again', async () => {
+    await page.goto('about:blank');
+    await page.goto(`${url}?r=canvas#/room/arena`); await ready(page);
+    await sleep(1000);
+    const entry = await page.evaluate(() => window.__ascii.map.arena.entry);
+    await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+    await page.waitForFunction(() => window.__ascii.mode() === 'top', { timeout: 3000 });
+    await sleep(500);
+    await page.evaluate((e) => window.__ascii.teleport(e.x + 0.5, e.y + 0.5), entry);
+    await page.waitForFunction(() => window.__ascii.mode() === 'side' && window.__ascii.world.figures.some((g) => g.bold), { timeout: 3000 });
+    assert.ok(await page.evaluate(() => window.__ascii.world.figures.some((g) => g.bold && g.a < 1)), 'flying in');
+    await sleep(700);
+    assert.ok(await page.evaluate(() => window.__ascii.world.figures.filter((g) => g.bold).every((g) => g.a === 1)), 'in place after 0.45 s');
+  });
+  await check('side view: hearts are labels over every figure, not entities under them', async () => {
+    await page.goto('about:blank');
+    await page.goto(`${url}?r=gl&bots=30#/room/arena`); await ready(page);
+    await sleep(500);
+    const h = await page.evaluate(() => { const w = window.__ascii.world; return { first: w.figures.findIndex((g) => g.ch === '♥' && !g.bold), lastFig: w.figures.map((g) => g.bold).lastIndexOf(true), entities: w.entities.filter((e) => e.glyph === '♥').length }; });
+    assert.ok(h.first > h.lastFig, `hearts after the figures (${h.first} vs ${h.lastFig})`);
+    assert.equal(h.entities, 0, 'hearts still in world.entities');
+  });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

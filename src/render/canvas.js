@@ -10,6 +10,23 @@ import { coverCrop, nearArena, blockGlyph } from '../arena.js';
 
 const CW = 48, CH = 24; // chunk size in cells
 
+// The figure layer's sprites are keyed by colour, so a long visit sees many. Past the cap the cache starts
+// over (30 people need well under 2,000: about 25 figure glyphs per colour plus the shared label colours).
+export const SPRITE_CAP = 2000;
+export function createSpriteCache(cap = SPRITE_CAP) {
+  const map = new Map();
+  return {
+    get: (key) => map.get(key),
+    set(key, value) {
+      if (map.size >= cap) map.clear();
+      map.set(key, value);
+      return value;
+    },
+    clear: () => map.clear(),
+    get size() { return map.size; },
+  };
+}
+
 export function createCanvasRenderer() {
   let canvas, ctx, m, dpr = 1, viewW = 0, viewH = 0, map, darkRoomIndex = -1, tints = [];
   const chunks = new Map();
@@ -18,7 +35,7 @@ export function createCanvasRenderer() {
   const onLoad = new Set();
   let lightCv = null, glowCv = null;
   let bakedMode = null; // chunks are baked for one view: the arena's inside differs top-down and side-on
-  const sprites = new Map(); // the figure layer's glyphs: 'ch|r,g,b|bold' → a small canvas, outline baked in
+  const sprites = createSpriteCache(); // the figure layer's glyphs: 'ch|r,g,b|bold' → a small canvas, outline baked in
 
   function init(el, theMap) {
     canvas = el;
@@ -306,8 +323,7 @@ export function createCanvasRenderer() {
     c.strokeText(glyph, x, y);
     c.fillStyle = rgb(...color);
     c.fillText(glyph, x, y);
-    sprites.set(key, cv);
-    return cv;
+    return sprites.set(key, cv);
   }
 
   function drawFigures(list, left, top) {

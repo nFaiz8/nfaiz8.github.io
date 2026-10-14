@@ -237,6 +237,7 @@ function loop(now) {
   world.lighting = world.mode === 'side' ? lightingSide : lightingTop;
   if (world.mode !== lastMode) {
     lastMode = world.mode;
+    if (world.mode === 'side') meEntry++; // a fresh motion-memory entry: my fly-in plays on every entry
     if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
   }
   const showPad = touch && world.mode === 'side' && !viewer.isOpen && !grid.isOpen && !mapView.isOpen;
@@ -259,6 +260,8 @@ function loop(now) {
   // In the arena's side view people are stick figures (world.bodies → world.figures); top-down they are @.
   const side = world.mode === 'side' && !!map.arena;
   const bodies = [];
+  // Hearts: top-down they're entities; in the side view they're labels, drawn over every figure.
+  const hearts = side ? [] : world.entities;
   if (live) {
     const now = performance.now();
     live.tick(world.player);
@@ -280,18 +283,25 @@ function loop(now) {
     const posOf = (id) => list.find((p) => p.id === id) || null;
     if (side) for (const p of shown) bodies.push(peerBody(p));
     else world.entities.push(...peerEntities(shown, { reducedMotion, muted }));
-    world.entities.push(...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion, posOf }));
+    hearts.push(...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion, posOf }));
   }
   if (side) {
     const now = performance.now();
-    for (let i = 0; i < botCount; i++) bodies.push(botBody(i, now / 1000));
+    for (let i = 0; i < botCount; i++) {
+      const b = botBody(i, now / 1000);
+      bodies.push(b);
+      // Every fourth bot hearts the arena photo, a heart every 2 s.
+      if (i % 4 === 3 && map.arena.backdrop) hearts.push(...heartEntities([{ f: map.arena.backdrop.id, id: b.id, age: ((now / 1000 + i * 0.37) % 2) / 2 }], map.frames, { reducedMotion, posOf: () => b.state }));
+    }
     bodies.push(myBody(now));
-    mine.hearts = mine.hearts.filter((h) => now - h.at < MY_HEART_MS);
-    const hearts = mine.hearts.map((h) => ({ f: h.f, id: 'me', age: (now - h.at) / MY_HEART_MS }));
-    world.entities.push(...heartEntities(hearts, map.frames, { reducedMotion, posOf: () => world.player }));
+    pruneHearts(now);
+    const my = mine.hearts.map((h) => ({ f: h.f, id: 'me', age: (now - h.at) / MY_HEART_MS }));
+    hearts.push(...heartEntities(my, map.frames, { reducedMotion, posOf: () => world.player }));
     const m = renderer.metrics, cols = innerWidth / m.cw, rows = innerHeight / m.ch;
     world.figures = figureGlyphs(bodies, { t: now / 1000, reducedMotion, phone: touch, memory,
       view: { left: world.cam.x - cols / 2, top: world.cam.y - rows / 2, cols, rows }, ceiling: map.arena.y + 1 });
+    // Hearts last: the label layer, over every figure (stickman spec §5 draw order), with the outline.
+    for (const h of hearts) world.figures.push({ x: h.x, y: h.y, ch: h.glyph, color: h.color, a: 1, bold: false, strip: false });
   } else {
     world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
     world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
@@ -356,6 +366,7 @@ const echo = localEcho();
 // draws them). The times are createPeers' defaults, so I see them as long as others do.
 const MY_SAY_MS = 5000, MY_EMOTE_MS = 2500, MY_HEART_MS = 2000;
 const mine = { say: null, sayAt: 0, emote: null, emoteAt: 0, hearts: [] };
+const pruneHearts = (now) => { mine.hearts = mine.hearts.filter((h) => now - h.at < MY_HEART_MS); };
 function sendEmote(kind) {
   const now = performance.now();
   if (!echo.emote(kind, now)) return;
@@ -366,17 +377,20 @@ function sendEmote(kind) {
 function sendHeart(f) {
   const now = performance.now();
   if (!f || !echo.heart(f.id, now)) return;
+  pruneHearts(now);
   mine.hearts.push({ f: f.id, at: now });
   if (live) live.heart(f.id);
 }
 
 // The side view's bodies (stickman spec §5, §6). Each has a state for stickPose; the motion memory fills in
 // landT and spawnT. __ascii.pose (localhost) pins fields of my state, landT and spawnT included.
-let posePin = null;
+let posePin = null, meEntry = 0;
 const motion = createMotionMemory();
+// My entry is keyed per visit to the side view, so leaving and coming back within the memory's 5 s still
+// plays the fly-in (stickman spec §4). Others' respawns come from their own spawnT, so they keep their id.
 const memory = {
   fill(id, s, t) {
-    motion.fill(id, s, t);
+    motion.fill(id === 'me' ? `me#${meEntry}` : id, s, t);
     if (id === 'me' && posePin) {
       if ('landT' in posePin) s.landT = posePin.landT;
       if ('spawnT' in posePin) s.spawnT = posePin.spawnT;
