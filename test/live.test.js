@@ -58,3 +58,23 @@ test('my position goes out when it changes, including a teleport while standing 
   tick({ x: 80.5, y: 30.5 }, false);
   assert.deepEqual(out.at(-1), { t: 'p', x: 80.5, y: 30.5 }, 'a teleport after stopping is sent');
 });
+
+test('a line of chat shows above the @, pushing an emote up a row; muted people say nothing', () => {
+  const p = { id: 'a', name: '', x: 10.5, y: 5.5, alpha: 1, emote: '!', emoteAge: 0, say: 'hi all' };
+  const at = (es, y) => es.filter((e) => e.y === y).sort((m, n) => m.x - n.x).map((e) => e.glyph).join('');
+  const es = peerEntities([p], { reducedMotion: true });
+  assert.equal(at(es, 4.5), 'hi all');
+  assert.equal(at(es, 3.5), '!');
+  const muted = peerEntities([p], { reducedMotion: true, muted: new Set(['a']) });
+  assert.equal(at(muted, 4.5), '!');
+});
+
+test('my own chat shows at once, at most one line every 2 s', () => {
+  const echo = localEcho();
+  assert.equal(echo.say('hello', 0), true);
+  assert.equal(echo.say('again', 1000), false);
+  const es = echo.entities({ x: 3.5, y: 3.5 }, [], 1500, { reducedMotion: true });
+  assert.equal(es.filter((e) => e.y === 2.5).map((e) => e.glyph).join(''), 'hello');
+  assert.equal(echo.entities({ x: 3.5, y: 3.5 }, [], 5200, { reducedMotion: true }).length, 0);
+  assert.equal(echo.say('later', 2000), true);
+});

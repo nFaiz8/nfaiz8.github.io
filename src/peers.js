@@ -3,7 +3,7 @@
 export const EMOTE_GLYPH = { heart: '♥', bang: '!', ask: '?', star: '★', wave: '~o/' };
 export const EMOTES_ORDER = ['heart', 'bang', 'ask', 'star', 'wave'];
 
-export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFor = 2000 } = {}) {
+export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFor = 2000, sayFor = 5000 } = {}) {
   const peers = new Map(); // id → { id, name, track: [{t,x,y}], left: number|null, emote, emoteAt, dx, dy }
   let hearts = []; // { f, at }
   const api = {
@@ -27,6 +27,7 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
         if (p.track.length > 8) p.track.shift();
       } else if (m.t === 'e') { p.emote = EMOTE_GLYPH[m.e] || null; p.emoteAt = now; }
       else if (m.t === 'n') p.name = m.name;
+      else if (m.t === 'c') { p.say = m.text; p.sayAt = now; }
       else if (m.t === 'r') hearts.push({ f: m.f, at: now });
     },
     list(now) {
@@ -36,7 +37,8 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
         const { x, y } = sample(p.track, now - delay);
         const showing = p.emote && now - p.emoteAt < emoteFor;
         out.push({ id: p.id, name: p.name, x, y, dx: p.dx, dy: p.dy, alpha: p.left == null ? 1 : 1 - (now - p.left) / fade,
-          emote: showing ? p.emote : null, emoteAge: showing ? (now - p.emoteAt) / emoteFor : 0 });
+          emote: showing ? p.emote : null, emoteAge: showing ? (now - p.emoteAt) / emoteFor : 0,
+          say: p.say && now - p.sayAt < sayFor ? p.say : null });
       }
       return out;
     },
@@ -51,7 +53,7 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
     dropAll(now) { for (const p of peers.values()) if (p.left == null) p.left = now; },
   };
   function add(p, now) {
-    peers.set(p.id, { id: p.id, name: p.name || '', track: [{ t: now, x: p.x, y: p.y }], left: null, emote: null, emoteAt: 0, dx: 0, dy: 1 });
+    peers.set(p.id, { id: p.id, name: p.name || '', track: [{ t: now, x: p.x, y: p.y }], left: null, emote: null, emoteAt: 0, say: null, sayAt: 0, dx: 0, dy: 1 });
   }
   return api;
 }

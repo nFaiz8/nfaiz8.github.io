@@ -1,9 +1,9 @@
 // One gallery instance: up to 30 people. Relays each message to everyone else as it arrives. Uses the
 // hibernation API, so all per-person state lives in the socket's attachment, never in fields or storage.
 import { DurableObject } from 'cloudflare:workers';
-import { LIMITS, cleanName, parseMessage, newBuckets, take, newFlood, dropped } from './rules.js';
+import { LIMITS, cleanName, cleanText, parseMessage, newBuckets, take, newFlood, dropped } from './rules.js';
 
-const KIND = { p: 'p', e: 'e', r: 'r', n: 'n' };
+const KIND = { p: 'p', e: 'e', r: 'r', n: 'n', c: 'c' };
 
 async function ipTag(ip) {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`faiz-live:${ip}`));
@@ -68,6 +68,10 @@ export class Gallery extends DurableObject {
       const name = cleanName(m.name);
       if (name === null) ws.send(JSON.stringify({ t: 'name-rejected' }));
       else { me.name = name; this.broadcast(ws, { t: 'n', id: me.id, name }); }
+    } else if (m.t === 'c') {
+      const text = cleanText(m.text);
+      if (text === null) ws.send(JSON.stringify({ t: 'chat-rejected' }));
+      else this.broadcast(ws, { t: 'c', id: me.id, text });
     }
     ws.serializeAttachment(me);
   }

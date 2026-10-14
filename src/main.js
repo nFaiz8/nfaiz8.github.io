@@ -1,7 +1,7 @@
 import { SITE } from './config.js';
 import { createLive, peerEntities, heartEntities, localEcho } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
-import { cleanName } from '../server/rules.js';
+import { cleanName, cleanText } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout, isWalkable } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
@@ -176,6 +176,7 @@ function onKey(e) {
   if (live && digit) { sendEmote(EMOTES_ORDER[digit[1] - 1]); return true; }
   if (live && e.code === 'KeyH') { sendHeart(world.focus); return true; }
   if (live && e.code === 'KeyN') { document.getElementById('name-btn').click(); return true; }
+  if (live && e.code === 'KeyT') { document.getElementById('chat-btn').click(); return true; }
   return false;
 }
 
@@ -244,7 +245,7 @@ function loop(now) {
         if (c) walkTo(world, c.x, c.y);
       }
     }
-    world.entities.push(...peerEntities(list, { reducedMotion }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion }));
+    world.entities.push(...peerEntities(list, { reducedMotion, muted }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion }));
   }
   world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
   world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
@@ -271,6 +272,7 @@ function loop(now) {
 
 let live = null;
 let following = null, followAt = 0;
+const muted = new Set(); // ids whose chat you've hidden, for this visit
 function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }
 function peerAtCell(cx, cy) {
   if (!live) return null;
@@ -378,6 +380,50 @@ async function boot() {
     closeName();
   });
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeName(); } });
+  // Chat: a line at the bottom to type into, and a short log of the last few lines (click a name to mute).
+  const chatBtn = document.getElementById('chat-btn'), chatForm = document.getElementById('chat-form');
+  const chatInput = document.getElementById('chat-input'), chatMsg = document.getElementById('chat-msg'), chatLog = document.getElementById('chat-log');
+  let idleTimer = 0;
+  const addLog = (id, name, text) => {
+    const line = document.createElement('div');
+    line.dataset.id = id || '';
+    const who = document.createElement(id ? 'button' : 'span');
+    who.className = 'chat-who';
+    who.textContent = id ? name || 'someone' : 'you';
+    if (id) {
+      who.type = 'button';
+      who.title = 'Hide their messages';
+      who.addEventListener('click', () => {
+        muted.add(id);
+        for (const l of [...chatLog.children]) if (l.dataset.id === id) l.remove();
+        note(`muted ${name || 'someone'}`);
+      });
+    }
+    line.append(who, text);
+    chatLog.append(line);
+    while (chatLog.children.length > 6) chatLog.firstChild.remove();
+    chatLog.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => chatLog.classList.add('idle'), 8000);
+  };
+  const closeChat = () => { if (chatForm.hidden) return; chatForm.hidden = true; stage.focus({ preventScroll: true }); };
+  chatBtn.addEventListener('click', () => {
+    if (!chatForm.hidden) return closeChat();
+    chatMsg.textContent = '';
+    chatForm.hidden = false;
+    chatInput.focus();
+  });
+  chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = cleanText(chatInput.value);
+    if (text === null) { chatMsg.textContent = chatInput.value.trim() ? 'try different words' : ''; return; }
+    if (!echo.say(text, performance.now())) { chatMsg.textContent = 'one line every 2 s'; return; }
+    if (live) live.chat(text);
+    addLog(null, '', text);
+    chatInput.value = '';
+    closeChat();
+  });
+  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeChat(); } });
   const hereEl = document.getElementById('hud-here');
   live = createLive({
     version: data.generated,
@@ -391,8 +437,10 @@ async function boot() {
       note(`${m.name || 'someone'} ${kind === 'join' ? 'joined' : 'left'}`, 2000);
     },
     onRejected: () => note('try another name'),
+    onChat: ({ id, name, text }) => { if (!muted.has(id)) addLog(id, name, text); },
+    onChatRejected: () => note('try different words'),
   });
-  if (live) { emoteBtn.hidden = false; nameBtn.hidden = false; }
+  if (live) { emoteBtn.hidden = false; nameBtn.hidden = false; chatBtn.hidden = false; }
   if (debug) debugEl.hidden = false;
 
   // A hidden list of every photo, so screen readers have a way in.
@@ -413,7 +461,7 @@ async function boot() {
 
   // Test hook for the e2e scripts.
   window.__ascii = { map, world, stats, viewer, teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
-    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, get renderer() { return renderer.name; } };
+    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; } };
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 

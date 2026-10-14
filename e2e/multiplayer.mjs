@@ -112,6 +112,30 @@ try {
       const aAt = await a.evaluate(() => ({ x: window.__ascii.world.player.x, y: window.__ascii.world.player.y }));
       assert.ok(Math.hypot(aAt.x - (target.x + 0.5), aAt.y - (target.y + 0.5)) < 3.5, `follower at ${aAt.x},${aAt.y}`);
     });
+    await check('chat: typing sends nothing else, the line reaches the other page, and muting hides that person', async () => {
+      await a.focus('#stage');
+      const before = await a.evaluate(() => [window.__ascii.world.player.x, window.__ascii.world.player.y]);
+      await a.keyboard.press('KeyT');
+      await a.waitForSelector('#chat-form:not([hidden])');
+      await a.keyboard.type('wasd 15 gmh hello');
+      await sleep(400);
+      assert.deepEqual(await a.evaluate(() => [window.__ascii.world.player.x, window.__ascii.world.player.y]), before, 'typing moved me');
+      assert.equal(await a.evaluate(() => window.__ascii.grid.isOpen), false);
+      await a.keyboard.press('Enter');
+      const aId = await a.evaluate(() => window.__ascii.live().peers.myId);
+      await b.waitForFunction((id) => window.__ascii.live().peers.list(performance.now()).find((p) => p.id === id)?.say === 'wasd 15 gmh hello', { timeout: 3000 }, aId);
+      assert.equal(await b.evaluate((id) => window.__ascii.live().peers.list(performance.now()).find((p) => p.id === id)?.emote ?? null, aId), null, 'typing sent an emote');
+      await b.waitForFunction(() => document.getElementById('chat-log').textContent.includes('wasd 15 gmh hello'), { timeout: 3000 });
+      await b.click('#chat-log .chat-who');
+      await sleep(2100);
+      await a.focus('#stage');
+      await a.keyboard.press('KeyT');
+      await a.keyboard.type('second line');
+      await a.keyboard.press('Enter');
+      await sleep(1000);
+      assert.equal(await b.evaluate(() => document.getElementById('chat-log').textContent.includes('second line')), false, 'muted line shown');
+      assert.equal(await b.evaluate(() => window.__ascii.world.entities.map((e) => e.glyph).join('').includes('secondline')), false, 'muted speech drawn');
+    });
     await check('stopping the server leaves both galleries walkable', async () => {
       dev.kill();
       await sleep(1500);

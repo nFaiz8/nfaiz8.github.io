@@ -1,5 +1,5 @@
 // Checks shared by the multiplayer Worker and its tests. Pure: no Workers or Node APIs.
-export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, floodDrops: 50, floodWindowMs: 10000 };
+export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000 };
 export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
 
 export function allowedOrigin(origin) {
@@ -22,6 +22,31 @@ export function cleanName(raw) {
   return BLOCKED.some((w) => flat.includes(w)) ? null : name;
 }
 
+// Chat is sentences, so it is checked word by word: some words are blocked wherever they appear, some
+// only at the start of a word (so "Scunthorpe" is fine), and some only as a whole word (so "cockpit" and
+// "cumulus" are fine). Letters spelled out one at a time ("f u c k", "f.u.c.k") are joined back up first.
+const ANYWHERE = ['fuck', 'shit', 'nigg', 'whore', 'slut', 'pussy', 'retard', 'hitler', 'kike', 'porn'];
+const PREFIX = ['cunt', 'nazi', 'fag'];
+const WHOLE = ['cum', 'cock', 'dick', 'spic', 'rape', 'raped', 'rapist', 'tits', 'twat', 'chink'];
+
+export function cleanText(raw) {
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (!text || text.length > LIMITS.chat || !/^[\x20-\x7E]+$/.test(text)) return null;
+  const words = [];
+  let run = '';
+  for (const token of text.toLowerCase().split(/\s+/)) {
+    const w = token.replace(/[^a-z0-9]/g, '').replace(/[0-9]/g, (d) => SWAPS[d] || d);
+    if (w.length === 1) { run += w; continue; }
+    if (run) { words.push(run); run = ''; }
+    if (w) words.push(w);
+  }
+  if (run) words.push(run);
+  const bad = (w) => ANYWHERE.some((b) => w.includes(b)) || PREFIX.some((b) => w.startsWith(b))
+    || WHOLE.some((b) => w === b || w === b + 's');
+  return words.some(bad) ? null : text;
+}
+
 const pos = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 2000;
 
 export function parseMessage(text) {
@@ -36,6 +61,7 @@ export function parseMessage(text) {
       return pos(m.x) && pos(m.y) ? { t: 'hi', name: m.name || '', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
     }
     case 'n': return typeof m.name === 'string' ? { t: 'n', name: m.name } : null;
+    case 'c': return typeof m.text === 'string' && m.text.length >= 1 && m.text.length <= LIMITS.chat ? { t: 'c', text: m.text } : null;
     case 'p': return pos(m.x) && pos(m.y) ? { t: 'p', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
     case 'e': return EMOTES.includes(m.e) ? { t: 'e', e: m.e } : null;
     case 'r': return typeof m.f === 'string' && m.f.length >= 1 && m.f.length <= 64 ? { t: 'r', f: m.f } : null;
@@ -44,13 +70,13 @@ export function parseMessage(text) {
 }
 
 // Token buckets: capacity and refill per second.
-const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2] };
+const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5] };
 export function newBuckets(now) {
   return Object.fromEntries(Object.entries(RATES).map(([k, [cap]]) => [k, { tokens: cap, at: now }]));
 }
 export function take(b, kind, now) {
   const [cap, rate] = RATES[kind];
-  const s = b[kind];
+  const s = b[kind] || (b[kind] = { tokens: cap, at: now });
   s.tokens = Math.min(cap, s.tokens + ((now - s.at) / 1000) * rate);
   s.at = now;
   if (s.tokens < 1) return false;

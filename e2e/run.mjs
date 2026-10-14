@@ -169,6 +169,13 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await page.evaluate(() => window.__ascii.world.entities.some((e) => e.glyph === '♥')), false, 'emote shown');
     assert.equal(await page.$eval('#name-form', (e) => e.hidden), true, 'name form opened');
   });
+  await check('a landscape phone sees about as much as a computer', async () => {
+    await page.setViewport({ width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true });
+    await page.goto(url); await ready(page);
+    const cells = await page.evaluate(() => ({ cols: Math.floor(innerWidth / window.__ascii.metrics().cw), rows: Math.floor(innerHeight / window.__ascii.metrics().ch) }));
+    assert.ok(cells.cols >= 120 && cells.rows >= 28, `${cells.cols}×${cells.rows}`);
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

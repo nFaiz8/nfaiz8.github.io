@@ -1,7 +1,7 @@
 // test/rules.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allowedOrigin, validVersion, cleanName, parseMessage, newBuckets, take, newFlood, dropped, EMOTES } from '../server/rules.js';
+import { allowedOrigin, validVersion, cleanName, cleanText, parseMessage, newBuckets, take, newFlood, dropped, EMOTES } from '../server/rules.js';
 
 test('only faiz.pics and localhost may connect', () => {
   assert.equal(allowedOrigin('https://faiz.pics'), true);
@@ -75,4 +75,33 @@ test('hi may carry where I am standing, so I appear in the right place before I 
   assert.deepEqual(parseMessage('{"t":"hi","name":"Sam","x":12.34,"y":5}'), { t: 'hi', name: 'Sam', x: 12.3, y: 5 });
   assert.equal(parseMessage('{"t":"hi","name":"Sam","x":-1,"y":5}'), null);
   assert.equal(parseMessage('{"t":"hi","name":"Sam","x":3}'), null, 'both or neither');
+});
+
+test('chat text: plain, at most 80 characters, and no blocked words, without tripping on innocent ones', () => {
+  assert.equal(cleanText('  nice photo! '), 'nice photo!');
+  assert.equal(cleanText(''), null);
+  assert.equal(cleanText('a'.repeat(80)), 'a'.repeat(80));
+  assert.equal(cleanText('a'.repeat(81)), null);
+  assert.equal(cleanText('hi 😀'), null, 'outside the drawable set');
+  assert.equal(cleanText('hi\nthere'), null);
+  for (const ok of ['the cockpit view', 'spicy colours', 'rapeseed field', 'cumulus clouds', 'Dickens fan', 'document this', 'Scunthorpe'])
+    assert.equal(cleanText(ok), ok, ok);
+  for (const bad of ['fuck off', 'f.u.c.k off', 'f u c k', 'what a dick', 'sh1t', 'you cum', 'nazis'])
+    assert.equal(cleanText(bad), null, bad);
+  assert.equal(cleanText(7), null);
+});
+
+test('chat messages parse, and are limited to one every 2 s', () => {
+  assert.deepEqual(parseMessage('{"t":"c","text":"hello"}'), { t: 'c', text: 'hello' });
+  for (const bad of ['{"t":"c"}', '{"t":"c","text":5}', '{"t":"c","text":""}', `{"t":"c","text":"${'a'.repeat(81)}"}`]) assert.equal(parseMessage(bad), null, bad);
+  const b = newBuckets(0);
+  assert.equal(take(b, 'c', 0), true);
+  assert.equal(take(b, 'c', 1500), false);
+  assert.equal(take(b, 'c', 2000), true);
+});
+
+test('buckets saved before chat existed still work', () => {
+  const old = newBuckets(0);
+  delete old.c;
+  assert.equal(take(old, 'c', 0), true);
 });

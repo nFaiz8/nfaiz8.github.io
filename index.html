@@ -15,12 +15,19 @@
       <span class="hud-tools">
         <span class="hud-here" id="hud-here" hidden></span>
         <button class="hud-btn" id="emote-btn" type="button" title="Emotes (1–5)" aria-expanded="false" hidden>[☺]</button>
+        <button class="hud-btn" id="chat-btn" type="button" title="Chat (T)" hidden>[T]<span class="long"> chat</span></button>
         <button class="hud-btn" id="name-btn" type="button" title="Your name (N)" aria-expanded="false" hidden>[N]<span class="long"> name</span></button>
         <button class="hud-btn" id="map-btn" type="button" title="Map (M)">[M]<span class="long"> map</span></button>
         <button class="hud-btn" id="renderer-btn" type="button" title="Switch renderer (R)"></button>
       </span>
     </header>
     <div class="emote-bar" id="emote-bar" hidden></div>
+    <form class="chat-form" id="chat-form" hidden>
+      <input id="chat-input" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Say something" placeholder="say something…" />
+      <button class="vbtn" type="submit">send</button>
+      <span class="chat-msg" id="chat-msg" role="status"></span>
+    </form>
+    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Chat"></div>
     <form class="name-form" id="name-form" hidden>
       <label for="name-input">your name</label>
       <input id="name-input" maxlength="12" autocomplete="nickname" spellcheck="false" />

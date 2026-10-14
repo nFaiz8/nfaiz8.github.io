@@ -149,3 +149,23 @@ test('where someone said hi from is where others first see them', async () => {
   assert.deepEqual([j.x, j.y], [7, 8]);
   a.close(); b.close();
 });
+
+test('chat reaches everyone else; blocked words are refused; one message every 2 s', async () => {
+  const r = room();
+  const a = client({ room: r }); await a.opened;
+  a.send2({ t: 'hi', name: 'Ann' }); await a.next('welcome');
+  const b = client({ room: r }); await b.opened;
+  b.send2({ t: 'hi', name: 'Bo' });
+  const wb = await b.next('welcome');
+  await a.next('join');
+  b.send2({ t: 'c', text: '  nice photo ' });
+  assert.deepEqual(await a.next('c'), { t: 'c', id: wb.id, text: 'nice photo' });
+  assert.equal(b.inbox.filter((m) => m.t === 'c').length, 0, 'nobody hears their own chat');
+  b.send2({ t: 'c', text: 'too soon' });
+  await new Promise((s) => setTimeout(s, 2100));
+  b.send2({ t: 'c', text: 'f u c k' });
+  await b.next('chat-rejected');
+  await new Promise((s) => setTimeout(s, 300));
+  assert.equal(a.inbox.filter((m) => m.t === 'c').length, 0, 'neither the early nor the blocked message arrived');
+  a.close(); b.close();
+});

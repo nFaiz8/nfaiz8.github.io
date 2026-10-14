@@ -18,15 +18,18 @@ export function peerColor(id) {
 
 const row = (text, cx, y, color) => [...text].map((glyph, i) => ({ x: Math.floor(cx) - Math.floor(text.length / 2) + i + 0.5, y, glyph, color }));
 
-export function peerEntities(list, { reducedMotion } = {}) {
+// muted: ids whose chat is hidden. figure: false leaves out the @ (for my own echo, drawn separately).
+export function peerEntities(list, { reducedMotion, muted, figure = true } = {}) {
   const out = [];
   for (const p of list) {
     const color = mix(peerColor(p.id), p.alpha);
-    out.push({ x: p.x, y: p.y, glyph: '@', color });
+    if (figure) out.push({ x: p.x, y: p.y, glyph: '@', color });
     if (p.name) out.push(...row(p.name, p.x, p.y + 1, mix([150, 147, 140], p.alpha)));
+    const say = p.say && !(muted && muted.has(p.id)) ? p.say : null;
+    if (say) out.push(...row(say, p.x, p.y - 1, mix([236, 232, 222], p.alpha)));
     if (p.emote) {
       const lift = reducedMotion ? 0 : -Math.min(1, p.emoteAge * 3) * 0.5;
-      out.push(...row(p.emote, p.x, p.y - 1 + lift, color));
+      out.push(...row(p.emote, p.x, p.y - (say ? 2 : 1) + lift, color));
     }
   }
   return out;
@@ -54,7 +57,7 @@ export function positionTicker(send) {
   };
 }
 
-export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onState = () => {} }) {
+export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onState = () => {} }) {
   // Local dev and tests never join the real gallery: on localhost only ?live=<ws url> connects.
   const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const target = onLocalhost ? new URLSearchParams(location.search).get('live') : url;
@@ -71,9 +74,11 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
     onMessage: (m) => {
       const now = performance.now();
       if (m.t === 'name-rejected') return onRejected();
+      if (m.t === 'chat-rejected') return onChatRejected();
       if (m.t === 'join') onAnnounce('join', m);
       if (m.t === 'leave') { const p = peers.get(m.id); if (p) onAnnounce('leave', { ...m, name: p.name, x: p.track.at(-1).x, y: p.track.at(-1).y }); }
       peers.apply(m, now);
+      if (m.t === 'c') { const p = peers.get(m.id); if (p) onChat({ id: m.id, name: p.name, text: m.text }); }
       if (m.t === 'welcome' || m.t === 'join' || m.t === 'leave') { count = peers.count(); onCount(count); }
     },
   });
@@ -89,6 +94,7 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
     tick: (player) => tick(player),
     emote: (e) => net.send({ t: 'e', e }),
     heart: (f) => net.send({ t: 'r', f }),
+    chat: (text) => net.send({ t: 'c', text }),
     setName: (n) => net.setName(n),
     get state() { return net.state; },
   };
@@ -98,12 +104,18 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
 export function localEcho() {
   const me = createPeers({ delay: 0 });
   me.apply({ t: 'welcome', id: 'me', peers: [{ id: 'me', name: '', x: 0, y: 0 }] }, 0);
-  let lastEmote = -Infinity, lastHeart = -Infinity;
+  let lastEmote = -Infinity, lastHeart = -Infinity, lastSay = -Infinity;
   return {
     emote(kind, now) {
       if (now - lastEmote < 1000) return false;
       lastEmote = now;
       me.apply({ t: 'e', id: 'me', e: kind }, now);
+      return true;
+    },
+    say(text, now) {
+      if (now - lastSay < 2000) return false;
+      lastSay = now;
+      me.apply({ t: 'c', id: 'me', text }, now);
       return true;
     },
     heart(f, now) {
@@ -115,7 +127,7 @@ export function localEcho() {
     entities(player, frames, now, opts) {
       const [p] = me.list(now);
       const out = [];
-      if (p && p.emote) out.push(...peerEntities([{ ...p, id: 'me', name: '', x: player.x, y: player.y }], opts).filter((e) => e.glyph !== '@'));
+      if (p && (p.emote || p.say)) out.push(...peerEntities([{ ...p, id: 'me', name: '', x: player.x, y: player.y }], { ...opts, figure: false }));
       out.push(...heartEntities(me.hearts(now), frames, opts));
       return out;
     },

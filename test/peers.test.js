@@ -81,3 +81,13 @@ test('with positions arriving every 200 ms, a walking peer never stands still be
     prev = x;
   }
 });
+
+test('what someone says shows for 5 s', () => {
+  const ps = createPeers();
+  ps.apply({ t: 'join', id: 'a', name: 'Ann', x: 0, y: 0 }, 0);
+  ps.apply({ t: 'c', id: 'a', text: 'hello' }, 100);
+  assert.equal(ps.list(5000)[0].say, 'hello');
+  assert.equal(ps.list(5200)[0].say, null);
+  ps.apply({ t: 'c', id: 'ghost', text: 'boo' }, 0);
+  assert.equal(ps.list(0).length, 1);
+});
