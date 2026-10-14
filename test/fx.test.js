@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseLevel, levelKind } from '../src/level.js';
 import { createFx } from '../src/fx.js';
+import { figureGlyphs } from '../src/render/figures.js';
 
 const L = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
 const fx = (o = {}) => createFx({ kindAt: levelKind(L), ...o });
@@ -71,6 +72,27 @@ test('a hit removes its bullet and shows a spark and a rising damage number', ()
   const still = fx({ reducedMotion: true });
   still.hit({ n: -1, x: 70, y: 24.5, d: 25, at: 0 });
   assert.equal(still.glyphs(0, {}).find((g) => g.ch === '2').y, still.glyphs(400, {}).find((g) => g.ch === '2').y);
+});
+
+test('a damage number never shares a row with the name label or the hp bar, from its first frame to its last', () => {
+  // A named body as figures.js draws it: where its name sits.
+  const body = { id: 'b', label: 'dummy', color: [150, 150, 150], state: { x: 50.5, y: 24.5, vx: 0, vy: 0, facing: 1, ground: true, aim: 0, act: 'idle', actT: 0, hp: 75 } };
+  const nameY = figureGlyphs([body], { t: 0 }).find((g) => !g.bold && g.ch === 'd').y;
+  for (const reducedMotion of [false, true]) {
+    for (const hs of [false, true]) {
+      const f = fx({ reducedMotion });
+      f.hit({ n: -1, x: body.state.x, y: body.state.y, d: hs ? 50 : 25, at: 0, hs });
+      const barY = f.glyphs(0, { bodies: [body] }).find((g) => g.ch === '█').y;
+      for (let ms = 0; ms < 800; ms += 20) {
+        const digits = f.glyphs(ms, {}).filter((g) => /[-0-9!]/.test(g.ch));
+        for (const g of digits) {
+          assert.ok(Math.abs(g.y - nameY) >= 1, `${ms} ms: the number at ${g.y}, the name at ${nameY} (rm ${reducedMotion}, hs ${hs})`);
+          assert.ok(Math.abs(g.y - barY) >= 1, `${ms} ms: the number at ${g.y}, the hp bar at ${barY}`);
+          assert.ok(g.y < nameY, 'above the name');
+        }
+      }
+    }
+  }
 });
 
 test('hp bars show below full health only', () => {

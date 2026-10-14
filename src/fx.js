@@ -10,6 +10,9 @@ const FLASH = [255, 255, 255]; // a headshot's number, in the figures' flash whi
 const SPARK_ART = [{ ch: '*', ang: -Math.PI / 2 }, { ch: '+', ang: Math.PI / 6 }, { ch: '·', ang: Math.PI * 5 / 6 }];
 const SPARK_TIME = 0.25, SPARK_STILL = 0.2, SPARK_REACH = 1.5, NUMBER_TIME = 0.6, HEAD_TIME = NUMBER_TIME * 1.3;
 const whiten = (c) => c.map((v) => Math.round((v + 255) / 2));
+// Rows above a body's centre: its hp bar (a row over its name, which figures.js puts 2.2 up), and its damage
+// numbers a row over the bar, rising from there, so they never share a row with the name or the bar.
+const BAR_DY = 3.2, NUMBER_DY = BAR_DY + 1;
 
 export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = false }) {
   let bullets = [];
@@ -33,8 +36,8 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     bullets = bullets.filter((b) => b.n == null || b.n !== n);
     sparks.push({ x, y, t0: at / 1000 });
     numbers.push(hs
-      ? { x, y: y - 2, text: `-${d}!`, t0: at / 1000, life: HEAD_TIME, color: FLASH }
-      : { x, y: y - 2, text: `-${d}`, t0: at / 1000, life: NUMBER_TIME, color: SPARK_COLOR });
+      ? { x, y: y - NUMBER_DY, text: `-${d}!`, t0: at / 1000, life: HEAD_TIME, color: FLASH }
+      : { x, y: y - NUMBER_DY, text: `-${d}`, t0: at / 1000, life: NUMBER_TIME, color: SPARK_COLOR });
   }
 
   function step(dt, nowMs, bodies = []) {
@@ -93,7 +96,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
       const s = o.state;
       if (!s || s.hp == null || s.hp >= MAX_HP || s.act === 'dead') continue;
       const full = Math.max(0, Math.min(5, Math.ceil(s.hp / 20)));
-      for (let i = 0; i < 5; i++) out.push({ x: s.x + i - 2, y: s.y - 3.2, ch: i < full ? '█' : '░', color: BAR_COLOR, a: 1 });
+      for (let i = 0; i < 5; i++) out.push({ x: s.x + i - 2, y: s.y - BAR_DY, ch: i < full ? '█' : '░', color: BAR_COLOR, a: 1 });
     }
     for (const p of pickups) {
       const art = GUN_ART[p.gun].glyphs;
