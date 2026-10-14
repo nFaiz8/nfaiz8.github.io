@@ -286,3 +286,32 @@ test('teleporting from the side view into the side view also settles onto the fl
   for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: -1 });
   assert.ok(x0 - w.player.x > 3, `walked ${x0 - w.player.x}`);
 });
+
+test('aimFacing overrides facing in the side view; a shake moves the camera and then settles back', () => {
+  const w = createWorld(amap);
+  teleport(w, A.entry.x - 20.5, A.floorY - 1.5);
+  w.aimFacing = 1;
+  for (let i = 0; i < 20; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: -1 });
+  assert.equal(w.player.facing, 1);
+  for (let i = 0; i < 60; i++) step(w, 1 / 60, SIDE_IDLE);
+  const cx = w.cam.x;
+  w.shake = { until: w.t + 0.15, amp: 0.4 };
+  step(w, 1 / 60, SIDE_IDLE);
+  assert.notEqual(w.cam.x, cx);
+  for (let i = 0; i < 60; i++) step(w, 1 / 60, SIDE_IDLE);
+  assert.ok(Math.abs(w.cam.x - cx) < 1e-6);
+});
+
+test('aimFacing 0 leaves facing to the running direction; Reduce Motion never shakes', () => {
+  const w = createWorld(amap);
+  teleport(w, A.entry.x - 20.5, A.floorY - 1.5);
+  w.aimFacing = 0;
+  for (let i = 0; i < 20; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: -1 });
+  assert.equal(w.player.facing, -1);
+  const r = createWorld(amap, { reducedMotion: true });
+  teleport(r, A.entry.x - 20.5, A.floorY - 1.5);
+  for (let i = 0; i < 30; i++) step(r, 1 / 60, SIDE_IDLE);
+  const cx = r.cam.x, cy = r.cam.y;
+  r.shake = { until: r.t + 0.15, amp: 0.4 };
+  for (let i = 0; i < 5; i++) { step(r, 1 / 60, SIDE_IDLE); assert.equal(r.cam.x, cx); assert.equal(r.cam.y, cy); }
+});

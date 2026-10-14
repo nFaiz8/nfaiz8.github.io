@@ -1,0 +1,397 @@
+// My own fight in the arena: controls into body input and acts, shots, strikes and rolls, the server's
+// messages, the practice dummy and offline play (a local referee), and what the HUD shows. DOM-free glue:
+// every rule comes from fight.js or the referee. Positions are map cells here and arena-local on the
+// wire; times are ms here and seconds in the rules.
+import { newBody, stepBody, knock, rolling } from './arena.js';
+import { levelKind } from './level.js';
+import {
+  MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
+  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup,
+} from './fight.js';
+import { createReferee, newFighter } from './referee.js';
+import { createFighters } from './fighters.js';
+import { createFx } from './fx.js';
+import { arenaTicker } from './live.js';
+
+const DUMMY = 'dummy';
+const DUMMY_SPOT = { x: 80.5, y: 27.5 }; // arena-local: on the yellow line at column 80
+const DUMMY_COLOR = [150, 150, 150];
+const DUMMY_BACK = 2000; // ms after the connection drops before the dummy shows
+const PK_EVERY = 500, RS_EVERY = 1000; // ms
+const SHAKE = { time: 0.15, amp: 0.4 }; // kicked or popped
+const AIM_WARN = 0.3; // s: a sniper's aim line brightens this long before its next shot is ready
+const MAX_PRESSES = 4; // strike presses handled in one frame
+const IDLE = { x: 0, y: 0, run: false, jump: false, down: false };
+const BULLETS = new Set(['d', 'r', 'n']);
+
+const num = (v) => typeof v === 'number' && Number.isFinite(v);
+const r2 = (v) => Math.round(v * 100) / 100 + 0; // + 0 turns -0 into 0
+const sec = (ms) => ms / 1000;
+
+export function createPvp({
+  world, map, level, send = () => false, rtt = () => 100, colorOf = () => [200, 200, 200], nameOf = () => '',
+  onNote = () => {}, onFeed = () => {}, reducedMotion = false, rand = Math.random, myId = () => 'me',
+}) {
+  const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
+  const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt });
+  const fx = createFx({ kindAt: levelKind(level), offset: off, reducedMotion });
+  const ref = createReferee({ level, rand }); // the dummy, offline play, and my own shot/strike bookkeeping
+  const me = newFighter(myId() || 'me', 0);
+  const dummy = { body: null, rec: null, act: null, deadAt: 0 };
+  const taken = level.pickups.map(() => -Infinity); // ms when each pickup is back
+  const shotAt = new Map(); // id -> ms of their last shot (for sniper aim lines)
+
+  let entered = false, online = false, enteredAt = 0, ticker = arenaTicker(send);
+  let act = null; // my last act: { act, at, for } in ms
+  let aim = 0, aimed = false, bits = 0, urgent = false, wasRolling = false, kills = 0;
+  let lastShot = -Infinity, lastPk = -Infinity, lastRs = -Infinity, deadAt = 0;
+  let dummyBackAt = 0, dummyUp = false;
+
+  const isMe = (id) => id != null && id === me.id;
+  const name = (id) => (isMe(id) ? 'you' : nameOf(id) || 'someone');
+  const local = (x, y) => ({ x: x - off.x, y: y - off.y });
+  const ts = (now) => Math.max(0, Math.round(now - enteredAt));
+  const pickOk = (n) => Number.isInteger(n) && n >= 0 && n < taken.length;
+  const shake = () => { if (!reducedMotion) world.shake = { until: world.t + SHAKE.time, amp: SHAKE.amp }; };
+
+  // My state for the wire and the local referee (arena-local).
+  function snap(now, facing = world.player.facing) {
+    const p = world.player, l = local(p.x, p.y);
+    return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0), a: aim, ts: ts(now) };
+  }
+
+  // ---------- the dummy ----------
+  function resetDummy(now) {
+    dummy.body = newBody(off.x + DUMMY_SPOT.x, off.y + DUMMY_SPOT.y);
+    dummy.rec = newFighter(DUMMY, sec(now));
+    ref.enter(dummy.rec, sec(now));
+    dummy.rec.safeUntil = 0; // it has nothing to get its bearings for: hittable at once
+    dummy.act = null;
+    syncDummy(now);
+  }
+  function syncDummy(now) {
+    const b = dummy.body, l = local(b.x, b.y);
+    ref.state(dummy.rec, { x: l.x, y: l.y, vx: b.vx, vy: b.vy, f: 1, g: b.onGround ? 1 : 0, i: 0, a: 0 }, sec(now));
+  }
+  // Shown in the side view whenever no real fighter is known (and not just after a dropped connection).
+  function dummyShown(now) {
+    const on = entered && fighters.ids().length === 0 && now >= dummyBackAt;
+    if (on && !dummyUp) resetDummy(now);
+    dummyUp = on;
+    return on;
+  }
+  const everyone = (now) => (dummyShown(now) ? [me, dummy.rec] : [me]);
+
+  function dummyMsg(m, now) {
+    const b = dummy.body;
+    if (m.t === 'h') {
+      // Online, local bullet numbers aren't the server's: the bullet already stopped at the dummy on screen.
+      fx.hit({ n: online ? undefined : m.n, x: b.x, y: b.y, d: m.d, at: now });
+      const stun = stunOf(m.w) || 0;
+      if (num(m.kx) && num(m.ky)) knock(b, m.kx, m.ky, stun, BULLETS.has(m.w));
+      if (dummy.rec.alive) dummy.act = { act: 'hurt', at: now, for: stun * 1000 };
+    } else if (m.t === 'k') dummy.deadAt = now; // quietly: no feed line, no kill
+    else if (m.t === 'sp') {
+      dummy.body = newBody(off.x + DUMMY_SPOT.x, off.y + DUMMY_SPOT.y);
+      dummy.rec.safeUntil = 0;
+      dummy.act = null;
+    }
+  }
+
+  // The local referee's messages: offline all of them, online only what happens to the dummy.
+  function runLocal(out, now) {
+    for (const m of out) if (!online || m.id === DUMMY) apply(m, now, true);
+    me.kills = kills; // the referee credits dummy pops; they never count
+  }
+
+  // ---------- messages ----------
+  function feed(m) {
+    if (!isMe(m.id) && !fighters.get(m.id)) return; // someone already gone: stale
+    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : `${name(m.by)} popped ${name(m.id)}`);
+  }
+
+  function mineMsg(m, now) {
+    const t = sec(now), p = world.player;
+    switch (m.t) {
+      case 'w': if (GUN_BY_CODE[m.w]) { me.gun = GUN_BY_CODE[m.w]; me.ammo = num(m.ammo) ? m.ammo : -1; } break;
+      case 's': if (num(m.n)) fx.assign(m.n); break;
+      case 'pk': if (pickOk(m.n) && num(m.at)) taken[m.n] = now + m.at; break;
+      case 'h': {
+        if (!me.alive) break;
+        fx.hit({ n: m.n, x: p.x, y: p.y, d: m.d, at: now });
+        if (num(m.hp)) me.hp = m.hp;
+        me.hurtAt = t;
+        if (m.by != null) me.hitBy = m.by;
+        const stun = stunOf(m.w) || 0;
+        if (num(m.kx) && num(m.ky)) knock(p, m.kx, m.ky, stun, BULLETS.has(m.w));
+        act = { act: 'hurt', at: now, for: stun * 1000 };
+        urgent = true;
+        if (m.w === 'k') shake();
+        break;
+      }
+      case 'k': {
+        feed(m);
+        if (m.fled || !me.alive) break;
+        Object.assign(me, { alive: false, hp: 0, deadAt: t, gun: 'deagle', ammo: -1 });
+        deadAt = now;
+        lastRs = -Infinity;
+        act = null;
+        onNote('popped by ' + (nameOf(m.by) || 'someone'));
+        shake();
+        break;
+      }
+      case 'sp': {
+        if (!num(m.x) || !num(m.y)) break;
+        const facing = p.facing;
+        Object.assign(p, newBody(off.x + m.x, off.y + m.y), { facing });
+        Object.assign(me, { alive: true, hp: MAX_HP, hurtAt: -1e9, safeUntil: t + SAFE_TIME, hitBy: null, gun: 'deagle', ammo: -1 });
+        act = null;
+        ref.state(me, snap(now), t);
+        break;
+      }
+    }
+  }
+
+  function apply(m, now, isLocal = false) {
+    if (!entered || !m || typeof m !== 'object') return;
+    if (isLocal && m.id === DUMMY) return dummyMsg(m, now);
+    if (m.t === 'aw') {
+      const you = m.you && typeof m.you === 'object' ? m.you : {};
+      if (num(you.hp)) { me.hp = you.hp; me.hurtAt = you.hp < MAX_HP ? sec(now) : -1e9; }
+      if (num(you.kills)) kills = me.kills = you.kills;
+      if (GUN_BY_CODE[you.w]) { me.gun = GUN_BY_CODE[you.w]; me.ammo = num(you.ammo) ? you.ammo : -1; }
+      if (Array.isArray(m.pk)) for (const q of m.pk) if (q && pickOk(q.n) && num(q.at)) taken[q.n] = now + q.at;
+      const list = Array.isArray(m.fighters) ? m.fighters.filter((q) => q && !isMe(q.id)) : [];
+      fighters.apply({ ...m, fighters: list }, now);
+      return;
+    }
+    if (m.t === 'k' && isMe(m.by) && num(m.kills)) kills = me.kills = m.kills;
+    if (isMe(m.id)) {
+      mineMsg(m, now);
+      if (m.t === 'k') fighters.apply(m, now); // the killer's new count
+      return;
+    }
+    const F = fighters.get(m.id);
+    switch (m.t) {
+      case 'h': if (F && F.body) fx.hit({ n: m.n, x: F.body.x + F.corr.x, y: F.body.y + F.corr.y, d: m.d, at: now }); break;
+      case 'k': feed(m); break;
+      case 'pk': if (pickOk(m.n) && num(m.at)) taken[m.n] = now + m.at; break;
+      case 's': {
+        if (!F || !num(m.x) || !num(m.y) || !num(m.a)) break;
+        // Drawn from where it is now: half my round trip after it was fired.
+        fx.shot({ id: m.id, n: m.n, x: m.x + off.x, y: m.y + off.y, angle: m.a, gun: GUN_BY_CODE[m.w] || 'deagle', color: colorOf(m.id), mine: false, at: now - rtt() / 2 });
+        shotAt.set(m.id, now);
+        break;
+      }
+    }
+    fighters.apply(m, now);
+  }
+
+  // ---------- controls ----------
+  function fire(facing, now) {
+    const gun = me.gun, t = sec(now);
+    if (now - lastShot < GUNS[gun].cooldown * 1000 - 1e-6) return;
+    const p = world.player, l = local(p.x, p.y);
+    const mz = muzzleOf(l.x, l.y, facing, aim, gun);
+    const x = r2(mz.x), y = r2(mz.y), a = r2(absAngle(facing, aim));
+    ref.state(me, snap(now, facing), t); // this frame's facing, so the muzzle check agrees
+    // The referee checks alive, not rolling and the in-flight cap, and spends a pickup gun's round.
+    const r = ref.fire(me, { x, y, a }, t, everyone(now));
+    if (!r.ok) return;
+    lastShot = now;
+    act = { act: 'shoot', at: now, for: ACT_TIME.shoot * 1000 };
+    fx.shot({ id: me.id, n: null, x: x + off.x, y: y + off.y, angle: a, gun, color: colorOf(me.id), mine: true, at: now });
+    if (online) send({ t: 'f', x, y, a, ts: ts(now) });
+    runLocal(r.out, now);
+  }
+
+  function strike(now) {
+    const t = sec(now);
+    if (!strikeReady(me, t)) return;
+    const { kind } = nextStrike(me, t, !world.player.onGround);
+    const k = STRIKES[kind].code;
+    ref.state(me, snap(now), t);
+    const r = ref.strike(me, { k }, t, everyone(now));
+    if (!r.ok) return;
+    act = { act: kind, at: now, for: ACT_TIME[kind] * 1000 };
+    if (online) send({ t: 'm', k, ts: ts(now) });
+    runLocal(r.out, now);
+  }
+
+  function control(inp, now) {
+    const p = world.player;
+    if (!entered || !me.alive) { world.aimFacing = 0; aimed = false; bits = 0; return { ...IDLE }; }
+    let facing = p.facing < 0 ? -1 : 1;
+    const mouse = inp.mouse && inp.mouse.on && num(inp.mouse.x) && num(inp.mouse.y) ? inp.mouse : null;
+    if (mouse) {
+      const s = shoulderOf(p.x, p.y, facing);
+      const r = pointAim(s.x, s.y, mouse.x, mouse.y, facing);
+      facing = r.facing;
+      aim = r.aim;
+      world.aimFacing = facing;
+    } else {
+      aim = keyAim(!!inp.aimUp, !!inp.aimDown);
+      world.aimFacing = 0;
+    }
+    aimed = !!mouse || !!inp.aimUp || !!inp.aimDown;
+    const x = num(inp.x) ? inp.x : 0;
+    bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (inp.down ? 8 : 0) | (inp.run ? 16 : 0);
+    if (!rolling(p)) { // a roll drops shots and strikes for its length
+      if (inp.fire) fire(facing, now);
+      const n = Math.min(MAX_PRESSES, Math.max(0, inp.strikes | 0));
+      for (let k = 0; k < n; k++) strike(now);
+    }
+    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down: !!inp.down, roll: inp.roll || 0 };
+  }
+
+  // ---------- the frame ----------
+  function frame(dt, now) {
+    if (!entered) return;
+    const t = sec(now), p = world.player;
+    const roll = rolling(p);
+    if (roll && !wasRolling) urgent = true;
+    wasRolling = roll;
+    ref.state(me, snap(now), t);
+    fighters.step(dt, now);
+    const on = dummyShown(now);
+    if (on && dt > 0) {
+      stepBody(dummy.body, dt, IDLE, world.kindAt, { inside: world.inside });
+      syncDummy(now);
+    }
+    runLocal(ref.tick(t, everyone(now)), now);
+    fx.step(dt, now, bodies(now));
+    if (online && me.alive) { ticker(snap(now), now, urgent); urgent = false; }
+    if (me.alive) {
+      const l = local(p.x, p.y);
+      for (const q of level.pickups) {
+        if (now < taken[q.n] || !nearPickup(l.x, l.y, q)) continue;
+        if (!online) runLocal(ref.pickup(me, q.n, t).out, now);
+        else if (now - lastPk >= PK_EVERY) { send({ t: 'pk', n: q.n }); lastPk = now; }
+      }
+    } else if (now - deadAt >= RESPAWN_TIME * 1000) {
+      if (!online) runLocal(ref.respawn(me, t, everyone(now)).out, now);
+      else if (now - lastRs >= RS_EVERY) { send({ t: 'rs' }); lastRs = now; }
+    }
+    if (on && !dummy.rec.alive && now - dummy.deadAt >= RESPAWN_TIME * 1000) runLocal(ref.respawn(dummy.rec, t, everyone(now), DUMMY_SPOT).out, now);
+  }
+
+  // ---------- what to draw ----------
+  function actNow(a, now, alive, diedAt, body) {
+    if (!alive) return { act: 'dead', actT: (now - diedAt) / 1000 };
+    if (rolling(body)) return { act: 'roll', actT: body.rollT };
+    if (a && now - a.at <= a.for) return { act: a.act, actT: (now - a.at) / 1000 };
+    return { act: 'idle', actT: 0 };
+  }
+
+  function bodies(now) {
+    if (!entered) return [];
+    const t = sec(now), p = world.player, out = [];
+    const a = actNow(act, now, me.alive, deadAt, p);
+    out.push({ id: me.id, me: true, dummy: false, kills, color: colorOf(me.id), state: {
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, aim, act: a.act, actT: a.actT,
+      hp: me.alive ? regenHp(me.hp, me.hurtAt, t) : 0, safe: me.alive && t < me.safeUntil, combo: me.combo, gun: me.gun, aimed,
+    } });
+    for (const f of fighters.list(now)) out.push({ id: f.id, me: false, dummy: false, kills: f.kills, color: colorOf(f.id), state: f.state });
+    if (dummyShown(now)) {
+      const b = dummy.body, R = dummy.rec, d = actNow(dummy.act, now, R.alive, dummy.deadAt, b);
+      out.push({ id: DUMMY, me: false, dummy: true, kills: 0, label: 'dummy', color: DUMMY_COLOR, state: {
+        x: b.x, y: b.y, vx: b.vx, vy: b.vy, facing: 1, ground: !!b.onGround, aim: 0, act: d.act, actT: d.actT,
+        hp: R.alive ? regenHp(R.hp, R.hurtAt, t) : 0, safe: false, combo: 0, gun: 'deagle', aimed: false,
+      } });
+    }
+    return out;
+  }
+
+  function glyphs(now, out = []) {
+    const list = bodies(now), aims = [];
+    for (const b of list) {
+      const s = b.state;
+      if (s.gun !== 'sniper' || s.act === 'dead') continue;
+      const last = b.me ? lastShot : shotAt.has(b.id) ? shotAt.get(b.id) : -Infinity;
+      aims.push({ x: s.x, y: s.y, facing: s.facing, aim: s.aim, color: b.color, ready: now - last >= (GUNS.sniper.cooldown - AIM_WARN) * 1000 });
+    }
+    const pickups = level.pickups.map((q) => ({ x: q.x + off.x, y: q.y + off.y, gun: q.gun, there: now >= taken[q.n] }));
+    return fx.glyphs(now, { bodies: list, pickups, aims }, out);
+  }
+
+  function hud(now) {
+    const others = fighters.ids().map((id) => fighters.get(id)).filter(Boolean);
+    const rows = [{ id: me.id, kills, me: true }, ...others.map((F) => ({ id: F.id, kills: F.kills, me: false }))];
+    rows.sort((a, b) => b.kills - a.kills);
+    const board = rows.slice(0, 5);
+    if (!board.some((r) => r.me)) board.push(rows.find((r) => r.me));
+    const hp = me.alive ? Math.max(1, Math.round(regenHp(me.hp, me.hurtAt, sec(now)))) : 0;
+    return { hp, gun: me.gun, ammo: me.ammo, alive: me.alive, showBoard: others.length > 0, board };
+  }
+
+  // ---------- entering, leaving, the connection ----------
+  // A fresh fight for me: full health, 1.5 s of protection, the deagle (as the server does on ae).
+  function freshFight(now) {
+    me.id = myId() || me.id;
+    ref.bullets.length = 0;
+    ref.enter(me, sec(now));
+    Object.assign(me, { combo: 0, strikeAt: -1e9, lastStrike: null });
+    act = null;
+    aim = 0; aimed = false; bits = 0; urgent = false; wasRolling = false;
+    lastShot = lastPk = lastRs = -Infinity;
+    enteredAt = now;
+    ticker = arenaTicker(send);
+    ref.state(me, snap(now), sec(now));
+  }
+
+  function enter(now, isOnline) {
+    entered = true;
+    online = !!isOnline;
+    fighters.clear();
+    fx.clear();
+    shotAt.clear();
+    world.aimFacing = 0;
+    freshFight(now);
+    dummyBackAt = now;
+    dummyUp = false;
+    dummyShown(now);
+    if (online) send({ t: 'ae' });
+  }
+
+  function leave(now) {
+    if (!entered) return;
+    if (online) send({ t: 'al' });
+    ref.leave(me, sec(now), [me]);
+    ref.bullets.length = 0;
+    entered = false;
+    dummyUp = false;
+    fighters.clear();
+    fx.clear();
+    act = null;
+    aimed = false; bits = 0;
+    world.aimFacing = 0;
+  }
+
+  function setOnline(v, now) {
+    v = !!v;
+    if (v === online) return;
+    if (!entered) { online = v; return; }
+    if (!v) {
+      const shown = dummyShown(now);
+      online = false;
+      fighters.clear();
+      fx.clear();
+      shotAt.clear();
+      ref.bullets.length = 0;
+      Object.assign(me, { hp: MAX_HP, hurtAt: -1e9, hitBy: null });
+      if (!shown) dummyBackAt = now + DUMMY_BACK;
+    } else {
+      online = true;
+      freshFight(now);
+      send({ t: 'ae' });
+    }
+  }
+
+  return {
+    enter, leave, setOnline, control, frame, bodies, glyphs, hud,
+    onMessage(m, now) { try { apply(m, now); } catch { /* a malformed message is ignored */ } },
+    me, dummy, fighters, fx,
+    get online() { return online; },
+    get entered() { return entered; },
+  };
+}

@@ -33,6 +33,9 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     view: { cols: 150, rows: 50 }, // cells on screen; main.js keeps it current
     kindAt: map.arena ? kindsFor(map) : null,
     inside: map.arena ? insideFor(map) : null,
+    aimFacing: 0, // -1 or 1: in the side view you face this way (the mouse's side), not the way you run
+    shake: null, // { until, amp } in world seconds (pvp.js: kicked or popped)
+    shakeOff: { x: 0, y: 0 }, // the offset the shake added to the camera last frame
   };
 }
 
@@ -143,6 +146,7 @@ export function teleport(world, x, y) {
   world.cam.x = x;
   world.cam.y = y;
   world.cam.vx = world.cam.vy = 0;
+  world.shakeOff = { x: 0, y: 0 };
   world.path = null;
   world.onArrive = null;
   // Landing somewhere else (a link, ← → in the viewer) switches view at once, without the tilt.
@@ -230,11 +234,28 @@ export function step(world, dt, input) {
   world.atKiosk = !world.focus && atKiosk(world);
 }
 
-// Camera: a spring that leads slightly in the direction you're walking.
+// Camera: a spring that leads slightly in the direction you're walking. A shake is an offset added on
+// top: last frame's comes off before the spring, so the spring never feels it.
 function moveCamera(world, dt) {
-  const g = cameraGoal(world), t = world.camTarget;
-  if (world.reducedMotion || (t && t.snap)) { world.cam.x = g.x; world.cam.y = g.y; world.cam.vx = world.cam.vy = 0; }
-  else { const ct = t ? 0.12 : CAM_TIME; spring(world.cam, 'x', g.x, ct, dt); spring(world.cam, 'y', g.y, ct, dt); }
+  const g = cameraGoal(world), t = world.camTarget, cam = world.cam, off = world.shakeOff;
+  cam.x -= off.x; cam.y -= off.y;
+  off.x = off.y = 0;
+  if (world.reducedMotion || (t && t.snap)) { cam.x = g.x; cam.y = g.y; cam.vx = cam.vy = 0; }
+  else { const ct = t ? 0.12 : CAM_TIME; spring(cam, 'x', g.x, ct, dt); spring(cam, 'y', g.y, ct, dt); }
+  shakeCamera(world);
+}
+
+// A wobble with no randomness, fading linearly to nothing at `until`. None with Reduce Motion.
+function shakeCamera(world) {
+  const s = world.shake;
+  if (!s) return;
+  if (world.reducedMotion || !(world.t < s.until)) { world.shake = null; return; }
+  if (s.from == null) s.from = world.t;
+  const k = s.until > s.from ? (s.until - world.t) / (s.until - s.from) : 0;
+  const amp = (s.amp || 0) * Math.max(0, Math.min(1, k)), t = world.t;
+  world.shakeOff = { x: amp * Math.sin(97 * t), y: amp * Math.cos(89 * t) / 2 };
+  world.cam.x += world.shakeOff.x;
+  world.cam.y += world.shakeOff.y;
 }
 
 // Inside the arena: arena.js moves you (gravity, platforms); everything else carries on as usual.
@@ -243,7 +264,8 @@ function stepSide(world, dt, input) {
   if (!world.frozen) {
     stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside });
     p.moving = Math.abs(p.vx) > 0.5 || !p.onGround;
-    if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);
+    if (world.aimFacing) p.facing = world.aimFacing < 0 ? -1 : 1;
+    else if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);
     if (!world.want && !inArena(world.map, p.x, p.y)) world.want = 'top';
   }
   stepVisitors(world, dt);
@@ -278,6 +300,7 @@ function cameraGoal(world) {
 function snapCamera(world) {
   const g = cameraGoal(world);
   world.cam.x = g.x; world.cam.y = g.y; world.cam.vx = world.cam.vy = 0;
+  world.shakeOff = { x: 0, y: 0 };
 }
 
 // Into the side view: on the floor just inside the door, facing west (or where you already are).
