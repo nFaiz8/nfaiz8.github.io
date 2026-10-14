@@ -3,7 +3,9 @@ import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
 
-const SPEED = 24; // cells per second horizontally (holding Shift runs at double); vertical is divided by CELL_ASPECT
+const SPEED = 12; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
+const SPRINT = 2.5; // holding Shift
+const PATH_SPEED = 24; // tap/click-to-walk keeps its brisk pace
 const HALF = 0.3; // player half-size in cells
 const FOCUS_DIST = 7; // in horizontal-cell units
 const ACCEL = 0.07; // seconds to reach about 63% of the target speed
@@ -136,7 +138,7 @@ function spring(o, axis, target, time, dt) {
 export function step(world, dt, input) {
   world.t += dt;
   const p = world.player;
-  const speed = SPEED * (input.run ? 2 : 1);
+  const speed = SPEED * (input.run ? SPRINT : 1);
 
   // Where we want to be going, in horizontal-cell units per second.
   let tx = 0, ty = 0;
@@ -149,13 +151,13 @@ export function step(world, dt, input) {
   } else if (world.path) {
     let wp = world.path[0];
     let dx = wp.x - p.x, dy = (wp.y - p.y) * CELL_ASPECT, d = Math.hypot(dx, dy);
-    if (d < Math.max(0.3, speed * (world.pathQuick ? 2.5 : 1) * dt * 1.5) && world.path.length > 1) {
+    const pace = PATH_SPEED * (world.pathQuick ? 2.5 : 1);
+    if (d < Math.max(0.3, pace * dt * 1.5) && world.path.length > 1) {
       world.path.shift();
       wp = world.path[0];
       dx = wp.x - p.x; dy = (wp.y - p.y) * CELL_ASPECT; d = Math.hypot(dx, dy);
     }
     const last = world.path.length === 1;
-    const pace = world.pathQuick ? speed * 2.5 : speed;
     if (last && d < 0.08) {
       p.x = wp.x; p.y = wp.y; p.vx = p.vy = 0;
       arrive(world);

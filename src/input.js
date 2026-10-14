@@ -6,7 +6,7 @@ const KEYS = {
 
 export function createInput(target, { onTap, onKey }) {
   const held = new Set();
-  let run = false; // Shift held: run instead of the default brisk pace
+  let run = false; // Shift held: sprint instead of walking
 
   const editable = (e) => e.target.closest && e.target.closest('input, textarea, [contenteditable]');
   window.addEventListener('keydown', (e) => {

@@ -86,11 +86,21 @@ test('click paths are pulled straight: few legs, each one walkable', () => {
   assert.deepEqual(legs.at(-1), { x: f.stand.x + 0.5, y: f.stand.y + 0.5 });
 });
 
-test('holding Shift runs at double speed', () => {
+test('walking is the calm pace; holding Shift sprints well past the old default', () => {
   const normal = createWorld(map), fast = createWorld(map);
   run(normal, 0.5, { x: 1, y: 0 });
   run(fast, 0.5, { x: 1, y: 0, run: true });
-  assert.ok(fast.player.vx > normal.player.vx * 1.8, `run ${fast.player.vx} vs ${normal.player.vx}`);
+  assert.ok(Math.abs(normal.player.vx - 12) < 0.5, `walk ${normal.player.vx}`);
+  assert.ok(fast.player.vx > 28, `sprint ${fast.player.vx}`);
+});
+
+test('tap-to-walk keeps its brisk pace', () => {
+  const w = createWorld(map);
+  const f = map.frames[0];
+  assert.ok(walkTo(w, f.stand.x, f.stand.y));
+  let peak = 0;
+  for (let t = 0; t < 1; t += 1 / 60) { step(w, 1 / 60, { x: 0, y: 0 }); peak = Math.max(peak, Math.hypot(w.player.vx, w.player.vy)); }
+  assert.ok(peak > 20, `path pace ${peak}`);
 });
 
 test('running into a wall on a slow frame rate stops at the wall instead of passing through', () => {
