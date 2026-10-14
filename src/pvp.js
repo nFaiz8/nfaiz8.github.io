@@ -11,6 +11,7 @@ import {
 import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
 import { createFx } from './fx.js';
+import { flipCut } from './stick.js';
 import { arenaTicker } from './live.js';
 import { enterSide } from './world.js';
 
@@ -55,6 +56,7 @@ export function createPvp({
   let aim = 0, aimed = false, bits = 0, urgent = false, wasRolling = false, kills = 0;
   let lastShot = -Infinity, lastPk = -Infinity, lastRs = -Infinity, deadAt = 0;
   let dummyBackAt = 0, dummyUp = false;
+  let cutJumpT = null; // the air jump (my body's airJumpT) whose flip a kick, hurt or roll took over
 
   const isMe = (id) => id != null && id === me.id;
   const name = (id) => (isMe(id) ? 'you' : nameOf(id) || 'someone');
@@ -299,6 +301,7 @@ export function createPvp({
     if (roll && !wasRolling) urgent = true;
     wasRolling = roll;
     ref.state(me, snap(now), t);
+    flipOf(actNow(act, now, me.alive, deadAt, p), p);
     fighters.step(dt, now);
     const on = dummyShown(now);
     if (on && dt > 0) {
@@ -331,12 +334,19 @@ export function createPvp({
     return { act: 'idle', actT: 0 };
   }
 
+  // Seconds since my air jump, for the flip; Infinity once a kick, hurt or roll has taken over from it.
+  function flipOf(a, p) {
+    const flipT = p.t - p.airJumpT;
+    if (flipCut(a.act, a.actT, flipT)) cutJumpT = p.airJumpT;
+    return p.airJumpT === cutJumpT ? Infinity : flipT;
+  }
+
   function bodies(now) {
     if (!entered) return [];
     const t = sec(now), p = world.player, out = [];
-    const a = actNow(act, now, me.alive, deadAt, p);
+    const a = actNow(act, now, me.alive, deadAt, p), flipT = flipOf(a, p);
     out.push({ id: me.id, me: true, dummy: false, kills, color: colorOf(me.id), state: {
-      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, flipT: p.t - p.airJumpT, aim, act: a.act, actT: a.actT,
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, flipT, aim, act: a.act, actT: a.actT,
       hp: me.alive ? regenHp(me.hp, me.hurtAt, t) : 0, safe: me.alive && t < me.safeUntil, combo: me.combo, gun: me.gun, aimed,
     } });
     for (const f of fighters.list(now)) out.push({ id: f.id, me: false, dummy: false, kills: f.kills, color: colorOf(f.id), state: f.state });

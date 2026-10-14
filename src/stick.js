@@ -177,6 +177,14 @@ const ACT_RIG = {
   roll: { wind: TUCK, strike: TUCK, in: 0.05, at: 0.05, hold: 0.25, end: 0.3, turns: 1, puff: true },
 };
 
+// The acts that take over from the flip: a kick, a hurt, the roll. Once one has overlapped the flip (it was
+// still going when the air jump came, or began after), the flip is over for that air jump: it never comes
+// back mid-turn. pvp.js and fighters.js then report flipT as Infinity, once the act itself has ended too.
+const TAKES_OVER = { kick: true, hurt: true, roll: true };
+export function flipCut(act, actT, flipT) {
+  return TAKES_OVER[act] === true && flipT < FLIP.time && actT - flipT < ACT_RIG[act].end;
+}
+
 // Layers 2 and 3 into P (from L). Returns the turn about the pivot (radians), or 0.
 function act(name, actT, ground) {
   copy(P, L);
@@ -436,10 +444,9 @@ function drawPose(st, t, opts, out) {
 
   const phi = act(name, actT, s.ground);
   const rolling = ACT_RIG[name] && ACT_RIG[name].turns > 0 && actT < ACT_RIG[name].end;
-  // The flip, while flipT is short of its end; a kick, a hurt or a roll takes over from it.
+  // The flip, while flipT is short of its end; a kick, a hurt or a roll takes over from it for good.
   const flipT = st.flipT >= 0 ? st.flipT : Infinity;
-  const over = (name === 'kick' || name === 'hurt' || name === 'roll') && actT < ACT_RIG[name].end;
-  const flipping = !over && flipT < (rm ? FLIP.rm : FLIP.time);
+  const flipping = !flipCut(name, actT, flipT) && flipT < (rm ? FLIP.rm : FLIP.time);
   let spin = 0, ga = P.ga, handX = 0, handY = 0;
   if (flipping) {
     // Aimed, the hand and gun stay where they'd be without the flip: the hand as solved now.

@@ -453,3 +453,38 @@ test('flipT: Infinity before any air jump and after a respawn', () => {
   F.apply({ t: 'sp', id: 'b', x: 20.5, y: 27.5 }, 100);
   assert.equal(F.list(100)[0].state.flipT, Infinity);
 });
+
+// A remote fighter in the air, then their air jump's state: flipping.
+function flipping(F) {
+  one(F, 0, { y: 15.5, vy: 0, g: 0, i: 0, ts: 0 });
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 15.5, vx: 0, vy: 0, f: 1, g: 0, i: 0, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 15.6, vx: 0, vy: 5, f: 1, g: 0, i: 4, a: 0, ts: 50 }, 50);
+}
+
+test('a remote hit mid-flip ends the flip for good: flipT stays Infinity once the hurt is over, through new states', () => {
+  const F = createFighters({ kindAt: kinds, rtt: () => 0 });
+  flipping(F);
+  F.step(1 / 60, 66);
+  assert.ok(F.list(66)[0].state.flipT < 0.05, 'flipping');
+  F.apply({ t: 'h', id: 'b', by: 'a', w: 'r', n: 1, d: 9, hp: 91, kx: 3, ky: 0 }, 80); // stun 0.05 s
+  F.step(1 / 60, 83);
+  assert.equal(F.list(83)[0].state.act, 'hurt');
+  let ms = 83;
+  while (ms < 200) { F.step(1 / 60, (ms += 1000 / 60)); assert.equal(F.list(ms)[0].state.flipT, Infinity, `at ${ms.toFixed(0)}`); }
+  assert.notEqual(F.list(ms)[0].state.act, 'hurt');
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 13, vx: 0, vy: -10, f: 1, g: 0, i: 4, a: 0, ts: 200 }, 200);
+  assert.equal(F.list(200)[0].state.flipT, Infinity, 'a new state does not bring it back');
+});
+
+test('a remote air kick, then their air jump within its 0.4 s: no flip, during the kick or after it', () => {
+  const F = createFighters({ kindAt: kinds, rtt: () => 0 });
+  one(F, 0, { y: 15.5, vy: 0, g: 0, i: 0, ts: 0 });
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 15.5, vx: 0, vy: 0, f: 1, g: 0, i: 0, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'mm', id: 'b', k: 'k' }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 15.6, vx: 0, vy: 5, f: 1, g: 0, i: 4, a: 0, ts: 100 }, 100);
+  for (let ms = 100; ms <= 600; ms += 1000 / 60) {
+    F.step(1 / 60, ms);
+    assert.equal(F.get('b').body.airJumps, 0, 'the air jump was predicted');
+    assert.equal(F.list(ms)[0].state.flipT, Infinity, `at ${ms.toFixed(0)}: ${F.list(ms)[0].state.act}`);
+  }
+});

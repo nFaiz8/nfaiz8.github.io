@@ -4,6 +4,7 @@
 // drawn glides out over ~80 ms, or snaps when it is large. Pure: no DOM, no clocks; times in ms.
 import { newBody, stepBody, knock, rolling, ROLL, AIR_JUMPS, COYOTE } from './arena.js';
 import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME, REGEN_AFTER } from './fight.js';
+import { flipCut } from './stick.js';
 
 const SILENT = 300; // ms since the last state was sent before their input counts as released
 const CORR_TAU = 0.08, AIM_TAU = 0.06; // seconds
@@ -73,6 +74,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     if (old) {
       b.airJumps = old.airJumps;
       b.airJumpT = old.airJumpT - old.t + age / 1000;
+      if (old.cutJumpT != null) b.cutJumpT = old.cutJumpT - old.t + age / 1000; // re-based alike, so it still matches
       if (!b.onGround) b.sinceGround = Math.max(0, (old.onGround ? 0 : old.sinceGround) - age / 1000);
     }
     if (b.onGround) b.airJumps = AIR_JUMPS;
@@ -173,6 +175,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       if (!F.body) continue;
       const input = !F.alive || now - F.lastAt > SILENT ? NONE : F.input;
       for (let k = 0; k < n; k++) stepBody(F.body, h, input, kindAt, opts);
+      flipOf(F, now);
       F.corr.x *= kc;
       F.corr.y *= kc;
       F.aim += (F.aimTo - F.aim) * ka;
@@ -186,6 +189,14 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     return { act: 'idle', actT: 0 };
   }
 
+  // Seconds since their air jump, for the flip; Infinity once a kick, hurt or roll has taken over from it
+  // (marked on the body, as the air jump it ended).
+  function flipOf(F, now) {
+    const b = F.body, { act, actT } = actOf(F, now), flipT = b.t - b.airJumpT;
+    if (flipCut(act, actT, flipT)) b.cutJumpT = b.airJumpT;
+    return b.cutJumpT === b.airJumpT ? Infinity : flipT;
+  }
+
   function list(now) {
     const out = [];
     for (const F of all.values()) {
@@ -193,7 +204,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       const b = F.body, { act, actT } = actOf(F, now);
       const hp = F.alive ? regenHp(F.hp, F.hurtAt / 1000, now / 1000) : 0;
       out.push({ id: F.id, kills: F.kills, alive: F.alive, state: {
-        x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround, flipT: b.t - b.airJumpT,
+        x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround, flipT: flipOf(F, now),
         aim: F.aim, act, actT, hp, safe: now < F.safeUntil, gun: F.gun, aimed: F.aimTo !== 0, // the smoothed aim only nears 0
       } });
     }

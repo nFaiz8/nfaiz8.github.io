@@ -527,8 +527,11 @@ test('flip: it yields to a kick, a hurt, the roll and death; it goes on through 
   const body = (g) => g.filter((x) => x.part !== 'fx');
   for (const [act, actT] of [['kick', 0.1], ['hurt', 0.1], ['roll', 0.1]]) assert.deepEqual(body(pose({ ...air, flipT: 0.1, act, actT })), body(pose({ ...air, act, actT })), act);
   assert.deepEqual(pose({ ...air, flipT: 0.1, act: 'dead', actT: 0.5 }), pose({ ...air, act: 'dead', actT: 0.5 }));
-  // A kick or a hurt that has ended gives the flip back.
-  assert.notDeepEqual(body(pose({ ...air, flipT: 0.1, act: 'hurt', actT: 0.36 })), body(pose(air)));
+  // A kick or a hurt that overlapped the flip keeps it away, even once its own pose is over (the state layer
+  // reports flipT Infinity after it); one that was over before the air jump does not.
+  assert.deepEqual(body(pose({ ...air, flipT: 0.1, act: 'hurt', actT: 0.36 })), body(pose(air)));
+  assert.deepEqual(body(pose({ ...air, flipT: 0.05, act: 'kick', actT: 0.4 })), body(pose(air)));
+  assert.notDeepEqual(body(pose({ ...air, flipT: 0.1, act: 'kick', actT: 0.55 })), body(pose(air)));
   assert.notDeepEqual(body(pose({ ...air, flipT: 0.1, act: 'punch', actT: 0.1 })), body(pose({ ...air, act: 'punch', actT: 0.1 })));
 });
 
@@ -565,4 +568,25 @@ test('flip: the puff, two ~ in fx spreading sideways from the feet at the jump p
   assert.equal(part(stickPose({ ...base, ...st(0.15) }, 0.15), 'fx').length, 0);
   // It stays with the jump through a kick.
   assert.equal(part(pose({ ...air, flipT: 0.05, act: 'kick', actT: 0.2 }), 'fx').filter((g) => g.ch === '~').length, 2);
+});
+
+test('flip: interrupted by a kick or a hurt, it never snaps back into the tumble (1 ms continuity, the act start may snap)', () => {
+  // The states as pvp.js and fighters.js report them: once a kick or hurt overlaps the flip, flipT is Infinity.
+  const runs = [
+    // An air kick, then the air jump 0.1 s into it: the kick runs its 0.4 s, then the air pose.
+    ['kick then air jump', 800, [0, 100], (ms) => (ms < 100 ? { act: 'kick', actT: ms / 1000 }
+      : ms <= 400 ? { act: 'kick', actT: ms / 1000, flipT: (ms - 100) / 1000 } : { flipT: Infinity })],
+    // A kick's hit (stun 0.4) 0.1 s into the flip.
+    ['hit mid-flip', 800, [100], (ms) => (ms < 100 ? { flipT: ms / 1000 } : ms <= 500 ? { act: 'hurt', actT: (ms - 100) / 1000, flipT: ms / 1000 } : { flipT: Infinity })],
+    // A rifle hit (stun 0.05) 0.1 s into the flip: its short hurt ends with the hurt pose's own snap at 150 ms.
+    ['rifle hit mid-flip', 800, [100, 151], (ms) => (ms < 100 ? { flipT: ms / 1000 } : ms <= 150 ? { act: 'hurt', actT: (ms - 100) / 1000, flipT: ms / 1000 } : { flipT: Infinity })],
+  ];
+  for (const [name, n, snaps, st] of runs) {
+    let prev = pose({ ...air, ...st(0) });
+    for (let ms = 1; ms <= n; ms++) {
+      const cur = pose({ ...air, ...st(ms) }, ms / 1000);
+      if (!snaps.includes(ms)) assert.ok(jump(prev, cur) <= 0.35, `${name}: a jump of ${jump(prev, cur).toFixed(3)} u at ${ms} ms`);
+      prev = cur;
+    }
+  }
 });

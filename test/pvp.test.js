@@ -541,3 +541,37 @@ test('my state carries flipT: Infinity until my air jump, then the seconds since
   s.frames(6, { jump: true });
   assert.ok(Math.abs(me().flipT - 0.1) < 1e-6, `${me().flipT}`);
 });
+
+test('a hit mid-flip ends my flip for good: flipT stays Infinity once the hurt is over', () => {
+  const s = setup();
+  s.frames(15);
+  const me = () => s.pvp.bodies(s.now).find((b) => b.me).state;
+  s.frames(6, { jump: true });
+  s.frames(6);
+  s.frames(1, { jump: true });
+  s.frames(5);
+  assert.ok(me().flipT < 0.1, 'flipping');
+  s.pvp.onMessage({ t: 'h', id: 'me', by: 'x', w: 'r', n: 1, d: 9, hp: 91, kx: 3, ky: 0 }, s.now); // stun 0.05 s
+  s.frames(1);
+  assert.equal(me().act, 'hurt');
+  s.frames(6);
+  assert.notEqual(me().act, 'hurt', 'the hurt is over');
+  assert.equal(me().flipT, Infinity);
+  s.frames(6);
+  assert.equal(me().flipT, Infinity, 'and stays over');
+});
+
+test('an air kick, then my air jump within its 0.4 s: no flip, during the kick or after it', () => {
+  const s = setup();
+  s.frames(15);
+  const me = () => s.pvp.bodies(s.now).find((b) => b.me).state;
+  s.frames(6, { jump: true });
+  s.frames(3);
+  s.frames(1, { strikes: 1 });
+  assert.equal(me().act, 'kick');
+  s.frames(6);
+  s.frames(1, { jump: true });
+  assert.equal(s.world.player.airJumps, 0, 'the air jump was taken');
+  for (let k = 0; k < 24; k++) { s.frames(1); assert.equal(me().flipT, Infinity, `frame ${k}: ${me().act}`); }
+  assert.notEqual(me().act, 'kick', 'the kick is over');
+});
