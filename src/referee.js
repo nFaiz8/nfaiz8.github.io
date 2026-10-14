@@ -6,6 +6,7 @@ import {
   MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, GUN_BY_CODE, STRIKES, stunOf,
   shoulderOf, muzzleOf, rayLength, bulletRange, bulletAt, sweep,
   regenHp, fleeKiller, nextStrike, strikeBox, boxHits, strikeKnock, bulletKnock, inDodge, pickSpawn, nearPickup,
+  HEADSHOT, isHeadshot,
 } from './fight.js';
 
 const EST_MAX = 0.1; // how far ahead a fighter's last state is moved on by its velocity, then held
@@ -45,7 +46,8 @@ export function createReferee({ level, rand }) {
   const ready = (F) => F.arena && F.alive && !(F.i & 32);
   const target = (T, t) => T.arena && T.alive && t >= T.safeUntil && !inDodge(T.rollAt, t);
 
-  function hurt(T, by, w, n, d, kx, ky, stun, now, all) {
+  // hs: a headshot; h and the k it causes carry hs: 1, and leave it out otherwise.
+  function hurt(T, by, w, n, d, kx, ky, stun, now, all, hs = false) {
     T.hp = regenHp(T.hp, T.hurtAt, now) - d;
     T.hurtAt = now;
     T.hitBy = by;
@@ -55,12 +57,13 @@ export function createReferee({ level, rand }) {
     // A bullet doesn't cancel a jump: its knock adds to vy. A strike's replaces it.
     if (GUN_BY_CODE[w]) T.vy += ky; else if (ky) T.vy = ky;
     const out = [{ t: 'h', id: T.id, by, w, n: n ?? -1, d, hp: shownHp(T.hp), kx: r1(kx), ky: r1(ky) }];
+    if (hs) out[0].hs = 1;
     if (T.hp <= 0) {
       T.alive = false; T.deadAt = now; T.hp = 0;
       toDeagle(T);
       const K = all.find((o) => o.id === by);
       if (K) K.kills++;
-      out.push({ t: 'k', id: T.id, by, kills: K ? K.kills : 0 });
+      out.push(hs ? { t: 'k', id: T.id, by, kills: K ? K.kills : 0, hs: 1 } : { t: 'k', id: T.id, by, kills: K ? K.kills : 0 });
     }
     return out;
   }
@@ -146,8 +149,12 @@ export function createReferee({ level, rand }) {
           if (t < hitT && target(T, t)) { hit = T; hitT = t; }
         }
         if (hit) {
+          // Where it struck: the bullet at the hit time against the target's estimate then (clamped into
+          // the box by isHeadshot). The head row takes HEADSHOT times the damage; knock and stun stay.
+          const p = bulletAt(b, hitT), c = estimate(hit, hitT);
+          const hs = isHeadshot({ dx: p.x - c.x, dy: p.y - c.y });
           const { kx, ky } = bulletKnock(b.gun, b.angle);
-          out.push(...hurt(hit, b.owner, G.code, b.n, G.damage, kx, ky, stunOf(G.code), hitT, all));
+          out.push(...hurt(hit, b.owner, G.code, b.n, hs ? G.damage * HEADSHOT : G.damage, kx, ky, stunOf(G.code), hitT, all, hs));
           bullets.splice(j--, 1);
           continue;
         }

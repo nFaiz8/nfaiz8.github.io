@@ -470,3 +470,60 @@ test('a roll\'s first frame sends an a with bit 32', () => {
   const a = s.sent.slice(n).find((m) => m.t === 'a');
   assert.ok(a && (a.i & 32), JSON.stringify(a));
 });
+
+// ---- headshots (addendum §1) ----
+
+test('a headshot kill\'s feed line ends " ◎ headshot"; a body-shot kill\'s and a flee\'s do not', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('a', 20.5), fighter('b', 40.5)] }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'a', kills: 1, hs: 1 }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'me', kills: 1, hs: 1 }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'a', kills: 2 }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'me', by: 'a', kills: 3, hs: 1 }, s.now);
+  assert.deepEqual(s.feed, ['Ann popped Bo ◎ headshot', 'you popped Bo ◎ headshot', 'Ann popped Bo', 'Ann popped you ◎ headshot']);
+});
+
+test('online: my headshot on someone shows -50! in white and gives a tiny shake; theirs on someone else does not shake', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('a', 20.5), fighter('b', 40.5)] }, s.now);
+  s.frames(2);
+  s.pvp.onMessage({ t: 'h', id: 'b', by: 'a', w: 'd', n: 3, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 }, s.now);
+  assert.equal(s.world.shake, null, 'someone else\'s headshot');
+  const white = s.pvp.fx.glyphs(s.now, {}).filter((g) => g.color.join() === '255,255,255').map((g) => g.ch).join('');
+  assert.equal(white, '-50!');
+  s.pvp.onMessage({ t: 'h', id: 'b', by: 'me', w: 'd', n: 4, d: 50, hp: 0, kx: 10, ky: 0, hs: 1 }, s.now);
+  assert.ok(s.world.shake && s.world.shake.amp > 0 && s.world.shake.amp < 0.4, 'a tiny shake');
+  assert.ok(s.world.shake.until - s.world.t <= 0.15 + 1e-9);
+  s.world.shake = null;
+  s.pvp.onMessage({ t: 'h', id: 'b', by: 'me', w: 'd', n: 5, d: 25, hp: 0, kx: 10, ky: 0 }, s.now);
+  assert.equal(s.world.shake, null, 'a body shot does not shake');
+  s.pvp.onMessage({ t: 'h', id: 'me', by: 'b', w: 'd', n: 6, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 }, s.now);
+  assert.equal(s.world.shake, null, 'taking a headshot does not shake');
+  assert.ok(s.pvp.fx.glyphs(s.now, {}).filter((g) => g.ch === '!').length >= 2, 'mine shows -50! too');
+});
+
+test('Reduce Motion: my headshot gives no shake', () => {
+  const s = setupNamed({ reducedMotion: true });
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('b', 40.5)] }, s.now);
+  s.frames(2);
+  s.pvp.onMessage({ t: 'h', id: 'b', by: 'me', w: 'd', n: 4, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 }, s.now);
+  assert.equal(s.world.shake, null);
+});
+
+test('offline: shooting the dummy from mid-jump hits its head row: 50 damage, -50!, and a tiny shake', () => {
+  const s = setup();
+  s.frames(15);
+  s.frames(1, { jump: true });
+  const y = s.world.player.y - off.y; // the shot leaves 0.3 rows above this: the head row is 26..27
+  assert.ok(y > 26.3 && y < 27.3, `high enough for the head row, low enough to hit: ${y}`);
+  s.frames(1, { jump: true, fire: true });
+  let shook = false, white = '';
+  for (let k = 0; k < 10; k++) {
+    s.frames(1);
+    if (s.world.shake) shook = true;
+    if (!white) white = s.pvp.fx.glyphs(s.now, {}).filter((g) => g.color.join() === '255,255,255').map((g) => g.ch).join('');
+  }
+  assert.equal(s.pvp.bodies(s.now).find((b) => b.dummy).state.hp, 50);
+  assert.equal(white, '-50!');
+  assert.ok(shook);
+});

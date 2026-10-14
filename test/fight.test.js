@@ -87,6 +87,17 @@ test('sweep: a miss is −1; starting inside is 0', () => {
   close(F.sweep({ x: 0, y: 5 }, { x: 10, y: 5 }, { x: 5, y: 5 }, { x: 5, y: 5 }), 0.45);
 });
 
+test('headshots: ×2; the head is the top row of the box (dy < −0.5), clamped into the box first', () => {
+  assert.equal(F.HEADSHOT, 2);
+  assert.equal(F.isHeadshot({ dx: 0, dy: -1.5 }), true, 'the top edge');
+  assert.equal(F.isHeadshot({ dx: 0.3, dy: -0.6 }), true);
+  assert.equal(F.isHeadshot({ dx: 0, dy: -0.5 }), false, 'the line itself is the torso');
+  assert.equal(F.isHeadshot({ dx: 0, dy: -0.3 }), false, 'a level shot from the shoulder');
+  assert.equal(F.isHeadshot({ dx: 0, dy: 1.4 }), false);
+  assert.equal(F.isHeadshot({ dx: 0, dy: -2.1 }), true, 'above the box clamps to its top edge');
+  assert.equal(F.isHeadshot({ dx: 0, dy: 2.1 }), false, 'below the box clamps to its bottom edge');
+});
+
 test('regeneration starts 4 s after damage, at 20 hp/s, and stops at 100', () => {
   assert.equal(F.regenHp(40, 10, 13.9), 40);
   close(F.regenHp(40, 10, 15), 60);

@@ -20,6 +20,7 @@ const DUMMY_COLOR = [150, 150, 150];
 const DUMMY_BACK = 2000; // ms after the connection drops before the dummy shows
 const PK_EVERY = 500, RS_EVERY = 1000; // ms
 const SHAKE = { time: 0.15, amp: 0.4 }; // kicked or popped
+const HEAD_SHAKE = { time: 0.1, amp: 0.2 }; // my bullet landed a headshot
 const AIM_WARN = 0.3; // s: a sniper's aim line brightens this long before its next shot is ready
 const MAX_PRESSES = 4; // strike presses handled in one frame
 const URGENT_GAP = 30; // ms: arenaTicker's gap; a forced state stands in for its urgent send within it
@@ -60,7 +61,8 @@ export function createPvp({
   const local = (x, y) => ({ x: x - off.x, y: y - off.y });
   const ts = (now) => Math.max(0, Math.round(now - enteredAt));
   const pickOk = (n) => Number.isInteger(n) && n >= 0 && n < taken.length;
-  const shake = () => { if (!reducedMotion) world.shake = { until: world.t + SHAKE.time, amp: SHAKE.amp }; };
+  const shake = (S = SHAKE) => { if (!reducedMotion) world.shake = { until: world.t + S.time, amp: S.amp }; };
+  const myHeadshot = (m) => { if (m.hs && isMe(m.by) && !isMe(m.id)) shake(HEAD_SHAKE); };
 
   // My state for the wire and the local referee (arena-local).
   function snap(now, facing = world.player.facing) {
@@ -102,7 +104,8 @@ export function createPvp({
     const b = dummy.body;
     if (m.t === 'h') {
       // Online, local bullet numbers aren't the server's: the bullet already stopped at the dummy on screen.
-      fx.hit({ n: online ? undefined : m.n, x: b.x, y: b.y, d: m.d, at: now });
+      fx.hit({ n: online ? undefined : m.n, x: b.x, y: b.y, d: m.d, at: now, hs: !!m.hs });
+      myHeadshot(m);
       const stun = stunOf(m.w) || 0;
       if (num(m.kx) && num(m.ky)) knock(b, m.kx, m.ky, stun, BULLETS.has(m.w));
       if (dummy.rec.alive) dummy.act = { act: 'hurt', at: now, for: stun * 1000 };
@@ -141,7 +144,7 @@ export function createPvp({
   // ---------- messages ----------
   function feed(m) {
     if (!isMe(m.id) && !fighters.get(m.id)) return; // someone already gone: stale
-    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : `${name(m.by)} popped ${name(m.id)}`);
+    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : `${name(m.by)} popped ${name(m.id)}${m.hs ? ' ◎ headshot' : ''}`);
   }
 
   function mineMsg(m, now) {
@@ -152,7 +155,7 @@ export function createPvp({
       case 'pk': if (pickOk(m.n) && num(m.at)) taken[m.n] = now + m.at; break;
       case 'h': {
         if (!me.alive) break;
-        fx.hit({ n: m.n, x: p.x, y: p.y, d: m.d, at: now });
+        fx.hit({ n: m.n, x: p.x, y: p.y, d: m.d, at: now, hs: !!m.hs });
         if (num(m.hp)) me.hp = m.hp;
         me.hurtAt = t;
         if (m.by != null) me.hitBy = m.by;
@@ -208,7 +211,10 @@ export function createPvp({
     }
     const F = fighters.get(m.id);
     switch (m.t) {
-      case 'h': if (F && F.body) fx.hit({ n: m.n, x: F.body.x + F.corr.x, y: F.body.y + F.corr.y, d: m.d, at: now }); break;
+      case 'h':
+        if (F && F.body) fx.hit({ n: m.n, x: F.body.x + F.corr.x, y: F.body.y + F.corr.y, d: m.d, at: now, hs: !!m.hs });
+        myHeadshot(m);
+        break;
       case 'k': feed(m); break;
       case 'pk': if (pickOk(m.n) && num(m.at)) taken[m.n] = now + m.at; break;
       case 's': {

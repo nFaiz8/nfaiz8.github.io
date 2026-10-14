@@ -115,3 +115,20 @@ test('with an offset, a remote bullet still ends at the pillar', () => {
   for (let ms = 64; ms <= 100; ms += 16) f.step(0.016, ms, []);
   assert.equal(f.glyphs(100, {}).filter((g) => g.ch === '•').length, 0);
 });
+
+test('a headshot number is -50! in flash white and lasts 1.3× as long; a body number stays as it was', () => {
+  const f = fx();
+  f.hit({ n: -1, x: 70, y: 27.5, d: 50, at: 0, hs: 1 });
+  const text = (ms) => f.glyphs(ms, {}).filter((g) => g.y < 26.5 && '-50!'.includes(g.ch));
+  const n0 = text(0);
+  assert.equal(n0.map((g) => g.ch).join(''), '-50!');
+  assert.ok(n0.every((g) => g.color.join() === '255,255,255'), 'flash white');
+  assert.equal(text(700).length, 4, 'still there at 0.7 s');
+  assert.equal(text(790).length, 0, 'gone after 0.78 s');
+  const b = fx();
+  b.hit({ n: -1, x: 70, y: 27.5, d: 25, at: 0 });
+  const body = b.glyphs(0, {}).filter((g) => g.y < 26.5 && '-25!'.includes(g.ch));
+  assert.equal(body.map((g) => g.ch).join(''), '-25');
+  assert.ok(body.every((g) => g.color.join() !== '255,255,255'));
+  assert.equal(b.glyphs(700, {}).filter((g) => g.ch === '2').length, 0, 'gone after 0.6 s');
+});

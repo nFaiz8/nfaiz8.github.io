@@ -317,3 +317,85 @@ test('fix 5: a bullet adds its knock to a mid-air target\'s vy; a strike replace
   R.strike(S, { k: 'p' }, 2, [S, T]);
   assert.equal(T.vy, -STRIKES.punch.ky);
 });
+
+// ---- headshots (addendum §1): the hit point at the swept hit time, relative to the target's estimate ----
+
+test('headshot: a level deagle bullet at the head row does 50 with hs: 1; knockback unchanged', () => {
+  const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5); // the bullet flies at 26.2: 1.3 rows above B's centre
+  shoot(R, A, 1, [A, B]);
+  const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
+  assert.deepEqual({ ...h, n: undefined }, { t: 'h', id: 'b', by: 'a', w: 'd', n: undefined, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 });
+});
+
+test('headshot: ×2 for the rifle too (18)', () => {
+  const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5);
+  A.gun = 'rifle'; A.ammo = 40;
+  shoot(R, A, 1, [A, B]);
+  const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
+  assert.deepEqual([h.d, h.hp, h.hs], [18, 82, 1]);
+});
+
+test('a level bullet at the torso does 1× with no hs; melee never has hs', () => {
+  const R = ref(), A = F('a', 20.5), B = F('b', 30.5); // the bullet flies at 27.2: 0.3 rows above B's centre
+  shoot(R, A, 1, [A, B]);
+  const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
+  assert.equal(h.d, 25);
+  assert.equal('hs' in h, false);
+  const S = F('s', 60.5, 27.5), T = F('t', 62, 28.5); // T a row lower: S's punch reaches its head row
+  const p = R.strike(S, { k: 'p' }, 2, [S, T]).out.find((m) => m.t === 'h');
+  assert.equal(p.d, STRIKES.punch.damage);
+  assert.equal('hs' in p, false);
+});
+
+test('a sniper headshot kills from 100 and its k carries hs: 1; a sniper body shot does not kill', () => {
+  const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5);
+  A.gun = 'sniper'; A.ammo = 5;
+  shoot(R, A, 1, [A, B]);
+  const out = run(R, 1, 1.3, [A, B]);
+  const h = out.find((m) => m.t === 'h');
+  assert.deepEqual([h.d, h.hp, h.hs], [140, 0, 1]);
+  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1, hs: 1 });
+  const R2 = ref(), A2 = F('a', 20.5), B2 = F('b', 30.5);
+  A2.gun = 'sniper'; A2.ammo = 5;
+  shoot(R2, A2, 1, [A2, B2]);
+  const out2 = run(R2, 1, 1.3, [A2, B2]);
+  assert.deepEqual([out2.find((m) => m.t === 'h').d, B2.hp], [70, 30]);
+  assert.equal(out2.some((m) => m.t === 'k'), false);
+});
+
+test('a body-shot k carries no hs', () => {
+  const R = ref(), A = F('a', 20.5), B = F('b', 30.5);
+  Object.assign(B, { hp: 20, hurtAt: 0.9 });
+  shoot(R, A, 1, [A, B]);
+  const k = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'k');
+  assert.equal('hs' in k, false);
+});
+
+test('a bullet coming straight down through the top of the box is a headshot (the point at the hit time, not the tick end)', () => {
+  // A 9 rows above B, shoulder over B's centre, aiming straight down. One long tick carries the bullet to
+  // the floor, past B's feet: only the point at the swept hit time is on B's head.
+  const R = ref(), A = F('a', 30.35, 18.5), B = F('b', 30.5);
+  const m = muzzleOf(A.x, A.y, 1, Math.PI / 2, 'deagle');
+  assert.equal(R.fire(A, { x: m.x, y: m.y, a: Math.PI / 2 }, 1, [A, B]).ok, true);
+  const h = R.tick(1.5, [A, B]).find((q) => q.t === 'h');
+  assert.deepEqual([h.d, h.hs], [50, 1]);
+});
+
+test('a steep downward bullet entering through the top edge, off the centre line, is a headshot', () => {
+  const R = ref(), A = F('a', 24.3, 18.5), B = F('b', 30.5), a = 1.2;
+  const m = muzzleOf(A.x, A.y, 1, a, 'deagle');
+  assert.equal(R.fire(A, { x: m.x, y: m.y, a }, 1, [A, B]).ok, true);
+  const h = R.tick(1.5, [A, B]).find((q) => q.t === 'h'); // one long tick, as above
+  assert.deepEqual([h.d, h.hs], [50, 1]);
+});
+
+test('a roll still dodges a bullet at the head row', () => {
+  const at = (rollOffset) => {
+    const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5);
+    shoot(R, A, 1, [A, B]);
+    B.rollAt = 1.082 - rollOffset;
+    return run(R, 1, 1.3, [A, B]).some((m) => m.t === 'h');
+  };
+  assert.equal(at(0.1), false);
+  assert.equal(at(0.3), true);
+});

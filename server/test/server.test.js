@@ -262,6 +262,19 @@ test('a deagle shot hits a standing, unprotected target for 25; a ▓ in the way
   a.close(); b.close();
 });
 
+test('a headshot reaches the wire: a shot from a row higher hits the head row for 50, with hs: 1', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await sleepMs(1600);
+  at(a, 20.5, 26.5, { g: 0 }); at(b, 30.5, 27.5);
+  await sleepMs(150);
+  fire(a, 20.5, 26.5); // the bullet flies at 26.2: 1.3 rows above B's centre
+  const h = await b.next('h', 2000);
+  assert.deepEqual([h.id, h.by, h.d, h.hp, h.hs], [b.id, a.id, 50, 50, 1]);
+  a.close(); b.close();
+});
+
 test('five shots within 100 ms give at most two bullets', async () => {
   const r = room();
   const a = await fighter(r, 'A');

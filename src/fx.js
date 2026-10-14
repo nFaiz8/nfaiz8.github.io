@@ -6,8 +6,9 @@ import { GUN_ART } from './stick.js';
 const SPARK_COLOR = [255, 214, 140];
 const BAR_COLOR = [255, 110, 70];
 const PICKUP_COLOR = [255, 236, 210];
+const FLASH = [255, 255, 255]; // a headshot's number, in the figures' flash white
 const SPARK_ART = [{ ch: '*', ang: -Math.PI / 2 }, { ch: '+', ang: Math.PI / 6 }, { ch: '·', ang: Math.PI * 5 / 6 }];
-const SPARK_TIME = 0.25, SPARK_STILL = 0.2, SPARK_REACH = 1.5, NUMBER_TIME = 0.6;
+const SPARK_TIME = 0.25, SPARK_STILL = 0.2, SPARK_REACH = 1.5, NUMBER_TIME = 0.6, HEAD_TIME = NUMBER_TIME * 1.3;
 const whiten = (c) => c.map((v) => Math.round((v + 255) / 2));
 
 export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = false }) {
@@ -27,16 +28,19 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     if (b) b.n = n;
   }
 
-  function hit({ n, x, y, d, at }) {
+  // hs: a headshot: -50! in flash white, lasting 1.3 times as long.
+  function hit({ n, x, y, d, at, hs = false }) {
     bullets = bullets.filter((b) => b.n == null || b.n !== n);
     sparks.push({ x, y, t0: at / 1000 });
-    numbers.push({ x, y: y - 2, text: `-${d}`, t0: at / 1000 });
+    numbers.push(hs
+      ? { x, y: y - 2, text: `-${d}!`, t0: at / 1000, life: HEAD_TIME, color: FLASH }
+      : { x, y: y - 2, text: `-${d}`, t0: at / 1000, life: NUMBER_TIME, color: SPARK_COLOR });
   }
 
   function step(dt, nowMs, bodies = []) {
     const now = nowMs / 1000;
     sparks = sparks.filter((s) => now - s.t0 <= SPARK_TIME);
-    numbers = numbers.filter((q) => now - q.t0 < NUMBER_TIME);
+    numbers = numbers.filter((q) => now - q.t0 < q.life);
     bullets = bullets.filter((b) => {
       const reach = GUNS[b.gun].speed;
       if (now - b.t0 >= b.end / reach) return false;
@@ -77,11 +81,11 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
       }
     }
     for (const q of numbers) {
-      if (now - q.t0 >= NUMBER_TIME) continue;
-      const k = Math.max(0, (now - q.t0) / NUMBER_TIME);
+      if (now - q.t0 >= q.life) continue;
+      const k = Math.max(0, (now - q.t0) / q.life);
       const y = reducedMotion ? q.y : q.y - k;
       for (let i = 0; i < q.text.length; i++) {
-        out.push({ x: q.x + i - (q.text.length - 1) / 2, y, ch: q.text[i], color: SPARK_COLOR, a: 1 - k });
+        out.push({ x: q.x + i - (q.text.length - 1) / 2, y, ch: q.text[i], color: q.color, a: 1 - k });
       }
     }
     for (const o of bodies) {

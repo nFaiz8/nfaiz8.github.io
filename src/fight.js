@@ -102,6 +102,12 @@ export function sweep(p0, p1, c0, c1, hw = 0.5, hh = 1.5) {
   return enter <= exit && exit >= 0 && enter <= 1 ? Math.max(0, enter) : -1;
 }
 
+// Headshots: a bullet's hit point (dx cells, dy rows from the target's centre), clamped into the hurtbox,
+// is on the head when it is in the top row of the box. Damage is HEADSHOT times; melee has none.
+export const HEADSHOT = 2;
+const HEAD_LINE = -0.5;
+export const isHeadshot = (rel) => Math.max(-HURT.hh, Math.min(HURT.hh, rel.dy)) < HEAD_LINE;
+
 // Health.
 export const regenHp = (hp, hurtAt, now) => Math.min(MAX_HP, hp + Math.max(0, now - hurtAt - REGEN_AFTER) * REGEN_RATE);
 export const fleeKiller = (f, now) => (f.hitBy && now - f.hurtAt <= FLEE_TIME ? f.hitBy : null);
