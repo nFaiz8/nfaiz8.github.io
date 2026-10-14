@@ -1,6 +1,5 @@
 // Loads the 512px "low" images and turns them into character cells. Cached per photo and size.
 import { toCells, stretchRange } from './ascii.js';
-import { coverCrop } from './arena.js';
 
 const images = new Map(); // id → Promise<ImageBitmap>
 const failed = new Set();
@@ -39,11 +38,10 @@ export function loadImage(photo, size = 'low') {
 
 export const hasFailed = (id) => failed.has(id);
 
-function pixels(bitmap, w, h, crop = null) {
+function pixels(bitmap, w, h) {
   const c = new OffscreenCanvas(w, h);
   const ctx = c.getContext('2d', { willReadFrequently: true });
-  if (crop) ctx.drawImage(bitmap, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, w, h);
-  else ctx.drawImage(bitmap, 0, 0, w, h);
+  ctx.drawImage(bitmap, 0, 0, w, h);
   return ctx.getImageData(0, 0, w, h);
 }
 
@@ -52,14 +50,12 @@ export function rangeOf(photo, bitmap) {
   return ranges.get(photo.id);
 }
 
-// Synchronous lookup; returns null until the image has loaded. cover: crop the middle of the image to the
-// cells' shape instead of stretching it (the arena backdrop).
-export function cellsFor(photo, cols, rows, mono, bitmap, cover = false) {
-  const key = `${photo.id}:${cols}x${rows}:${mono ? 1 : 0}${cover ? ':cover' : ''}`;
+// Synchronous lookup; returns null until the image has loaded.
+export function cellsFor(photo, cols, rows, mono, bitmap) {
+  const key = `${photo.id}:${cols}x${rows}:${mono ? 1 : 0}`;
   let c = cells.get(key);
   if (!c && bitmap) {
-    const crop = cover ? coverCrop(bitmap.width, bitmap.height, cols, rows) : null;
-    const img = pixels(bitmap, Math.round(Math.min(crop ? crop.sw : bitmap.width, cols * 4)), Math.round(Math.min(crop ? crop.sh : bitmap.height, rows * 8)), crop);
+    const img = pixels(bitmap, Math.min(bitmap.width, cols * 4), Math.min(bitmap.height, rows * 8));
     c = toCells(img, cols, rows, { mono, range: rangeOf(photo, bitmap) });
     cells.set(key, c);
   }

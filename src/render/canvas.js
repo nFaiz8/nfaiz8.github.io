@@ -6,6 +6,7 @@ import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, cellsFor, hasFailed } from '../photos.js';
 import { lightWindow } from '../light.js';
+import { coverCrop } from '../arena.js';
 
 const CW = 48, CH = 24; // chunk size in cells
 
@@ -131,21 +132,28 @@ export function createCanvasRenderer() {
     return cv;
   }
 
-  // Side view: the arena's photo over the whole back wall, and the level's platforms on top of it.
+  // Side view: the arena's photo over the whole back wall (the photograph itself, cropped to the room's
+  // shape; this chunk draws its own slice of it), and the level's platforms on top.
   function bakeArena(c, x0, y0) {
     const a = map.arena, f = a.backdrop;
     const bmp = f && bitmaps.get(f.id);
-    const cells = bmp ? cellsFor(f.photo, f.cols, f.rows, false, bmp, true) : null;
-    for (let y = 0; y < CH; y++) {
+    const ix0 = Math.max(x0, a.x + 1), ix1 = Math.min(x0 + CW, a.x + 1 + a.cols);
+    const iy0 = Math.max(y0, a.y + 1), iy1 = Math.min(y0 + CH, a.y + 1 + a.rows);
+    if (ix0 >= ix1 || iy0 >= iy1) return;
+    if (bmp) {
+      const cr = coverCrop(bmp.width, bmp.height, a.cols, a.rows);
+      const kx = cr.sw / a.cols, ky = cr.sh / a.rows;
+      c.imageSmoothingEnabled = true;
+      c.imageSmoothingQuality = 'high';
+      c.drawImage(bmp, cr.sx + (ix0 - a.x - 1) * kx, cr.sy + (iy0 - a.y - 1) * ky, (ix1 - ix0) * kx, (iy1 - iy0) * ky,
+        (ix0 - x0) * m.cw, (iy0 - y0) * m.ch, (ix1 - ix0) * m.cw, (iy1 - iy0) * m.ch);
+    }
+    for (let y = iy0 - y0; y < iy1 - y0; y++) {
       const ay = y0 + y - a.y - 1;
-      if (ay < 0 || ay >= a.rows) continue;
-      for (let x = 0; x < CW; x++) {
+      for (let x = ix0 - x0; x < ix1 - x0; x++) {
         const ax = x0 + x - a.x - 1;
-        if (ax < 0 || ax >= a.cols) continue;
-        const k = ay * a.cols + ax;
-        if (cells) put(c, RAMP[cells.glyph[k]], x, y, cells.fg.subarray(k * 3, k * 3 + 3), cells.bg.subarray(k * 3, k * 3 + 3));
-        else if (f && hasFailed(f.id)) put(c, (ax + ay) % 2 ? '?' : ' ', x, y, C.plaque, C.bg); // as a print that failed
-        const kind = a.level.cells[k];
+        if (!bmp && f && hasFailed(f.id)) put(c, (ax + ay) % 2 ? '?' : ' ', x, y, C.plaque, C.bg); // as a print that failed
+        const kind = a.level.cells[ay * a.cols + ax];
         if (kind) put(c, kind === 1 ? '═' : '▓', x, y, C.platform, C.platformBg);
       }
     }

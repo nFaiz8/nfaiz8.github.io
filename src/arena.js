@@ -4,7 +4,7 @@
 import { CELL_ASPECT, isWalkable } from './layout.js';
 
 export const AIR = 0, PLATFORM = 1, SOLID = 2;
-export const LEVEL_COLS = 240, LEVEL_ROWS = 50;
+export const LEVEL_COLS = 160, LEVEL_ROWS = 34;
 
 // src/arena.txt → one kind per interior cell, top row first. Anything unexpected is air, so a typo can't
 // wall you in.

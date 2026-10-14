@@ -13,11 +13,11 @@ comes later and builds on this room.
 
 ### What the user chose
 
-- **Photo as the backdrop**: the photo fills the whole back wall as ASCII art. Because the room is big,
-  the art is much more detailed than a print on a gallery wall.
+- **Photo as the backdrop**: the photo fills the whole back wall as the real photograph, not ASCII art,
+  so you can tell what it is. (Changed 2026-10-14 after trying it: the ASCII version didn't read.)
 - **Animated transition** at the door: the view tilts from top-down to side-on.
 - **A hand-drawn ASCII level file** for the platforms.
-- **Two screens wide**: about 240 × 50 cells.
+- **About one computer screen wide**: 160 × 34 cells. (Changed 2026-10-14 from 240 × 50: smaller.)
 - **Phone buttons**: `◀ ▶` and `JUMP`.
 - **Glowing platforms with film halation**, not a dimmed photo.
 - **The arena photo can be viewed**: it stays in the all-photos grid, and its viewer has an `arena →`
@@ -41,14 +41,14 @@ comes later and builds on this room.
 - **Corridor**: a 5-row corridor runs west from the middle of the lobby's west wall, the same length as
   the darkroom corridor (10). A `← ARENA` sign is inside the lobby by the door.
 - **Room**:
-  - The interior is **240 × 50** cells, plus walls.
+  - The interior is **160 × 34** cells, plus walls.
   - The arena's door is on its **east wall**, using the **bottom 3 interior rows**, which line up with
     the corridor's middle 3 rows. You walk in along the floor.
 - **Room record**: `id: 'arena'`, `name: 'Arena'`.
   - It appears on the map (M) and can be picked to walk there.
   - `#/room/arena` links work like other room links.
   - Its `entry` is the first floor cell just inside the door.
-- **No overlap with the north wing**: the arena rises about 36 rows above the lobby, into the space the
+- **No overlap with the north wing**: the arena rises about 20 rows above the lobby, into the space the
   north wing's west-side rooms use today. Those rooms start beyond the arena's top, the same way the
   east-side rooms already start beyond the darkroom.
 - **Seen from outside** (top-down), the arena is a closed dark room behind its door. The backdrop,
@@ -67,10 +67,10 @@ comes later and builds on this room.
   - When the open photo in the viewer is the arena photo, the viewer shows an **`arena →`** button. It
     closes the viewer and walks you to the arena door, the same quick walk a map pick uses.
 - **Drawing**:
-  - The backdrop is one large frame covering the room's interior, drawn by the renderers' existing frame
-    path.
-  - The photo is **cover-fitted**: scaled to fill 240 × 50 cells, keeping its aspect ratio, and cropped
-    in the middle. It uses the high-resolution image, as prints do.
+  - The backdrop is one large frame covering the room's interior, drawn as the photograph itself (pixels,
+    not characters), under the glowing platforms and the arena's light.
+  - The photo is **cover-fitted**: scaled to fill 160 × 34 cells, keeping its aspect ratio, and cropped
+    in the middle. It uses the high-resolution image, loaded only once you are near the arena.
   - IMG_4927 (5066 × 2075, about 2.4:1) needs almost no crop.
 - **Caption in the arena**:
   - It shows the photo's caption line with `[E] open` and the ♥.
@@ -84,7 +84,7 @@ comes later and builds on this room.
 
 ### Level file
 
-- `src/arena.txt` holds **50 lines of 240 characters**, one character per interior cell, top row first.
+- `src/arena.txt` holds **34 lines of 160 characters**, one character per interior cell, top row first.
   - space: air
   - `═`: a platform. You can stand on it from above, jump up through it, and drop down through it.
   - `▓`: a solid block, solid from every side.
@@ -134,7 +134,8 @@ Rows are the vertical cell unit and positive y is down. A cell is twice as tall 
 
 - **Horizontal**: it follows you with a small lead in the direction you're running.
 - **Vertical**:
-  - If the view has at least 52 rows, the whole room height is shown, centred.
+  - If the view has at least 36 rows (the room with its walls), the whole room height is shown, centred,
+    and everything outside the room is dark.
   - Otherwise it follows you. It keeps the floor in view while you're within about a screen of it, and
     follows you up beyond that.
 - It is clamped to the room, so side view never shows anything outside the arena.
@@ -204,7 +205,7 @@ Rows are the vertical cell unit and positive y is down. A cell is twice as tall 
 
 - **Unit** (`npm test`):
   - `test/arena.test.js`, the level file:
-    - 50 × 240;
+    - 34 × 160;
     - only known characters;
     - the door cells are clear;
     - every `═` and every top of `▓` can be reached from the floor. A standing spot reaches another if
@@ -219,7 +220,7 @@ Rows are the vertical cell unit and positive y is down. A cell is twice as tall 
     - coyote time and the jump buffer each allow a jump that would otherwise miss.
   - `test/layout.test.js`:
     - the arena is west of the lobby;
-    - its interior is 240 × 50;
+    - its interior is 160 × 34;
     - its door lines up with the corridor;
     - it is reachable from spawn;
     - no room overlaps it;

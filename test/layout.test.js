@@ -94,13 +94,13 @@ const withArena = (photoId = 'IMG_1003') => {
   return buildLayout(d, SITE, { arena: { photo: d.byId.get(photoId) || null, level } });
 };
 
-test('the arena is west of the lobby: 240 × 50 inside, its door in line with a 10-cell corridor', () => {
+test('the arena is west of the lobby: 160 × 34 inside, its door in line with a 10-cell corridor', () => {
   const map = withArena();
   const a = map.arena, lobby = map.rooms[0], room = map.rooms.at(-1);
   assert.equal(room.id, 'arena');
   assert.equal(a.index, map.rooms.length - 1);
-  assert.equal(a.w - 2, 240);
-  assert.equal(a.h - 2, 50);
+  assert.equal(a.w - 2, 160);
+  assert.equal(a.h - 2, 34);
   assert.equal(lobby.x - a.door.x, 10, 'corridor length');
   assert.ok(a.x + a.w <= lobby.x, 'west of the lobby');
   // Door: the bottom 3 interior rows of the east wall, and the matching cells of the lobby's west wall.
@@ -138,7 +138,7 @@ test('the arena photo is one backdrop frame over the whole room, last in the fra
   assert.equal(f, a.backdrop);
   assert.equal(f.id, 'IMG_1003');
   assert.equal(f.backdrop, true);
-  assert.deepEqual([f.x, f.y, f.w, f.h, f.cols, f.rows], [a.x, a.y, a.w, a.h, 240, 50]);
+  assert.deepEqual([f.x, f.y, f.w, f.h, f.cols, f.rows], [a.x, a.y, a.w, a.h, 160, 34]);
   assert.equal(map.frames.filter((x) => x.id === 'IMG_1003').length, 1, 'not also on a colour-room wall');
   assert.deepEqual(map.rooms[a.index].frames, [f]);
 });

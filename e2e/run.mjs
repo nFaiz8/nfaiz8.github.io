@@ -2,6 +2,7 @@
 import { withBrowser, ready, sleep } from './lib.mjs';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
+import { coverCrop } from '../src/arena.js';
 
 const results = [];
 const check = async (name, fn) => {
@@ -266,11 +267,11 @@ await withBrowser(async ({ page, url, errors }) => {
       // Top-down, from the corridor: the arena's inside, west of the door.
       const outside = await sharp(await page.screenshot({ clip: await cellsClip(page, a.door.x - 40, a.door.y - 12, 30, 12) })).stats();
       const dark = outside.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
-      // Side view: the middle of the 22-cell platform 5 rows up near the door (level cols 196–217, row 45).
+      // Side view: the middle of the 18-cell platform 5 rows up near the door (level cols 128–145, row 29).
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
       await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
       await sleep(400);
-      const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 200, a.y + 1 + 45, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
+      const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 130, a.y + 1 + 29, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
       let warm = 0, lum = [];
       for (let i = 0; i < data.length; i += info.channels) {
         const [R, G, B] = [data[i], data[i + 1], data[i + 2]];
@@ -282,6 +283,35 @@ await withBrowser(async ({ page, url, errors }) => {
       console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform warm ${(warmShare * 100).toFixed(1)}%, median ${median.toFixed(0)}`);
       assert.ok(dark < 12, `outside, the arena is dark (${dark.toFixed(1)})`);
       assert.ok(warmShare > 0.01 && median < 90, 'platform glyphs: warm white strokes on a dark ground');
+    });
+  }
+  // How closely a screenshot of some arena cells matches the backdrop photo itself (luminance correlation).
+  const likePhoto = async (p, a, cx, cy, w, h) => {
+    const src = await p.evaluate(() => window.__ascii.map.arena.backdrop.photo.src.hi);
+    const file = new URL(`../public/${src}`, import.meta.url).pathname;
+    const shot = await sharp(await p.screenshot({ clip: await cellsClip(p, a.x + 1 + cx, a.y + 1 + cy, w, h) })).raw().toBuffer({ resolveWithObject: true });
+    const { width: W, height: H } = await sharp(file).metadata();
+    const cr = coverCrop(W, H, a.cols, a.rows), kx = cr.sw / a.cols, ky = cr.sh / a.rows;
+    const ref = await sharp(file).extract({ left: Math.round(cr.sx + cx * kx), top: Math.round(cr.sy + cy * ky), width: Math.round(w * kx), height: Math.round(h * ky) })
+      .resize(shot.info.width, shot.info.height, { fit: 'fill' }).removeAlpha().raw().toBuffer();
+    const n = shot.info.width * shot.info.height, sc = shot.info.channels;
+    const A = [], B = [];
+    for (let i = 0; i < n; i++) { A.push(shot.data[i * sc] + shot.data[i * sc + 1] + shot.data[i * sc + 2]); B.push(ref[i * 3] + ref[i * 3 + 1] + ref[i * 3 + 2]); }
+    const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, ma = mean(A), mb = mean(B);
+    let ab = 0, aa = 0, bb = 0;
+    for (let i = 0; i < n; i++) { ab += (A[i] - ma) * (B[i] - mb); aa += (A[i] - ma) ** 2; bb += (B[i] - mb) ** 2; }
+    return ab / Math.sqrt(aa * bb);
+  };
+  for (const r of ['canvas', 'gl']) {
+    await check(`${r}: the arena backdrop is the photograph itself, not characters`, async () => {
+      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      const a = await page.evaluate(() => { const a = window.__ascii.map.arena; return { x: a.x, y: a.y, cols: a.cols, rows: a.rows, id: a.backdrop.id }; });
+      await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
+      await sleep(400);
+      // Above the top tier of platforms (level rows 1–6, cols 60–100): only the photo is there.
+      const corr = await likePhoto(page, a, 60, 1, 40, 6);
+      console.log(`  ${r} arena: backdrop vs the photo file, correlation ${corr.toFixed(3)}`);
+      assert.ok(corr > 0.9, `the photograph (${corr.toFixed(3)})`);
     });
   }
   await check('arena on a landscape phone: ◀ ▶ JUMP ▼ show only inside, are big enough, and work', async () => {

@@ -52,6 +52,7 @@ export function createGlRenderer() {
       ascii: compile(S.ASCII_VS, S.ASCII_FS),
       glyph: compile(S.GLYPH_VS, S.GLYPH_FS),
       light: compile(S.ASCII_VS, S.LIGHT_FS),
+      backdrop: compile(S.BACKDROP_VS, S.BACKDROP_FS),
     };
 
     // Full-screen triangle (tiles, ascii) — attribute 0
@@ -277,14 +278,12 @@ export function createGlRenderer() {
     gl.uniform1i(pp.u.u_img, 0);
     for (const f of map.frames) {
       const t = photoTex.get(f.id);
-      if (!t) continue;
-      if (f.backdrop && world.mode !== 'side') continue; // the arena is a dark room from outside
+      if (!t || f.backdrop) continue; // the arena's photo is drawn as itself, after the ASCII pass
       if (f.x > origin[0] + sceneSize[0] || f.x + f.w < origin[0] || f.y > origin[1] + sceneSize[1] || f.y + f.h < origin[1]) continue;
       gl.bindTexture(gl.TEXTURE_2D, t.tex);
       gl.uniform4f(pp.u.u_rect, f.x + 1 + swayOf(world, f), f.y + 1, f.cols, f.rows);
       gl.uniform2f(pp.u.u_range, t.range[0], t.range[1]);
       gl.uniform1f(pp.u.u_mono, f.darkroom ? 1 : 0);
-      gl.uniform4f(pp.u.u_uv, t.uv[0], t.uv[1], t.uv[2], t.uv[3]);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
     gl.bindTexture(gl.TEXTURE_2D, sceneTex);
@@ -331,6 +330,23 @@ export function createGlRenderer() {
       gl.uniform2f(pg.u.u_atlasGlyphs, atlas.cols, atlas.rows);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, data.length / FLOATS);
     };
+    // Side view: the arena's photo over its back wall, then its platforms (both lit with the room below).
+    const bd = world.mode === 'side' && map.arena && map.arena.backdrop;
+    const bt = bd && photoTex.get(bd.id);
+    if (bt) {
+      const pb = progs.backdrop;
+      gl.disable(gl.BLEND);
+      gl.useProgram(pb.p);
+      gl.bindVertexArray(glyphVao);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, bt.tex);
+      gl.uniform1i(pb.u.u_img, 0);
+      gl.uniform4f(pb.u.u_rect, bd.x + 1, bd.y + 1, bd.cols, bd.rows);
+      gl.uniform4f(pb.u.u_uv, bt.uv[0], bt.uv[1], bt.uv[2], bt.uv[3]);
+      gl.uniform2f(pb.u.u_view, vx, vy);
+      gl.uniform2f(pb.u.u_viewCells, canvas.width / (m.cw * dpr), canvas.height / (m.ch * dpr));
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
     drawGlyphs(staticGlyphs);
     if (world.mode === 'side') drawGlyphs(arenaGlyphs);
     const people = [];

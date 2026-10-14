@@ -5,11 +5,11 @@ import { parseLevel, AIR, PLATFORM, SOLID } from '../src/arena.js';
 
 const text = fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8');
 
-test('the level file is 50 lines of 240 characters, using only space, ═ and ▓', () => {
+test('the level file is 34 lines of 160 characters, using only space, ═ and ▓', () => {
   const lines = text.replace(/\n$/, '').split('\n');
-  assert.equal(lines.length, 50);
+  assert.equal(lines.length, 34);
   lines.forEach((l, i) => {
-    assert.equal([...l].length, 240, `line ${i + 1}`);
+    assert.equal([...l].length, 160, `line ${i + 1}`);
     assert.match(l, /^[ ═▓]*$/, `line ${i + 1}`);
   });
 });
@@ -46,10 +46,10 @@ test('every platform and every block top can be reached from the floor', () => {
 
 test('parseLevel: ═ is a platform, ▓ is solid, anything else is air, and short input is padded', () => {
   const L = parseLevel('═▓x\n');
-  assert.equal(L.cols, 240);
-  assert.equal(L.rows, 50);
+  assert.equal(L.cols, 160);
+  assert.equal(L.rows, 34);
   assert.deepEqual([...L.cells.slice(0, 4)], [PLATFORM, SOLID, AIR, AIR]);
-  assert.equal(L.cells[49 * 240 + 239], AIR);
+  assert.equal(L.cells[33 * 160 + 159], AIR);
 });
 
 import { newBody, stepBody, sideCamera, coverCrop } from '../src/arena.js';
