@@ -25,10 +25,12 @@ test('my bullet is still flying when no body is in its way', () => {
 test('a remote bullet flies to the ▓ the ray cast finds', () => {
   const f = fx();
   f.shot({ id: 'b', n: 4, x: 30.5, y: 27.2, angle: 0, gun: 'deagle', color: [120, 200, 255], mine: false, at: 0 });
-  for (let ms = 16; ms <= 100; ms += 16) f.step(0.016, ms, []);
-  const heads = f.glyphs(100, {}).filter((g) => g.ch === '•');
+  for (let ms = 16; ms <= 48; ms += 16) f.step(0.016, ms, []);
+  const heads = f.glyphs(48, {}).filter((g) => g.ch === '•');
   assert.equal(heads.length, 1);
   assert.ok(heads[0].x <= 35, 'still short of the pillar at col 35');
+  for (let ms = 64; ms <= 100; ms += 16) f.step(0.016, ms, []);
+  assert.equal(f.glyphs(100, {}).filter((g) => g.ch === '•').length, 0, 'gone at the pillar');
   for (let ms = 116; ms <= 400; ms += 16) f.step(0.016, ms, []);
   assert.equal(f.glyphs(400, {}).filter((g) => g.ch === '•').length, 0, 'gone at the pillar');
 });
@@ -90,4 +92,24 @@ test('clear drops bullets, sparks and numbers', () => {
   f.hit({ n: -1, x: 70, y: 27.5, d: 25, at: 0 });
   f.clear();
   assert.equal(f.glyphs(10, {}).length, 0);
+});
+
+test('my bullet flies through a dead body and a spawn-protected one', () => {
+  for (const state of [{ x: 30.5, y: 27.5, act: 'dead' }, { x: 30.5, y: 27.5, safe: true }]) {
+    const f = fx();
+    f.shot({ id: 'me', n: null, x: 23.45, y: 27.2, angle: 0, gun: 'deagle', color: [1, 2, 3], mine: true, at: 0 });
+    for (let ms = 16; ms <= 32; ms += 16) f.step(0.016, ms, [{ id: 'b', state }]);
+    assert.equal(f.glyphs(32, {}).filter((g) => g.ch === '•').length, 1);
+  }
+});
+
+test('with an offset, a remote bullet still ends at the pillar', () => {
+  const f = fx({ offset: { x: 10, y: 5 } });
+  f.shot({ id: 'b', n: 4, x: 40.5, y: 32.2, angle: 0, gun: 'deagle', color: [1, 2, 3], mine: false, at: 0 });
+  for (let ms = 16; ms <= 48; ms += 16) f.step(0.016, ms, []);
+  const heads = f.glyphs(48, {}).filter((g) => g.ch === '•');
+  assert.equal(heads.length, 1);
+  assert.ok(heads[0].x <= 45);
+  for (let ms = 64; ms <= 100; ms += 16) f.step(0.016, ms, []);
+  assert.equal(f.glyphs(100, {}).filter((g) => g.ch === '•').length, 0);
 });

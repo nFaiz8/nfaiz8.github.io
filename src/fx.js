@@ -7,7 +7,6 @@ const SPARK_COLOR = [255, 214, 140];
 const BAR_COLOR = [255, 110, 70];
 const PICKUP_COLOR = [255, 236, 210];
 const SPARK_ART = [{ ch: '*', ang: -Math.PI / 2 }, { ch: '+', ang: Math.PI / 6 }, { ch: '·', ang: Math.PI * 5 / 6 }];
-const WALL_LINGER = 0.1; // a bullet that meets a wall sits there this long before it goes
 const SPARK_TIME = 0.25, SPARK_STILL = 0.2, SPARK_REACH = 1.5, NUMBER_TIME = 0.6;
 const whiten = (c) => c.map((v) => Math.round((v + 255) / 2));
 
@@ -20,8 +19,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
   function shot({ id, n, x, y, angle, gun, color, mine, at }) {
     const l = local(x, y);
     const end = Math.min(rayLength(kindAt, l.x, l.y, angle, bulletRange(gun)), bulletRange(gun));
-    const wall = end < bulletRange(gun);
-    bullets.push({ id, n, x, y, angle, gun, color, mine, t0: at / 1000, end, wall, last: at / 1000 });
+    bullets.push({ id, n, x, y, angle, gun, color, mine, t0: at / 1000, end, last: at / 1000 });
   }
 
   function assign(n) {
@@ -41,12 +39,12 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     numbers = numbers.filter((q) => now - q.t0 < NUMBER_TIME);
     bullets = bullets.filter((b) => {
       const reach = GUNS[b.gun].speed;
-      if (now - b.t0 >= b.end / reach + (b.wall ? WALL_LINGER : 0)) return false;
+      if (now - b.t0 >= b.end / reach) return false;
       if (b.mine && now > b.t0) {
         const a = bulletAt(b, Math.max(b.last, b.t0));
         const z = bulletAt(b, Math.min(now, b.t0 + b.end / reach));
         for (const o of bodies) {
-          if (o.id === b.id || !o.state) continue;
+          if (o.id === b.id || !o.state || o.state.act === 'dead' || o.state.safe) continue;
           const c = { x: o.state.x, y: o.state.y };
           if (sweep(a, z, c, c) >= 0) return false;
         }
@@ -61,7 +59,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     const tmp = [];
     for (const b of bullets) {
       const run = Math.min(b.end, GUNS[b.gun].speed * (now - b.t0));
-      if (run < 0 || (!b.wall && run >= b.end)) continue;
+      if (run < 0 || run >= b.end) continue;
       const color = whiten(b.color);
       for (const g of bulletGlyphs(b.gun, b.angle, tmp)) {
         const back = Math.max(0, run - g.du);
@@ -88,7 +86,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     }
     for (const o of bodies) {
       const s = o.state;
-      if (!s || s.hp == null || s.hp >= MAX_HP || s.act === 'dead' || s.dead) continue;
+      if (!s || s.hp == null || s.hp >= MAX_HP || s.act === 'dead') continue;
       const full = Math.max(0, Math.min(5, Math.ceil(s.hp / 20)));
       for (let i = 0; i < 5; i++) out.push({ x: s.x + i - 2, y: s.y - 3.2, ch: i < full ? '█' : '░', color: BAR_COLOR, a: 1 });
     }
