@@ -12,6 +12,7 @@ import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
 import { createFx } from './fx.js';
 import { arenaTicker } from './live.js';
+import { enterSide } from './world.js';
 
 const DUMMY = 'dummy';
 const DUMMY_SPOT = { x: 80.5, y: 27.5 }; // arena-local: on the yellow line at column 80
@@ -21,11 +22,13 @@ const PK_EVERY = 500, RS_EVERY = 1000; // ms
 const SHAKE = { time: 0.15, amp: 0.4 }; // kicked or popped
 const AIM_WARN = 0.3; // s: a sniper's aim line brightens this long before its next shot is ready
 const MAX_PRESSES = 4; // strike presses handled in one frame
+const URGENT_GAP = 30; // ms: arenaTicker's gap; a forced state stands in for its urgent send within it
 const IDLE = { x: 0, y: 0, run: false, jump: false, down: false };
 const BULLETS = new Set(['d', 'r', 'n']);
 
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const r2 = (v) => Math.round(v * 100) / 100 + 0; // + 0 turns -0 into 0
+const r1 = (v) => Math.round(v * 10) / 10 + 0;
 const sec = (ms) => ms / 1000;
 
 export function createPvp({
@@ -35,13 +38,18 @@ export function createPvp({
   const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
   const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt });
   const fx = createFx({ kindAt: levelKind(level), offset: off, reducedMotion });
-  const ref = createReferee({ level, rand }); // the dummy, offline play, and my own shot/strike bookkeeping
+  // My own referee: my cap, ammo and combo always, and offline the whole fight (the dummy too). Online the
+  // dummy lives in a second one, against a stand-in of me, so its hits never touch what the server owns.
+  const ref = createReferee({ level, rand });
+  const practice = createReferee({ level, rand });
   const me = newFighter(myId() || 'me', 0);
+  const ghost = newFighter(me.id, 0);
   const dummy = { body: null, rec: null, act: null, deadAt: 0 };
   const taken = level.pickups.map(() => -Infinity); // ms when each pickup is back
   const shotAt = new Map(); // id -> ms of their last shot (for sniper aim lines)
 
-  let entered = false, online = false, enteredAt = 0, ticker = arenaTicker(send);
+  let entered = false, online = false, enteredAt = 0, ticker = null;
+  let lastF = null, forced = null, awaitAw = false; // the facing in my last a; a state sent ahead of a shot
   let act = null; // my last act: { act, at, for } in ms
   let aim = 0, aimed = false, bits = 0, urgent = false, wasRolling = false, kills = 0;
   let lastShot = -Infinity, lastPk = -Infinity, lastRs = -Infinity, deadAt = 0;
@@ -73,14 +81,22 @@ export function createPvp({
     const b = dummy.body, l = local(b.x, b.y);
     ref.state(dummy.rec, { x: l.x, y: l.y, vx: b.vx, vy: b.vy, f: 1, g: b.onGround ? 1 : 0, i: 0, a: 0 }, sec(now));
   }
-  // Shown in the side view whenever no real fighter is known (and not just after a dropped connection).
+  // Shown in the side view whenever no real fighter is known (online: once the welcome said so; not just
+  // after a dropped connection).
   function dummyShown(now) {
-    const on = entered && fighters.ids().length === 0 && now >= dummyBackAt;
+    const on = entered && !awaitAw && fighters.ids().length === 0 && now >= dummyBackAt;
     if (on && !dummyUp) resetDummy(now);
     dummyUp = on;
     return on;
   }
-  const everyone = (now) => (dummyShown(now) ? [me, dummy.rec] : [me]);
+  const everyone = (now) => (!online && dummyShown(now) ? [me, dummy.rec] : [me]); // who my referee's rules reach
+
+  // Online, the stand-in that shoots and strikes the dummy: me as I am now, endless ammo, the gun in hand.
+  function syncGhost(now, facing, gun) {
+    Object.assign(ghost, { id: me.id, arena: true, alive: me.alive, gun, ammo: -1, safeUntil: 0, combo: me.combo, strikeAt: me.strikeAt, lastStrike: me.lastStrike, airAt: me.airAt });
+    practice.state(ghost, snap(now, facing), sec(now));
+  }
+  const atDummy = (now) => online && dummyShown(now);
 
   function dummyMsg(m, now) {
     const b = dummy.body;
@@ -98,7 +114,25 @@ export function createPvp({
     }
   }
 
-  // The local referee's messages: offline all of them, online only what happens to the dummy.
+  // The ticker's sends. A state forced out ahead of a shot stands in for the ticker's next urgent send
+  // (same facing, input and ground, within its gap), so the ticker records it as sent and nothing repeats.
+  function tickerSend(m) {
+    const f = forced;
+    forced = null;
+    if (f && m.ts - f.ts < URGENT_GAP && m.f === f.f && m.i === f.i && m.g === f.g) return true;
+    const ok = send(m);
+    if (ok) lastF = m.f;
+    return ok;
+  }
+  // A facing the server hasn't heard yet goes out before the shot, or it would find the shot ~6 cells
+  // from the muzzle it expects and fire from the other side.
+  function forceState(now, facing) {
+    const s = snap(now, facing);
+    const c = { t: 'a', ...s, x: r2(s.x), y: r2(s.y), a: r2(s.a), vx: r1(s.vx), vy: r1(s.vy) };
+    if (send(c)) { forced = c; lastF = c.f; }
+  }
+
+  // The local referees' messages: offline all of them, online only what happens to the dummy.
   function runLocal(out, now) {
     for (const m of out) if (!online || m.id === DUMMY) apply(m, now, true);
     me.kills = kills; // the referee credits dummy pops; they never count
@@ -163,6 +197,7 @@ export function createPvp({
       if (Array.isArray(m.pk)) for (const q of m.pk) if (q && pickOk(q.n) && num(q.at)) taken[q.n] = now + q.at;
       const list = Array.isArray(m.fighters) ? m.fighters.filter((q) => q && !isMe(q.id)) : [];
       fighters.apply({ ...m, fighters: list }, now);
+      awaitAw = false;
       return;
     }
     if (m.t === 'k' && isMe(m.by) && num(m.kills)) kills = me.kills = m.kills;
@@ -201,7 +236,11 @@ export function createPvp({
     lastShot = now;
     act = { act: 'shoot', at: now, for: ACT_TIME.shoot * 1000 };
     fx.shot({ id: me.id, n: null, x: x + off.x, y: y + off.y, angle: a, gun, color: colorOf(me.id), mine: true, at: now });
-    if (online) send({ t: 'f', x, y, a, ts: ts(now) });
+    if (online) {
+      if ((facing < 0 ? -1 : 1) !== lastF) forceState(now, facing);
+      send({ t: 'f', x, y, a, ts: ts(now) });
+      if (atDummy(now)) { syncGhost(now, facing, gun); runLocal(practice.fire(ghost, { x, y, a }, t, [ghost, dummy.rec]).out, now); }
+    }
     runLocal(r.out, now);
   }
 
@@ -211,11 +250,13 @@ export function createPvp({
     const { kind } = nextStrike(me, t, !world.player.onGround);
     const k = STRIKES[kind].code;
     ref.state(me, snap(now), t);
+    if (atDummy(now)) syncGhost(now, world.player.facing, me.gun); // before my combo moves on
     const r = ref.strike(me, { k }, t, everyone(now));
     if (!r.ok) return;
     act = { act: kind, at: now, for: ACT_TIME[kind] * 1000 };
     if (online) send({ t: 'm', k, ts: ts(now) });
     runLocal(r.out, now);
+    if (atDummy(now)) runLocal(practice.strike(ghost, { k }, t, [ghost, dummy.rec]).out, now);
   }
 
   function control(inp, now) {
@@ -259,6 +300,7 @@ export function createPvp({
       syncDummy(now);
     }
     runLocal(ref.tick(t, everyone(now)), now);
+    if (online) runLocal(practice.tick(t, on ? [ghost, dummy.rec] : [ghost]), now);
     fx.step(dt, now, bodies(now));
     if (online && me.alive) { ticker(snap(now), now, urgent); urgent = false; }
     if (me.alive) {
@@ -272,7 +314,7 @@ export function createPvp({
       if (!online) runLocal(ref.respawn(me, t, everyone(now)).out, now);
       else if (now - lastRs >= RS_EVERY) { send({ t: 'rs' }); lastRs = now; }
     }
-    if (on && !dummy.rec.alive && now - dummy.deadAt >= RESPAWN_TIME * 1000) runLocal(ref.respawn(dummy.rec, t, everyone(now), DUMMY_SPOT).out, now);
+    if (on && !dummy.rec.alive && now - dummy.deadAt >= RESPAWN_TIME * 1000) runLocal(ref.respawn(dummy.rec, t, [dummy.rec], DUMMY_SPOT).out, now);
   }
 
   // ---------- what to draw ----------
@@ -329,26 +371,26 @@ export function createPvp({
   function freshFight(now) {
     me.id = myId() || me.id;
     ref.bullets.length = 0;
+    practice.bullets.length = 0;
+    lastF = forced = null;
     ref.enter(me, sec(now));
     Object.assign(me, { combo: 0, strikeAt: -1e9, lastStrike: null });
     act = null;
     aim = 0; aimed = false; bits = 0; urgent = false; wasRolling = false;
     lastShot = lastPk = lastRs = -Infinity;
     enteredAt = now;
-    ticker = arenaTicker(send);
+    ticker = arenaTicker(tickerSend);
     ref.state(me, snap(now), sec(now));
   }
 
   function enter(now, isOnline) {
     entered = true;
     online = !!isOnline;
-    fighters.clear();
-    fx.clear();
-    shotAt.clear();
+    fighters.clear(); fx.clear(); shotAt.clear();
     world.aimFacing = 0;
     freshFight(now);
-    dummyBackAt = now;
-    dummyUp = false;
+    awaitAw = online; // online, whether anyone else is here is the welcome's to say
+    dummyBackAt = now; dummyUp = false;
     dummyShown(now);
     if (online) send({ t: 'ae' });
   }
@@ -358,12 +400,10 @@ export function createPvp({
     if (online) send({ t: 'al' });
     ref.leave(me, sec(now), [me]);
     ref.bullets.length = 0;
-    entered = false;
-    dummyUp = false;
-    fighters.clear();
-    fx.clear();
-    act = null;
-    aimed = false; bits = 0;
+    practice.bullets.length = 0;
+    awaitAw = entered = dummyUp = aimed = false;
+    fighters.clear(); fx.clear();
+    act = null; bits = 0;
     world.aimFacing = 0;
   }
 
@@ -378,10 +418,17 @@ export function createPvp({
       fx.clear();
       shotAt.clear();
       ref.bullets.length = 0;
+      practice.bullets.length = 0;
+      awaitAw = false;
       Object.assign(me, { hp: MAX_HP, hurtAt: -1e9, hitBy: null });
       if (!shown) dummyBackAt = now + DUMMY_BACK;
     } else {
+      // A reconnect is a fresh entry, and the server starts a fresh entry at the door: go there the way
+      // walking in does, so body, camera and server agree.
+      awaitAw = !dummyShown(now); // a dummy already up stays until the welcome says otherwise
       online = true;
+      enterSide(world);
+      world.aimFacing = 0;
       freshFight(now);
       send({ t: 'ae' });
     }
@@ -389,7 +436,9 @@ export function createPvp({
 
   return {
     enter, leave, setOnline, control, frame, bodies, glyphs, hud,
-    onMessage(m, now) { try { apply(m, now); } catch { /* a malformed message is ignored */ } },
+    onMessage(m, now) {
+      try { apply(m, now); } catch (e) { console.warn('pvp: a message was ignored', m && m.t, e); }
+    },
     me, dummy, fighters, fx,
     get online() { return online; },
     get entered() { return entered; },

@@ -6,6 +6,8 @@ import { buildLayout } from '../src/layout.js';
 import { parseLevel } from '../src/level.js';
 import { createWorld, step, teleport } from '../src/world.js';
 import { createPvp } from '../src/pvp.js';
+import { createReferee, newFighter } from '../src/referee.js';
+import { muzzleOf } from '../src/fight.js';
 
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
 const level = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
@@ -114,6 +116,8 @@ test('online: h for me lowers hp and knocks me back; k pops me with a note; rs a
 
 test('when a real fighter enters, the dummy pops quietly; alone again, it comes back', () => {
   const s = setup({ online: true });
+  // Fix round 1 (item 4): online, the dummy waits for the arena welcome; an empty one shows it.
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [] }, s.now);
   assert.ok(s.pvp.bodies(s.now).some((b) => b.dummy));
   s.pvp.onMessage({ t: 'aj', id: 'b', hp: 100, kills: 0 }, s.now);
   s.pvp.onMessage({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 }, s.now);
@@ -333,4 +337,136 @@ test('an aw rebuilds the fighters and sets the pickups; mine is never a remote f
   const sniper = level.pickups[0];
   assert.ok(g.some((q) => q.ch === '·' && Math.abs(q.y - (off.y + sniper.y - 0.5)) < 0.2), 'the taken sniper is a dim outline');
   assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
+});
+
+// ---- fix round 1 ----
+
+const emptyAw = (w = 'd', ammo = -1) => ({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w, ammo }, pk: [], fighters: [] });
+
+test('a frame that flips facing and fires sends an a with the new facing before the f, and no duplicate after', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw(), s.now);
+  s.frames(10);
+  const n = s.sent.length;
+  const mouse = { on: true, x: s.world.player.x - 10, y: s.world.player.y };
+  s.frames(1, { fire: true, mouse });
+  const now = s.sent.slice(n);
+  const fi = now.findIndex((m) => m.t === 'f'), as = now.filter((m) => m.t === 'a');
+  assert.ok(fi > 0, JSON.stringify(now));
+  assert.equal(as.length, 1);
+  assert.equal(now.indexOf(as[0]) < fi, true);
+  assert.equal(as[0].f, -1);
+  const mz = muzzleOf(as[0].x, as[0].y, as[0].f, as[0].a, 'deagle');
+  assert.ok(Math.abs(now[fi].x - mz.x) <= 3 && Math.abs(now[fi].y - mz.y) <= 2, 'the server finds the shot at the muzzle');
+  const m = s.sent.length;
+  s.frames(1, { mouse });
+  assert.ok(!s.sent.slice(m).some((q) => q.t === 'a'), 'the ticker does not repeat the forced state');
+});
+
+// A server-side referee fed exactly what the browser sends, at the same clock.
+function serverSim(gun, ammo) {
+  const srv = createReferee({ level, rand: () => 0.5 });
+  const S = newFighter('me', 0);
+  srv.enter(S, 0);
+  Object.assign(S, { gun, ammo, safeUntil: 0 });
+  let seen = 0, rejected = 0;
+  return {
+    S,
+    get rejected() { return rejected; },
+    feed(sent, now) {
+      srv.tick(now / 1000, [S]);
+      for (; seen < sent.length; seen++) {
+        const m = sent[seen];
+        if (m.t === 'a') srv.state(S, m, now / 1000);
+        else if (m.t === 'f' && !srv.fire(S, m, now / 1000, [S]).ok) rejected++;
+      }
+    },
+  };
+}
+
+test('online, shooting the dummy never frees my in-flight cap or spends ammo the server does not see', () => {
+  for (const [gun, code, ammo] of [['rifle', 'r', 40], ['deagle', 'd', -1]]) {
+    const s = setup({ online: true, at: { x: 48.5, y: 27.5 } }); // 82 clear cells east, through the dummy
+    s.pvp.onMessage(emptyAw(code, ammo), s.now);
+    const srv = serverSim(gun, ammo);
+    let now = s.now, hit = false;
+    for (let k = 0; k < 60 * 3.5; k++) {
+      now += 1000 / 60;
+      step(s.world, 1 / 60, s.pvp.control({ ...IN, fire: k > 10 }, now));
+      s.pvp.frame(1 / 60, now);
+      srv.feed(s.sent, now);
+      const d = s.pvp.bodies(now).find((b) => b.dummy);
+      hit ||= !!d && d.state.hp < 100;
+    }
+    const shots = s.sent.filter((m) => m.t === 'f').length;
+    assert.ok(hit, `${gun}: the dummy was hit`);
+    assert.equal(srv.rejected, 0, `${gun}: shots the server refused`);
+    if (ammo > 0) {
+      assert.ok(shots >= 30 && shots < 40, `${gun}: ${shots} shots`);
+      assert.equal(s.pvp.me.ammo, ammo - shots);
+      assert.equal(s.pvp.me.ammo, srv.S.ammo);
+    }
+  }
+});
+
+test('reconnecting inside the arena enters at the door, like walking in: the first a carries the door point', () => {
+  const s = setup({ online: false, at: { x: 50.5, y: 27.5 } });
+  s.frames(5);
+  s.pvp.setOnline(true, s.now);
+  assert.equal(s.world.player.x, A.entry.x + 0.5);
+  assert.equal(s.world.player.y, A.floorY - 1.5);
+  assert.equal(s.world.player.x - off.x, 159.5);
+  assert.equal(s.world.player.y - off.y, 32.5);
+  const n = s.sent.findIndex((m) => m.t === 'ae');
+  assert.ok(n >= 0);
+  s.frames(5);
+  const a = s.sent.slice(n).find((m) => m.t === 'a');
+  assert.ok(a && a.x === 159.5 && a.y === 32.5, JSON.stringify(a));
+});
+
+test('online, the dummy waits for the arena welcome: no grey flash in a busy arena', () => {
+  const s = setup({ online: true });
+  assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
+  s.frames(5);
+  assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
+  s.pvp.onMessage({ ...emptyAw(), fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 20.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 }] }, s.now);
+  s.frames(5);
+  assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
+  const o = setup({ online: false });
+  assert.ok(o.pvp.bodies(o.now).some((b) => b.dummy), 'offline it is there at once');
+});
+
+test('a message that breaks the handler is logged with console.warn, not swallowed', () => {
+  const s = setup({ online: true });
+  const warn = console.warn, seen = [];
+  console.warn = (...a) => seen.push(a);
+  try {
+    const bad = { t: 'h', id: 'me', by: 'b', w: 'd' };
+    Object.defineProperty(bad, 'hp', { get() { throw new Error('boom'); } });
+    s.pvp.onMessage(bad, s.now);
+  } finally { console.warn = warn; }
+  assert.equal(seen.length, 1);
+});
+
+test('popped while holding a pickup gun: back to the deagle at once, and after the respawn', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw('r', 33), s.now);
+  assert.equal(s.pvp.me.gun, 'rifle');
+  s.pvp.onMessage({ t: 'k', id: 'me', by: 'b', kills: 1 }, s.now);
+  assert.equal(s.pvp.me.gun, 'deagle');
+  assert.equal(s.pvp.me.ammo, -1);
+  s.frames(130);
+  s.pvp.onMessage({ t: 'sp', id: 'me', x: level.spawns[0].x, y: level.spawns[0].y }, s.now);
+  assert.equal(s.pvp.hud(s.now).gun, 'deagle');
+  assert.equal(s.pvp.hud(s.now).ammo, -1);
+});
+
+test('a roll\'s first frame sends an a with bit 32', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw(), s.now);
+  s.frames(20);
+  const n = s.sent.length;
+  s.frames(1, { roll: 1 });
+  const a = s.sent.slice(n).find((m) => m.t === 'a');
+  assert.ok(a && (a.i & 32), JSON.stringify(a));
 });
