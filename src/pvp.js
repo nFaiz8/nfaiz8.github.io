@@ -6,7 +6,7 @@ import { newBody, stepBody, knock, rolling, doorZone } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
-  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup, LOW_KNOCK,
+  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup, LOW_KNOCK, CRAWL_SPREAD,
 } from './fight.js';
 import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
@@ -260,8 +260,10 @@ export function createPvp({
     // the cap full, the shot waits for the next slot.
     if (online && (facing < 0 ? -1 : 1) !== lastF && !ticker.force(snap(now, facing), now)) return;
     const p = world.player, l = local(p.x, p.y), low = p.low || 0;
-    const mz = muzzleOf(l.x, l.y, facing, aim, gun, low); // from the stance's shoulder
-    const x = r2(mz.x), y = r2(mz.y), a = r2(absAngle(facing, aim));
+    // Crawling (prone is only ever crawling): the shot goes wild, up to CRAWL_SPREAD off the aim either way.
+    const shotAim = low === 2 ? Math.max(-Math.PI / 2, Math.min(Math.PI / 2, aim + (rand() * 2 - 1) * CRAWL_SPREAD)) : aim;
+    const mz = muzzleOf(l.x, l.y, facing, shotAim, gun, low); // from the stance's shoulder
+    const x = r2(mz.x), y = r2(mz.y), a = r2(absAngle(facing, shotAim));
     ref.state(me, snap(now, facing), t); // this frame's facing, so the muzzle check agrees
     // The referee checks alive, not rolling and the in-flight cap, and spends a pickup gun's round.
     const r = ref.fire(me, { x, y, a }, t, everyone(now));

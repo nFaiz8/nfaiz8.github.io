@@ -72,7 +72,12 @@ live in `src/stick.js`. A test keeps the rules' values and the rig's within
   - The `s` message carries `l: 1` for these shots, so every screen draws the bullet to its real end.
   - The sniper's aim line is as long as the shot would be.
 - **Keyboard aim stays level while low.** ↓ crouches and does not tilt the shot. ↑ still jumps, which
-  stands you up. The mouse aims anywhere from any stance. You can shoot while crawling.
+  stands you up. The mouse aims anywhere from any stance.
+- **Crawling shots go wild.** The user asked on 2026-10-14, "cuz shooting while crawling with sniper is op".
+  A shot fired prone (prone is only ever crawling) leaves up to `CRAWL_SPREAD` = 0.5 rad off the aim,
+  either way at random. It still gets the long range. Crouch and stay still to shoot straight.
+  - The spread is rolled on the client and sent as the shot's angle. The server takes the angle as given,
+    as it already does.
 - **The sniper scope.** Crouched or prone with the sniper in hand, the side view pulls back from 33 to 45
   rows (`SIDE_ROWS.scope`). It uses the same eased zoom (0.35 s) as changing guns. Standing up pushes back
   in to 33.
