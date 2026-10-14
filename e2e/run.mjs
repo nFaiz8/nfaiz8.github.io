@@ -363,33 +363,19 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
     await sleep(600);
   });
-  await check('L switches the train\'s look (line, ascii) and the next visit remembers it; the HUD button does too, by name', async () => {
-    await page.goto(`${url}#/room/arena`); await ready(page);
-    await page.evaluate(() => { try { localStorage.removeItem('ascii-look'); } catch {} });
+  await check('the train is always drawn in the line look: no look button, and L changes nothing', async () => {
     await page.goto('about:blank');
     await page.goto(`${url}#/room/arena`); await ready(page);
     await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 8000 });
-    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'line by default');
-    const btn = () => page.$eval('#look-btn', (b) => ({ hidden: b.hidden, label: b.getAttribute('aria-label'), text: b.textContent }));
-    assert.match((await btn()).label, /look: line/);
-    assert.equal((await btn()).hidden, false, 'shown in the side view');
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line');
+    assert.equal(await page.$('#look-btn'), null, 'no look button');
     await page.focus('#stage');
     await page.keyboard.press('KeyL');
-    assert.equal(await page.evaluate(() => window.__ascii.look()), 'ascii');
-    assert.match((await btn()).label, /look: ascii/);
-    await page.goto('about:blank');
-    await page.goto(`${url}#/room/arena`); await ready(page);
-    assert.equal(await page.evaluate(() => window.__ascii.look()), 'ascii', 'remembered');
-    await page.click('#look-btn');
-    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'the button switches it back');
-    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'stage', 'focus back on the stage');
-    await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
-    await sleep(200);
-    assert.equal((await btn()).hidden, true, 'hidden top-down');
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'L does nothing');
   });
   for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
     for (const r of ['canvas', 'gl']) {
-      await check(`${r} on a ${size}: the train in both looks with the deagle and the sniper (screenshots), no ? glyphs`, async () => {
+      await check(`${r} on a ${size}: the train with the deagle and the sniper (screenshots), no ? glyphs`, async () => {
         await page.setViewport(vp);
         await page.goto('about:blank');
         await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
@@ -397,13 +383,10 @@ await withBrowser(async ({ page, url, errors }) => {
         await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 150.5, a.floorY - 1.5); });
         for (const gun of ['deagle', 'sniper']) {
           await page.evaluate((g) => { window.__ascii.pvp().me.gun = g; }, gun);
-          for (const look of ['line', 'ascii']) {
-            if (await page.evaluate(() => window.__ascii.look()) !== look) await page.evaluate(() => document.getElementById('look-btn').click());
-            await sleep(900);
-            await page.screenshot({ path: `${SHOTS}/train-${r}-${size}-${look}-${gun}.png` });
-          }
+          await sleep(900);
+          await page.screenshot({ path: `${SHOTS}/train-${r}-${size}-${gun}.png` });
         }
-        await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; if (window.__ascii.look() !== 'line') document.getElementById('look-btn').click(); });
+        await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
         assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'no glyph drawn as ?');
       });
     }
@@ -1276,22 +1259,22 @@ await withBrowser(async ({ page, url, errors }) => {
       await page.goto('about:blank');
       await page.goto(`${url}?r=${r}&bots=30#/room/arena`); await ready(page);
       await sleep(1000);
-      // The deagle's close view, then the sniper's whole room (the most train cells to light), in both looks.
+      // The deagle's close view, then the sniper's whole room (the most train cells to light).
       const fps = [];
-      for (const [gun, look] of [['deagle', 'line'], ['sniper', 'line'], ['sniper', 'ascii']]) {
-        await page.evaluate(([g, l]) => { window.__ascii.pvp().me.gun = g; if (window.__ascii.look() !== l) document.getElementById('look-btn').click(); }, [gun, look]);
+      for (const gun of ['deagle', 'sniper']) {
+        await page.evaluate((g) => { window.__ascii.pvp().me.gun = g; }, gun);
         await sleep(800);
         await page.evaluate(() => { window.__ascii.stats.times.length = 0; });
         await sleep(2000);
         const t = await page.evaluate(() => window.__ascii.stats.times.slice());
         const sorted = [...t].sort((a, b) => a - b), avg = t.reduce((a, b) => a + b, 0) / t.length;
         const info = await page.evaluate(() => ({ bodies: window.__ascii.world.bodies.filter((b) => b.label !== 'dummy').length, glyphs: window.__ascii.world.figures.length }));
-        console.log(`  ${r} with 30 bots (${gun}, ${look}): ${info.bodies} bodies, ${info.glyphs} glyphs, ${(avg * 1000).toFixed(1)} ms a frame, p95 ${(sorted[Math.floor(sorted.length * 0.95)] * 1000).toFixed(1)} ms`);
-        fps.push([`${gun} ${look}`, 1 / avg]);
+        console.log(`  ${r} with 30 bots (${gun}): ${info.bodies} bodies, ${info.glyphs} glyphs, ${(avg * 1000).toFixed(1)} ms a frame, p95 ${(sorted[Math.floor(sorted.length * 0.95)] * 1000).toFixed(1)} ms`);
+        fps.push([gun, 1 / avg]);
         assert.equal(info.bodies, 31); // me and the bots (the practice dummy stands there too)
       }
       await page.screenshot({ path: `${SHOTS}/stick-${r}-bots30.png` });
-      await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; if (window.__ascii.look() !== 'line') document.getElementById('look-btn').click(); });
+      await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
       for (const [what, f] of fps) assert.ok(f > 110, `${what}: ${f.toFixed(0)} fps (120 wanted)`);
     });
   }

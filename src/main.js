@@ -28,7 +28,6 @@ const captionEl = document.getElementById('caption');
 const noteEl = document.getElementById('note');
 const fightSr = document.getElementById('fight-sr');
 const rendererBtn = document.getElementById('renderer-btn');
-const lookBtn = document.getElementById('look-btn');
 const debugEl = document.getElementById('debug');
 document.getElementById('hud-name').textContent = SITE.name;
 
@@ -105,24 +104,8 @@ function syncView() {
   if (world && m) world.view = { cols: innerWidth / m.cw, rows: innerHeight / m.ch };
 }
 
-// The train's look (train level addendum §1): 'line' (box drawing and colour, the default) or 'ascii'
-// (7-bit). L or the HUD button switches it; remembered for the next visit.
-const LOOKS = ['line', 'ascii'];
-let look = 'line';
-try { const v = localStorage.getItem('ascii-look'); if (LOOKS.includes(v)) look = v; } catch {}
-function showLook() {
-  const long = document.createElement('span');
-  long.className = 'long';
-  long.textContent = ` ${look}`;
-  lookBtn.replaceChildren('[L]', long);
-  const other = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
-  lookBtn.setAttribute('aria-label', `Train look: ${look}. Switch to ${other} (L)`);
-}
-function toggleLook() {
-  look = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
-  try { localStorage.setItem('ascii-look', look); } catch {}
-  showLook();
-}
+// The train's look (train level addendum §1): the user chose 'line' (box drawing and colour) for good.
+const look = 'line';
 
 // The side view's zoom by the gun in hand (train level addendum §2), and on touch how far the figure keeps
 // clear of the pad: its top above the screen's bottom, and how far its two clusters reach in from the
@@ -250,7 +233,6 @@ function onKey(e) {
     else if (world.atKiosk) openGrid();
     return true;
   }
-  if (e.code === 'KeyL') { toggleLook(); return true; }
   if (e.code === 'KeyR') {
     const names = Object.keys(RENDERERS);
     setRenderer(names[(names.indexOf(renderer.name) + 1) % names.length]);
@@ -346,7 +328,6 @@ function loop(now) {
     lastMode = world.mode;
     input.clear(); // nothing held, no strike or roll carried in or out of the arena
     document.body.classList.toggle('side', world.mode === 'side');
-    lookBtn.hidden = world.mode !== 'side';
     if (world.mode === 'side') meEntry++; // a fresh motion-memory entry: my fly-in plays on every entry
     if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
   }
@@ -629,7 +610,6 @@ async function boot() {
   lightingTop = createLighting(map);
   train = map.arena ? buildTrain(map.arena.level) : null;
   world.lighting = lightingTop;
-  showLook();
   input = createInput(stage, { onTap, onKey, arena: () => !!pvp && world.mode === 'side' });
   if (PVP && map.arena) {
     const myId = () => (live && live.peers.myId) || 'me';
@@ -709,7 +689,6 @@ async function boot() {
   setRenderer(RENDERERS[pick] ? pick : 'gl'); // WebGL by default; falls back to canvas if unavailable
   addEventListener('resize', resize);
   rendererBtn.addEventListener('click', () => onKey({ code: 'KeyR' }));
-  lookBtn.addEventListener('click', () => { toggleLook(); stage.focus({ preventScroll: true }); });
   mapView = createMap(map, {
     onOpen: () => { input.clear(); stopFollowing(); },
     onClose: () => stage.focus({ preventScroll: true }),

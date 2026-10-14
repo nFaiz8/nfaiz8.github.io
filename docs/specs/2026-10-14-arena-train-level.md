@@ -110,7 +110,8 @@ Use the same characters as before: `▓` solid, `═` platform (one-way, ↓ dro
   - the figures, HUD and fight effects on top, unchanged.
   - The WebGL atlas gains every glyph that `buildTrain`, `tunnel` and `lookChar` can produce. A test lists
     them and checks they're all in the atlas, so none draws as `?`.
-- **The look toggle** (the user hasn't decided yet):
+- **The look** (decided 2026-10-14: the user chose `'line'` for good; the L key, the HUD button and the
+  saved choice were removed. `lookChar` keeps its `'ascii'` mapping, unused). Originally specified as a toggle:
   - `'line'` is the default, and `'ascii'` is the alternative.
   - Toggle with the **L** key, or a small "look" button in the arena HUD (it must work on touch too).
   - Remember the choice in `localStorage`, wrapped in try/catch.
