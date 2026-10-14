@@ -193,7 +193,11 @@ export function createGlRenderer() {
     const a = map.arena, plat = [];
     if (a) for (let k = 0; k < a.cols * a.rows; k++) {
       const kind = a.level.cells[k];
-      if (kind) pushGlyph(plat, a.x + 1 + (k % a.cols), a.y + 1 + Math.floor(k / a.cols), kind === 1 ? '═' : '▓', C.platform, C.platformBg);
+      if (!kind) continue;
+      // No background, so the photo shows through; a dark copy just below reads on a white wall too.
+      const x = a.x + 1 + (k % a.cols), y = a.y + 1 + Math.floor(k / a.cols), g = kind === 1 ? '═' : '▓';
+      pushGlyph(plat, x, y + 0.09, g, C.platformShadow);
+      pushGlyph(plat, x, y, g, C.platform);
     }
     arenaGlyphs = new Float32Array(plat);
   }
@@ -348,7 +352,6 @@ export function createGlRenderer() {
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
     drawGlyphs(staticGlyphs);
-    if (world.mode === 'side') drawGlyphs(arenaGlyphs);
     const people = [];
     for (const e of world.people || []) pushGlyph(people, e.x - 0.5, e.y - 0.5, e.glyph, e.color);
     drawGlyphs(new Float32Array(people));
@@ -385,6 +388,7 @@ export function createGlRenderer() {
     }
     if (world.focus && !world.focus.darkroom && !world.focus.backdrop) pushBorder(dynamic, world.focus, C.frameFocus);
     for (const e of world.entities || []) pushGlyph(dynamic, e.x - 0.5, e.y - 0.5, e.glyph, e.color, C.bg);
+    if (world.mode === 'side') drawGlyphs(arenaGlyphs); // platforms over the light, at full brightness
     drawGlyphs(new Float32Array(dynamic));
     gl.bindVertexArray(null);
   }

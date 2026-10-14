@@ -90,3 +90,10 @@ test('in the side view the arena is evenly lit at 0.75 with no lantern, and plat
   assert.ok(g[above] > g[above + 2] * 1.5, 'more red than blue');
   assert.ok(glow[o] < 3, 'no glow in open air');
 });
+
+test('in the side view the photo under a platform keeps the room light: only the halo glows there', () => {
+  const L = createArenaLighting(amap);
+  const i = (firstPlat.y * amap.W + firstPlat.x) * 3;
+  assert.ok(Math.abs(L.buf[i] - 0.75) < 0.01, `light at a platform cell ${L.buf[i]}`);
+  assert.ok(L.halo[i] > 0, 'the halo is there');
+});

@@ -115,17 +115,16 @@ export function createLighting(map, { ambient = AMBIENT, lights = staticLights(m
   return { map, buf, halo, print, lights, dark, ambient, lantern, scratch: new Float32Array(0) };
 }
 
-// The arena's side view: a brighter, neutral light so the photo reads, and every platform glows, with
-// a red-orange halo bleeding onto the photo around it like film halation.
+// The arena's side view: a brighter, neutral light so the photo reads, and every platform glows with a
+// red-orange halo bleeding onto the photo around it like film halation. The platforms themselves are drawn
+// on top of the light at full brightness, so nothing here brightens the photo under them.
 export function createArenaLighting(map) {
-  const a = map.arena, cores = [], halos = [];
+  const a = map.arena, halos = [];
   for (let r = 0; r < a.rows; r++) for (let c = 0; c < a.cols; c++) {
     if (!a.level.cells[r * a.cols + c]) continue;
-    const x = a.x + 1 + c + 0.5, y = a.y + 1 + r + 0.5;
-    cores.push({ x, y, radius: 1.5, color: [1.0, 0.94, 0.84], intensity: 0.5 });
-    halos.push({ x, y, radius: 7, color: [1.0, 0.36, 0.16], intensity: 0.08 });
+    halos.push({ x: a.x + 1 + c + 0.5, y: a.y + 1 + r + 0.5, radius: 7, color: [1.0, 0.36, 0.16], intensity: 0.08 });
   }
-  return createLighting(map, { ambient: ARENA_AMBIENT, lights: cores, halos, prints: false, lantern: false });
+  return createLighting(map, { ambient: ARENA_AMBIENT, lights: [], halos, prints: false, lantern: false });
 }
 
 // The light for a window of the map: static light plus the lantern at (px, py), flickering with t.

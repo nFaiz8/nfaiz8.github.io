@@ -259,7 +259,7 @@ await withBrowser(async ({ page, url, errors }) => {
     return { x: (x0 - left) * m.cw, y: (y0 - top) * m.ch, width: w * m.cw, height: h * m.ch };
   }, x0, y0, w, h);
   for (const r of ['canvas', 'gl']) {
-    await check(`${r}: from outside the arena is a dark room; inside, its platforms glow warm white`, async () => {
+    await check(`${r}: from outside the arena is a dark room; inside, its platforms glow warm white over the photo`, async () => {
       await page.goto(`${url}?r=${r}`); await ready(page);
       const a = await arenaInfo(page);
       await page.evaluate((d) => window.__ascii.teleport(d.x + 4.5, d.y + 1.5), a.door);
@@ -271,18 +271,23 @@ await withBrowser(async ({ page, url, errors }) => {
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
       await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
       await sleep(400);
-      const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 130, a.y + 1 + 29, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
-      let warm = 0, lum = [];
-      for (let i = 0; i < data.length; i += info.channels) {
-        const [R, G, B] = [data[i], data[i + 1], data[i + 2]];
-        if (R >= 225 && G >= 200 && B >= 165 && R >= B + 20) warm++;
-        lum.push((R + G + B) / 3);
-      }
-      lum.sort((x, y) => x - y);
-      const warmShare = warm / lum.length, median = lum[Math.floor(lum.length / 2)];
-      console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform warm ${(warmShare * 100).toFixed(1)}%, median ${median.toFixed(0)}`);
+      const strip = async (row) => {
+        const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 130, a.y + 1 + row, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
+        let warm = 0;
+        const lum = [];
+        for (let i = 0; i < data.length; i += info.channels) {
+          const [R, G, B] = [data[i], data[i + 1], data[i + 2]];
+          if (R >= 225 && G >= 200 && B >= 165 && R >= B + 20) warm++;
+          lum.push((R + G + B) / 3);
+        }
+        lum.sort((x, y) => x - y);
+        return { warm: warm / lum.length, median: lum[Math.floor(lum.length / 2)] };
+      };
+      const plat = await strip(29), above = await strip(28);
+      console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform warm ${(plat.warm * 100).toFixed(1)}%, median ${plat.median.toFixed(0)} (row above ${above.median.toFixed(0)})`);
       assert.ok(dark < 12, `outside, the arena is dark (${dark.toFixed(1)})`);
-      assert.ok(warmShare > 0.01 && median < 90, 'platform glyphs: warm white strokes on a dark ground');
+      assert.ok(plat.warm > 0.01, 'warm white platform strokes');
+      assert.ok(plat.median > 0.7 * above.median, 'the photo shows behind the strokes (no dark band)');
     });
   }
   // How closely a screenshot of some arena cells matches the backdrop photo itself (luminance correlation).
