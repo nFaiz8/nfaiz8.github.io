@@ -18,12 +18,18 @@ const LEVEL_HASH = levelHash(levelText);
 const kindAt = levelKind(LEVEL);
 const TICK_MS = 33;
 const KICK_GAP = 0.5; // s: after a kick, the next strike waits this long (the 0.55 s cooldown less jitter)
+const GAP_MAX = 300; // ms: a pause banks no more speed than this
+// The door is the bottom 3 rows of the east wall (src/layout.js); a body standing in it is centred here.
+// Every honest entrance (walking in, an arena link, a teleport) puts you there.
+const DOOR = { x: LEVEL.cols - 0.5, y: LEVEL.rows - 1.5 };
 
-// A body's centre inside a ▓ of the level file. Just outside the grid is the door, not a wall.
+// A body's centre inside a wall: a ▓, or anywhere outside the grid but the door.
 function inWall(x, y) {
   const c = Math.floor(x), r = Math.floor(y);
-  return c >= 0 && r >= 0 && c < LEVEL.cols && r < LEVEL.rows && kindAt(c, r) === SOLID;
+  if (c >= LEVEL.cols && r >= LEVEL.rows - 3 && r < LEVEL.rows) return false;
+  return kindAt(c, r) === SOLID;
 }
+const far = (p, q) => Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y));
 const r2 = (v) => Math.round(v * 100) / 100;
 
 async function ipTag(ip) {
@@ -129,10 +135,16 @@ export class Gallery extends DurableObject {
   startTick() {
     if (this.tickTimer || !this.ref || this.ref.live() === 0) return;
     this.tickTimer = setInterval(() => {
-      const pairs = this.arena();
-      this.tell(pairs, this.ref.tick(Date.now() / 1000, pairs.map(([, a]) => a.fx)));
-      this.save(pairs);
-      if (this.ref.live() === 0) { clearInterval(this.tickTimer); this.tickTimer = null; }
+      let done = false;
+      try {
+        const pairs = this.arena();
+        this.tell(pairs, this.ref.tick(Date.now() / 1000, pairs.map(([, a]) => a.fx)));
+        this.save(pairs);
+        done = true;
+      } finally {
+        // A throw stops the tick too, rather than repeating every 33 ms; the next shot starts it again.
+        if (!done || !this.ref || this.ref.live() === 0) { clearInterval(this.tickTimer); this.tickTimer = null; }
+      }
     }, TICK_MS);
   }
 
@@ -156,14 +168,26 @@ export class Gallery extends DurableObject {
       // Back from being away while still inside: leave first, quietly (the k still goes out).
       if (F.arena) this.tell(pairs, ref.leave(F, t, fighters(pairs)).filter((o) => o.t !== 'ax'));
       const others = pairs.filter(([o]) => o !== ws);
+      const popped = !F.alive;
       const out = ref.enter(F, t);
-      F.sentPrev = null; // the first state after entering is taken as it is: it says where I came in
+      F.vx = F.vy = 0;
+      F.sentPrev = now;
+      // The first state is clamped from the door, or from where I was if I'm back from being away.
+      F.fresh = true;
+      if (!F.placed) { F.x = DOOR.x; F.y = DOOR.y; }
       me.clk = senderClock(); // ts restarts at each ae
       ws.send(JSON.stringify({
         t: 'aw', lv: LEVEL_HASH, you: { hp: F.hp, kills: F.kills, w: GUNS[F.gun].code, ammo: F.ammo },
         pk: ref.pickups(t), fighters: others.map(([, a]) => ref.view(a.fx, t)),
       }));
       this.tell(others, out);
+      if (popped) {
+        // Popped, then back in: respawn at once, past the 2 s wait (it was spent outside).
+        Object.assign(F, { alive: false, deadAt: -1e9 });
+        const r = ref.respawn(F, t, fighters(others));
+        F.fresh = false;
+        this.tell([...others, [ws, me]], r.out);
+      }
       this.save(others);
       return ws.serializeAttachment(me);
     }
@@ -178,17 +202,17 @@ export class Gallery extends DurableObject {
     if (!F.arena) return drop(); // a, f, m and rs need you inside
 
     if (m.t === 'a') {
-      if (!F.alive) return; // some are always in flight when you pop: not a flood
       if (!take(me.buckets, 'a', now)) return drop();
+      if (!F.alive) return ws.serializeAttachment(me); // some are always in flight when you pop: within the bucket, not a flood
       const sent = sentAt(me.clk, m.ts, now);
-      let s = m;
-      if (F.sentPrev != null) {
-        const c = clampMove(F, m, Math.max(0, sent - F.sentPrev));
-        if (c !== m) s = { ...c, x: r2(c.x), y: r2(c.y) };
-      }
+      const from = F.fresh && !(F.placed && far(F, m) < far(DOOR, m)) ? DOOR : F;
+      const c = clampMove(from, m, Math.min(GAP_MAX, Math.max(0, sent - (F.sentPrev ?? sent))));
+      const s = c === m ? m : { ...c, x: r2(c.x), y: r2(c.y) };
       if (inWall(s.x, s.y)) return ws.serializeAttachment(me); // dropped, but the bucket and clock moved
       ref.state(F, s, t, sent / 1000);
-      F.sentPrev = sent;
+      F.sentPrev = Math.max(F.sentPrev ?? sent, sent); // a backdated stamp never moves it back
+      F.fresh = false;
+      F.placed = true;
       ws.serializeAttachment(me);
       const others = this.arena(ws, me).filter(([o]) => o !== ws);
       return this.tell(others, [{ t: 'a', id: me.id, ...s }]);
@@ -218,6 +242,7 @@ export class Gallery extends DurableObject {
       const r = ref.respawn(F, t, fighters(pairs));
       if (r.ok) {
         F.sentPrev = now; // the next state is measured from the spawn point, from now
+        F.fresh = false;
         this.tell(pairs, r.out);
       }
       return this.save(pairs);

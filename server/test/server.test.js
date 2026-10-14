@@ -191,6 +191,35 @@ async function fighter(r, name, ip) {
 const at = (ws, x, y, o = {}) => ws.send2({ t: 'a', x, y, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: Date.now() - ws.t0, ...o });
 const fire = (ws, x, y = 27.5, a = 0) => { const m = muzzleOf(x, y, 1, 0, 'deagle'); ws.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a, ts: Date.now() - ws.t0 }); };
 
+// The door: the bottom 3 rows of the east wall (src/layout.js). A body standing in it is centred here.
+const DOOR = { x: LV.cols - 0.5, y: LV.rows - 1.5 };
+// Legal steps from the door to (x, y): along the track bed under the floor, then up or down.
+function steps(x, y) {
+  const out = [];
+  let cx = DOOR.x, cy = DOOR.y;
+  while (cx !== x) { cx = Math.abs(x - cx) <= 20 ? x : cx + 20 * Math.sign(x - cx); out.push([cx, cy]); }
+  while (cy !== y) { cy = Math.abs(y - cy) <= 20 ? y : cy + 20 * Math.sign(y - cy); out.push([cx, cy]); }
+  return out;
+}
+async function walk(ws, x, y) {
+  at(ws, DOOR.x, DOOR.y);
+  for (const [px, py] of steps(x, y)) { await sleepMs(300); at(ws, px, py); }
+}
+// Walk fighters in to their spots, then out and back in (al, ae): back from away, the first state may
+// start where they were, so they stand there fresh and protected. Everyone's inbox is cleared after.
+async function walkIn(spots, also = []) {
+  await Promise.all(spots.map(([ws, x, y]) => walk(ws, x, y)));
+  await sleepMs(50);
+  for (const [ws] of spots) { ws.send2({ t: 'al' }); ws.send2({ t: 'ae' }); }
+  for (const [ws, x, y] of spots) { ws.aw = await ws.next('aw'); ws.t0 = Date.now(); at(ws, x, y); }
+  await sleepMs(150);
+  for (const ws of [...spots.map(([w]) => w), ...also]) ws.inbox.length = 0;
+}
+// The next state from id that passes ok.
+async function nextA(ws, id, ok = () => true, ms = 2000) {
+  for (;;) { const m = await ws.next('a', ms); if (m.id === id && ok(m)) return m; }
+}
+
 test('welcome carries the level hash', async () => {
   const ws = client({ room: room() });
   await ws.opened;
@@ -217,6 +246,7 @@ test('two fighters entering get aw and aj; someone outside gets none of it', asy
 test('a deagle shot hits a standing, unprotected target for 25; a ▓ in the way stops it; a protected target is not hit', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
   at(a, 20.5, 27.5); at(b, 30.5, 27.5);
   await sleepMs(250);
   fire(a, 20.5);
@@ -246,6 +276,7 @@ test('five shots within 100 ms give at most two bullets', async () => {
 test('four deagle hits pop: k with kills 1; rs at 1 s is ignored, at 2 s gives sp at a marked spawn', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
   await sleepMs(1600);
   at(a, 20.5, 27.5); at(b, 30.5, 27.5);
   await sleepMs(150);
@@ -265,6 +296,7 @@ test('four deagle hits pop: k with kills 1; rs at 1 s is ignored, at 2 s gives s
 test('a teleporting state is clamped', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5]], [b]);
   at(a, 20.5, 27.5);
   await sleepMs(100);
   at(a, 150.5, 27.5);
@@ -276,6 +308,7 @@ test('a teleporting state is clamped', async () => {
 test('leaving within 3 s of a hit gives the hitter the kill, fled', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
   await sleepMs(1600);
   at(a, 20.5, 27.5); at(b, 30.5, 27.5);
   await sleepMs(150);
@@ -315,6 +348,7 @@ test('pickups: within reach gives pk and w (rifle, 40); a second claim is refuse
   const r = room();
   const p = LV.pickups.find((q) => q.gun === 'rifle');
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, p.x, p.y], [b, p.x + 0.5, p.y]]);
   at(a, p.x, p.y); at(b, p.x + 0.5, p.y);
   await sleepMs(150);
   a.send2({ t: 'pk', n: p.n });
@@ -332,6 +366,7 @@ test('40 rifle shots, then the next s carries w d, after a w message', async () 
   const r = room();
   const p = LV.pickups.find((q) => q.gun === 'rifle');
   const a = await fighter(r, 'A');
+  await walkIn([[a, p.x, p.y]]);
   at(a, p.x, p.y);
   await sleepMs(150);
   a.send2({ t: 'pk', n: p.n });
@@ -348,6 +383,7 @@ test('40 rifle shots, then the next s carries w d, after a w message', async () 
 test('a shot reaching a target inside its roll\'s dodge window does not hit', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
   await sleepMs(1600);
   at(a, 20.5, 27.5); at(b, 30.5, 27.5);
   await sleepMs(150);
@@ -355,5 +391,98 @@ test('a shot reaching a target inside its roll\'s dodge window does not hit', as
   await sleepMs(60);
   fire(a, 20.5);
   await assert.rejects(b.next('h', 500));
+  a.close(); b.close();
+});
+
+// Fix round 1: entry, pauses, backdated stamps and the dead.
+test('a backdated state does not open the speed clamp', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 32.5]], [b]);
+  await sleepMs(1000);
+  at(a, 20.5, 32.5);
+  await sleepMs(50);
+  at(a, 20.5, 32.5, { ts: 0 });
+  await sleepMs(100);
+  at(a, 150.5, 32.5);
+  const seen = await nextA(b, a.id, (m) => m.x > 20.5);
+  assert.ok(seen.x < 33, `seen at ${seen.x}`);
+  a.close(); b.close();
+});
+
+test('a pause banks no speed: an a 2.5 s on and 100 cells away is clamped', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 32.5]], [b]);
+  await sleepMs(2500);
+  at(a, 120.5, 32.5);
+  const seen = await nextA(b, a.id, (m) => m.x > 20.5);
+  assert.ok(seen.x < 45, `seen at ${seen.x}`);
+  a.close(); b.close();
+});
+
+test('entering, the first state is clamped from the door: no jumping onto the sniper', async () => {
+  const r = room();
+  const p = LV.pickups.find((q) => q.gun === 'sniper');
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  at(a, p.x, p.y);
+  const seen = await nextA(b, a.id);
+  assert.ok(seen.x > 150 && seen.y > 25, `seen at ${seen.x}, ${seen.y}`);
+  a.send2({ t: 'pk', n: p.n });
+  await assert.rejects(a.next('w', 500));
+  a.close(); b.close();
+});
+
+test('back from away, the first state may start where I left', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walk(a, 50.5, 32.5);
+  await sleepMs(100);
+  a.send2({ t: 'al' }); a.send2({ t: 'ae' });
+  await a.next('aw'); a.t0 = Date.now();
+  await b.next('aj');
+  b.inbox.length = 0;
+  at(a, 50.5, 32.5);
+  assert.equal((await nextA(b, a.id)).x, 50.5);
+  a.close(); b.close();
+});
+
+test('the door is open, the wall above it is not', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await sleepMs(300);
+  at(a, 160.5, 32.5);
+  assert.ok((await nextA(b, a.id)).x >= 160);
+  await sleepMs(300);
+  at(a, 160.5, 28.5);
+  await assert.rejects(nextA(b, a.id, () => true, 500));
+  a.close(); b.close();
+});
+
+test('a popped fighter coming back in respawns at once', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await sleepMs(1600);
+  for (let k = 0; k < 4; k++) { fire(a, 20.5); await sleepMs(450); }
+  await b.next('k', 2000);
+  b.send2({ t: 'al' }); b.send2({ t: 'ae' });
+  await b.next('aw');
+  const sp = await b.next('sp', 1000);
+  assert.equal(sp.id, b.id);
+  assert.ok(LV.spawns.some((s) => s.x === sp.x && s.y === sp.y));
+  assert.equal((await a.next('sp')).id, b.id);
+  a.close(); b.close();
+});
+
+test('a flood of states from a popped fighter closes the socket', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await sleepMs(1600);
+  for (let k = 0; k < 4; k++) { fire(a, 20.5); await sleepMs(450); }
+  await b.next('k', 2000);
+  for (let k = 0; k < 120; k++) at(b, 30.5, 27.5);
+  assert.equal(await Promise.race([b.closed, sleepMs(3000).then(() => 'still open')]), 1008);
   a.close(); b.close();
 });
