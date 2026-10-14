@@ -1,3 +1,5 @@
+import { GUNS } from '../src/fight.js';
+
 // Checks shared by the multiplayer Worker and its tests. Pure: no Workers or Node APIs.
 export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000 };
 export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
@@ -49,6 +51,12 @@ export function cleanText(raw) {
 
 const pos = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 2000;
 
+const num = (n) => typeof n === 'number' && Number.isFinite(n);
+const within = (n, max) => num(n) && Math.abs(n) <= max;
+const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= 163 && y >= -1 && y <= 35;
+const stamp = (n) => Number.isInteger(n) && n >= 0 && n <= 1e9;
+const round = (n, k) => Math.round(n * k) / k;
+
 export function parseMessage(text) {
   if (typeof text !== 'string' || new TextEncoder().encode(text).length > LIMITS.bytes) return null;
   let m;
@@ -65,23 +73,60 @@ export function parseMessage(text) {
     case 'p': return pos(m.x) && pos(m.y) ? { t: 'p', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
     case 'e': return EMOTES.includes(m.e) ? { t: 'e', e: m.e } : null;
     case 'r': return typeof m.f === 'string' && m.f.length >= 1 && m.f.length <= 64 ? { t: 'r', f: m.f } : null;
+    case 'ae': case 'al': case 'rs': return { t: m.t };
+    case 'a': {
+      if (!inArena(m.x, m.y) || !within(m.vx, 60) || !within(m.vy, 60) || (m.f !== -1 && m.f !== 1) || (m.g !== 0 && m.g !== 1)) return null;
+      if (!Number.isInteger(m.i) || m.i < 0 || m.i > 63 || !within(m.a, Math.PI / 2 + 1e-9) || !stamp(m.ts)) return null;
+      return { t: 'a', x: round(m.x, 100), y: round(m.y, 100), vx: round(m.vx, 10), vy: round(m.vy, 10), f: m.f, g: m.g, i: m.i, a: round(m.a, 100), ts: m.ts };
+    }
+    case 'f': {
+      if (!inArena(m.x, m.y) || !within(m.a, Math.PI + 1e-9) || !stamp(m.ts)) return null;
+      return { t: 'f', x: round(m.x, 100), y: round(m.y, 100), a: round(m.a, 100), ts: m.ts };
+    }
+    case 'm': return (m.k === 'p' || m.k === 'k') && stamp(m.ts) ? { t: 'm', k: m.k, ts: m.ts } : null;
+    case 'pk': return Number.isInteger(m.n) && m.n >= 0 && m.n <= 15 ? { t: 'pk', n: m.n } : null;
     default: return null;
   }
 }
 
-// Token buckets: capacity and refill per second.
-const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5] };
+// Token buckets: capacity and refill per second. 'ae' covers both ae and al.
+const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5], a: [24, 20], pk: [2, 2], m: [2, 3.4], ae: [4, 1], rs: [2, 1] };
 export function newBuckets(now) {
   return Object.fromEntries(Object.entries(RATES).map(([k, [cap]]) => [k, { tokens: cap, at: now }]));
 }
-export function take(b, kind, now) {
-  const [cap, rate] = RATES[kind];
+function takeAt(b, kind, cap, rate, now) {
   const s = b[kind] || (b[kind] = { tokens: cap, at: now });
   s.tokens = Math.min(cap, s.tokens + ((now - s.at) / 1000) * rate);
   s.at = now;
   if (s.tokens < 1) return false;
   s.tokens -= 1;
   return true;
+}
+export function take(b, kind, now) {
+  const [cap, rate] = RATES[kind];
+  return takeAt(b, kind, cap, rate, now);
+}
+// Shots: 2 in hand, refilling a little faster than the gun's own cooldown.
+export const takeShot = (b, gun, now) => takeAt(b, 'f', 2, 1.15 / GUNS[gun].cooldown, now);
+
+// Pull a too-fast move back along its line: at most 60 cells/s, plus 25% and half a cell of slack.
+export function clampMove(prev, next, gapMs) {
+  const lim = 60 * (gapMs / 1000) * 1.25 + 0.5;
+  const dx = next.x - prev.x;
+  const dy = next.y - prev.y;
+  const k = Math.min(1, lim / Math.abs(dx), lim / Math.abs(dy));
+  return k >= 1 ? next : { ...next, x: prev.x + dx * k, y: prev.y + dy * k };
+}
+
+// A sender's ms clock mapped onto the server's. The offset follows the fastest delivery seen in each
+// 5 s window, and a clock running ahead can claim at most 300 ms.
+export const senderClock = () => ({ base: null, lo: Infinity, loAt: 0 });
+export function sentAt(clock, ts, nowMs) {
+  const off = nowMs - ts;
+  if (clock.base === null) { clock.base = off; clock.loAt = nowMs; }
+  if (off >= clock.base - 300) clock.lo = Math.min(clock.lo, off); // a stamp from the far future says nothing about the network
+  if (nowMs - clock.loAt >= 5000) { clock.base = clock.lo; clock.lo = Infinity; clock.loAt = nowMs; }
+  return Math.min(clock.base + ts, nowMs + 300);
 }
 
 export const newFlood = (now) => ({ start: now, drops: 0 });
