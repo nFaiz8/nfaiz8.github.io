@@ -58,6 +58,7 @@ export function createMap(map, { onGo, onOpen, onClose }) {
   }
   ctx.putImageData(img, 0, 0);
   for (const f of map.frames) {
+    if (f.backdrop) continue; // the arena's photo is its wall, not a print
     // Prints in their room's colour, so each room reads at a glance.
     const col = f.darkroom ? [190, 60, 48] : tints[f.roomIndex].title;
     ctx.fillStyle = `rgb(${col.join(',')})`;

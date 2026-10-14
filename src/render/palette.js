@@ -21,6 +21,9 @@ export const C = {
   dFloorDot: [52, 14, 12],
   dLine: [120, 44, 36],
   dFrame: [150, 50, 40],
+  // arena platforms: bright warm white
+  platform: [255, 236, 210],
+  platformBg: [16, 11, 9],
 };
 
 export const LABEL_COLOR = {

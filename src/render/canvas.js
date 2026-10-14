@@ -16,6 +16,7 @@ export function createCanvasRenderer() {
   const requested = new Set();
   const onLoad = new Set();
   let lightCv = null, glowCv = null;
+  let bakedMode = null; // chunks are baked for one view: the arena's inside differs top-down and side-on
 
   function init(el, theMap) {
     canvas = el;
@@ -110,6 +111,7 @@ export function createCanvasRenderer() {
         }
       }
     }
+    if (bakedMode === 'side' && map.arena) bakeArena(c, x0, y0);
     const visible = (x, y, w, h) => x < x0 + CW && x + w > x0 && y < y0 + CH && y + h > y0;
     for (const l of map.lines) {
       if (!visible(l.x, l.y, l.w, 1)) continue;
@@ -121,11 +123,32 @@ export function createCanvasRenderer() {
       [...l.text].forEach((g, k) => put(c, g, l.x + k - x0, l.y - y0, col));
     }
     for (const f of map.frames) {
+      if (f.backdrop) continue;
       if (!visible(f.x, f.y, f.w, f.h + 1)) continue;
       if (!f.darkroom) drawFrame(c, f, f.x - x0, f.y - y0, false);
       [...f.plaque.text].forEach((g, k) => put(c, g, f.plaque.x + k - x0, f.plaque.y - y0, f.darkroom ? C.dFrame : C.plaque));
     }
     return cv;
+  }
+
+  // Side view: the arena's photo over the whole back wall, and the level's platforms on top of it.
+  function bakeArena(c, x0, y0) {
+    const a = map.arena, f = a.backdrop;
+    const bmp = f && bitmaps.get(f.id);
+    const cells = bmp ? cellsFor(f.photo, f.cols, f.rows, false, bmp, true) : null;
+    for (let y = 0; y < CH; y++) {
+      const ay = y0 + y - a.y - 1;
+      if (ay < 0 || ay >= a.rows) continue;
+      for (let x = 0; x < CW; x++) {
+        const ax = x0 + x - a.x - 1;
+        if (ax < 0 || ax >= a.cols) continue;
+        const k = ay * a.cols + ax;
+        if (cells) put(c, RAMP[cells.glyph[k]], x, y, cells.fg.subarray(k * 3, k * 3 + 3), cells.bg.subarray(k * 3, k * 3 + 3));
+        else if (f && hasFailed(f.id)) put(c, (ax + ay) % 2 ? '?' : ' ', x, y, C.plaque, C.bg); // as a print that failed
+        const kind = a.level.cells[k];
+        if (kind) put(c, kind === 1 ? '═' : '▓', x, y, C.platform, C.platformBg);
+      }
+    }
   }
 
   function invalidateFrame(f) {
@@ -136,12 +159,13 @@ export function createCanvasRenderer() {
   function request(f) {
     if (requested.has(f.id)) return;
     requested.add(f.id);
-    loadImage(f.photo).then((bmp) => { bitmaps.set(f.id, bmp); invalidateFrame(f); onLoad.forEach((cb) => cb(f)); },
+    loadImage(f.photo, f.backdrop ? 'hi' : 'low').then((bmp) => { bitmaps.set(f.id, bmp); invalidateFrame(f); onLoad.forEach((cb) => cb(f)); },
       () => invalidateFrame(f));
   }
 
   function draw(world) {
     if (!m) return;
+    if (world.mode !== bakedMode) { bakedMode = world.mode; chunks.clear(); }
     const cols = viewW / m.cw, rows = viewH / m.ch;
     const left = world.cam.x - cols / 2, top = world.cam.y - rows / 2;
     const sx = (cx) => Math.round((cx - left) * m.cw * dpr) / dpr;
@@ -214,7 +238,7 @@ export function createCanvasRenderer() {
     }
 
     const fo = world.focus;
-    if (fo && !fo.darkroom) {
+    if (fo && !fo.darkroom && !fo.backdrop) {
       ctx.fillStyle = rgb(...C.frameFocus);
       const x1 = fo.x + fo.w - 1, y1 = fo.y + fo.h - 1;
       for (let x = fo.x; x <= x1; x++) {

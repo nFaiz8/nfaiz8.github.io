@@ -24,10 +24,11 @@ void main() {
 export const PHOTO_VS = `#version 300 es
 in vec2 a_pos; // 0..1 quad
 uniform vec4 u_rect;   // x, y, w, h in world cells
+uniform vec4 u_uv;     // the part of the image to show (x, y, w, h in 0..1)
 uniform vec2 u_origin, u_cells;
 out vec2 v_uv;
 void main() {
-  v_uv = a_pos;
+  v_uv = u_uv.xy + a_pos * u_uv.zw;
   vec2 p = (u_rect.xy + a_pos * u_rect.zw - u_origin) / u_cells;
   gl_Position = vec4(p.x * 2.0 - 1.0, p.y * 2.0 - 1.0, 0.0, 1.0); // scene rows run top-down
 }`;

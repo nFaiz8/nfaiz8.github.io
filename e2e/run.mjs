@@ -1,6 +1,7 @@
 // Live checks in headless Chrome for Testing. Usage: npm run e2e
 import { withBrowser, ready, sleep } from './lib.mjs';
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 
 const results = [];
 const check = async (name, fn) => {
@@ -234,6 +235,55 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(800);
     assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - spot.y) < 0.01, 'back on the floor');
   });
+  for (const r of ['canvas', 'gl']) {
+    await check(`${r}: the arena photo fills the back wall in the side view, with bright platforms`, async () => {
+      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      const id = await page.evaluate(() => window.__ascii.map.arena.backdrop.id);
+      await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, id);
+      await sleep(400);
+      const shot = await page.screenshot({ clip: { x: 200, y: 150, width: 1040, height: 600 } });
+      const { channels } = await sharp(shot).stats();
+      const mean = channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
+      const sd = channels.slice(0, 3).reduce((s, c) => s + c.stdev, 0) / 3;
+      console.log(`  ${r} arena: mean ${mean.toFixed(1)}, stdev ${sd.toFixed(1)}`);
+      assert.ok(mean > 25 && sd > 20, 'a photo, not a dark room');
+      const top = await page.evaluate(() => { window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y); return window.__ascii.mode(); });
+      assert.equal(top, 'top');
+    });
+  }
+  // Where some cells are on screen right now, in CSS pixels.
+  const cellsClip = (p, x0, y0, w, h) => p.evaluate((x0, y0, w, h) => {
+    const { world, metrics } = window.__ascii, m = metrics();
+    const left = world.cam.x - innerWidth / m.cw / 2, top = world.cam.y - innerHeight / m.ch / 2;
+    return { x: (x0 - left) * m.cw, y: (y0 - top) * m.ch, width: w * m.cw, height: h * m.ch };
+  }, x0, y0, w, h);
+  for (const r of ['canvas', 'gl']) {
+    await check(`${r}: from outside the arena is a dark room; inside, its platforms glow warm white`, async () => {
+      await page.goto(`${url}?r=${r}`); await ready(page);
+      const a = await arenaInfo(page);
+      await page.evaluate((d) => window.__ascii.teleport(d.x + 4.5, d.y + 1.5), a.door);
+      await sleep(1500);
+      // Top-down, from the corridor: the arena's inside, west of the door.
+      const outside = await sharp(await page.screenshot({ clip: await cellsClip(page, a.door.x - 40, a.door.y - 12, 30, 12) })).stats();
+      const dark = outside.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
+      // Side view: the middle of the 22-cell platform 5 rows up near the door (level cols 196–217, row 45).
+      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
+      await sleep(400);
+      const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 200, a.y + 1 + 45, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
+      let warm = 0, lum = [];
+      for (let i = 0; i < data.length; i += info.channels) {
+        const [R, G, B] = [data[i], data[i + 1], data[i + 2]];
+        if (R >= 225 && G >= 200 && B >= 165 && R >= B + 20) warm++;
+        lum.push((R + G + B) / 3);
+      }
+      lum.sort((x, y) => x - y);
+      const warmShare = warm / lum.length, median = lum[Math.floor(lum.length / 2)];
+      console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform warm ${(warmShare * 100).toFixed(1)}%, median ${median.toFixed(0)}`);
+      assert.ok(dark < 12, `outside, the arena is dark (${dark.toFixed(1)})`);
+      assert.ok(warmShare > 0.01 && median < 90, 'platform glyphs: warm white strokes on a dark ground');
+    });
+  }
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

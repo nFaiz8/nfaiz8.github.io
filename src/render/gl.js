@@ -6,6 +6,7 @@ import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, rangeOf } from '../photos.js';
 import { lightWindow } from '../light.js';
+import { coverCrop } from '../arena.js';
 import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
@@ -15,7 +16,8 @@ export function createGlRenderer() {
   let canvas, gl, map, m, dpr = 1, viewW = 0, viewH = 0, lost = false;
   let progs, quadVao, glyphVao, instBuf, tilesTex, atlasTex, atlas, sceneTex, sceneFbo, sceneSize = [0, 0];
   let staticGlyphs = new Float32Array(0), dynamic = [];
-  const photoTex = new Map(); // id → { tex, range }
+  let arenaGlyphs = new Float32Array(0); // the arena's platforms, drawn only in its side view
+  const photoTex = new Map(); // id → { tex, range, uv }
   const requested = new Set();
   const onLoad = new Set();
   let darkRoomIndex = -1;
@@ -183,10 +185,16 @@ export function createGlRenderer() {
       [...l.text].forEach((ch, k) => ch !== ' ' && pushGlyph(out, l.x + k, l.y, ch, col));
     }
     for (const f of map.frames) {
-      if (!f.darkroom) pushBorder(out, f, C.frame);
+      if (!f.darkroom && !f.backdrop) pushBorder(out, f, C.frame);
       [...f.plaque.text].forEach((ch, k) => ch !== ' ' && pushGlyph(out, f.plaque.x + k, f.plaque.y, ch, f.darkroom ? C.dFrame : C.plaque));
     }
     staticGlyphs = new Float32Array(out);
+    const a = map.arena, plat = [];
+    if (a) for (let k = 0; k < a.cols * a.rows; k++) {
+      const kind = a.level.cells[k];
+      if (kind) pushGlyph(plat, a.x + 1 + (k % a.cols), a.y + 1 + Math.floor(k / a.cols), kind === 1 ? '═' : '▓', C.platform, C.platformBg);
+    }
+    arenaGlyphs = new Float32Array(plat);
   }
 
   function resize(w, h, ratio) {
@@ -217,7 +225,7 @@ export function createGlRenderer() {
   function request(f) {
     if (requested.has(f.id)) return;
     requested.add(f.id);
-    loadImage(f.photo).then((bmp) => {
+    loadImage(f.photo, f.backdrop ? 'hi' : 'low').then((bmp) => {
       if (!gl || lost) return;
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -225,7 +233,9 @@ export function createGlRenderer() {
       gl.generateMipmap(gl.TEXTURE_2D);
       setFilter(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR);
       const r = rangeOf(f.photo, bmp);
-      photoTex.set(f.id, { tex, range: [r.lo, r.hi] });
+      const crop = f.backdrop ? coverCrop(bmp.width, bmp.height, f.cols, f.rows) : null;
+      const uv = crop ? [crop.sx / bmp.width, crop.sy / bmp.height, crop.sw / bmp.width, crop.sh / bmp.height] : [0, 0, 1, 1];
+      photoTex.set(f.id, { tex, range: [r.lo, r.hi], uv });
       onLoad.forEach((cb) => cb(f));
     }, () => {});
   }
@@ -268,11 +278,13 @@ export function createGlRenderer() {
     for (const f of map.frames) {
       const t = photoTex.get(f.id);
       if (!t) continue;
+      if (f.backdrop && world.mode !== 'side') continue; // the arena is a dark room from outside
       if (f.x > origin[0] + sceneSize[0] || f.x + f.w < origin[0] || f.y > origin[1] + sceneSize[1] || f.y + f.h < origin[1]) continue;
       gl.bindTexture(gl.TEXTURE_2D, t.tex);
       gl.uniform4f(pp.u.u_rect, f.x + 1 + swayOf(world, f), f.y + 1, f.cols, f.rows);
       gl.uniform2f(pp.u.u_range, t.range[0], t.range[1]);
       gl.uniform1f(pp.u.u_mono, f.darkroom ? 1 : 0);
+      gl.uniform4f(pp.u.u_uv, t.uv[0], t.uv[1], t.uv[2], t.uv[3]);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
     gl.bindTexture(gl.TEXTURE_2D, sceneTex);
@@ -320,6 +332,7 @@ export function createGlRenderer() {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, data.length / FLOATS);
     };
     drawGlyphs(staticGlyphs);
+    if (world.mode === 'side') drawGlyphs(arenaGlyphs);
     const people = [];
     for (const e of world.people || []) pushGlyph(people, e.x - 0.5, e.y - 0.5, e.glyph, e.color);
     drawGlyphs(new Float32Array(people));
@@ -354,7 +367,7 @@ export function createGlRenderer() {
       if (!f.darkroom || f.x > left + cols || f.x + f.w < left || f.y > top + rows || f.y + f.h < top) continue;
       pushBorder(dynamic, f, world.focus === f ? C.frameFocus : C.dFrame, swayOf(world, f));
     }
-    if (world.focus && !world.focus.darkroom) pushBorder(dynamic, world.focus, C.frameFocus);
+    if (world.focus && !world.focus.darkroom && !world.focus.backdrop) pushBorder(dynamic, world.focus, C.frameFocus);
     for (const e of world.entities || []) pushGlyph(dynamic, e.x - 0.5, e.y - 0.5, e.glyph, e.color, C.bg);
     drawGlyphs(new Float32Array(dynamic));
     gl.bindVertexArray(null);
