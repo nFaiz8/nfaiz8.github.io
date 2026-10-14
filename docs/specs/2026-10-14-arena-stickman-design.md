@@ -36,8 +36,11 @@ Each can be changed; the alternative is given.
    *Alternative:* an instant pop into sparks that leaves nothing behind.
 8. **Names go above the head in the side view** (they stay below the `@` top-down). *Alternative:* below
    the feet, where they would collide with the platform being stood on.
-9. **The aiming arm shows only while `act` is `'shoot'`.** *Alternative:* always point the arm at the aim,
-   which shows everyone where you are aiming all the time.
+9. **The gun is always drawn, so everyone can see who has the rifle or the sniper.** It points along the
+   aim while shooting, while ↑/↓ tilts it, and whenever mouse aim is on; otherwise it is carried level at
+   the hip. (Changed 2026-10-14 with the three guns; before, the arm showed only while shooting.)
+   *Alternative:* the old rule, where the arm and gun show only while shooting; nobody can tell the guns
+   apart until they fire.
 10. **A hit flashes the figure white for 0.1 s.** *Alternative:* a red flash.
 11. **Facing flips instantly** (the figure is mirrored), with no turn frame. *Alternative:* a one-frame turn
     pose.
@@ -99,8 +102,8 @@ and they become unit-test rules:
 Each body (you and every remote person) has the state that the PvP layer produces and syncs:
 
 ```
-{ x, y, vx, vy, facing: -1|1, ground: bool, aim: radians, act: 'idle'|'shoot'|'punch'|'kick'|'hurt'|'dead',
-  actT: seconds since act began, hp: 0..max }
+{ x, y, vx, vy, facing: -1|1, ground: bool, aim: radians, act: 'idle'|'shoot'|'punch'|'kick'|'hurt'|'dead'|'roll',
+  actT: seconds since act began, hp: 0..max, gun: 'deagle'|'rifle'|'sniper' }
 ```
 
 plus two fields that each client fills in for itself and **never syncs** (see Interface changes):
@@ -160,7 +163,7 @@ A pose is built in three layers, so actions work while running or in the air:
    - in the air: rise, apex or fall.
 2. **The upper-body action overlay** (`shoot`, `punch`) replaces `armF` and may lean the torso and head.
    The legs keep running or flying.
-3. **Whole-body actions** (`kick`, `hurt`, `dead`) and the respawn replace the pose entirely, except that
+3. **Whole-body actions** (`kick`, `hurt`, `dead`, `roll`) and the respawn replace the pose entirely, except that
    `kick` keeps the head where locomotion put it.
 
 All art is drawn **facing right**. Facing left mirrors it: every `dx` is negated, and characters swap
@@ -263,12 +266,11 @@ The front arm and the gun follow `aim` exactly. Only the arm's glyph is chosen f
   along the aim is `(r cos aim × facing, r sin aim / 2)` in cells and rows (see Interface changes).
 - **Shoulder** `S = (0.15, −0.3)`: 1.8 rows above the feet, the PvP spec's "60% of the figure's height".
   - Arm glyph at `S + 0.7` along the aim.
-  - Gun at `S + 1.5` along the aim.
-  - Muzzle flash `*` (tone `fx`) at `S + 2.3` along the aim, while `actT < 0.06`.
+  - The gun hand at `S + 1.3` along the aim, and the gun's glyphs along the ray from it ("Guns" below).
+  - Muzzle flash `*` (tone `fx`) at the gun's `MUZZLE_R` along the aim, while `actT < 0.06`.
 - **Arm glyph by angle**: `-` within 22.5° of level; `/` from 22.5° to 67.5° upward and `\` from 22.5° to
   67.5° downward; `|` beyond 67.5°.
-- **Gun glyph**: `=` within 35° of level; otherwise the same glyph as the arm. It is drawn in the body
-  colour.
+- **The gun** depends on `gun` (see "Guns" below). It is drawn in the body colour.
 - **Recoil**:
   - arm, gun and flash move back 0.3 along the aim: fully at `actT < 0.04`, easing to 0 by 0.15;
   - the head moves back 0.1 at the same time.
@@ -290,6 +292,52 @@ The front arm and the gun follow `aim` exactly. Only the arm's glyph is chosen f
 
 (Approximate: on screen the arm, gun and flash sit on one straight ray from the shoulder at exactly the aim
 angle.)
+
+### Guns
+
+Three guns, each a short row of glyphs laid along the aim ray from the gun hand. `GUN_ART` holds them and
+is exported, so the PvP layer draws the floating pickups from the same art.
+
+| gun | level art (facing right; `h` marks the cell at the hand) | cells behind the hand / in front | muzzle (`MUZZLE_R`, along the ray from the shoulder) |
+|---|---|---|---|
+| deagle | `h═` drawn as `╦═` | 0 / 1 | 2.8 |
+| rifle | `═h╤══` drawn as `═╦╤══` | 1 / 3 | 4.8 |
+| sniper | `═h═°═══` drawn as `═╦═°═══` | 1 / 5 | 6.8 |
+
+- The hand is at `S + 1.3` along the aim; each further glyph is 1 screen unit further along the ray (a
+  stock glyph 1 unit behind it). The muzzle flash sits at `MUZZLE_R`.
+- **Within 35° of level** the art is drawn as in the table. **Beyond 35°** every glyph of the gun becomes
+  the arm's glyph for that angle (`/`, `\` or `|`), except the sniper's scope `°`, which stays. The length
+  is unchanged, so a sniper aimed up is a long diagonal line with a `°` on it.
+- **Carried** (not shooting, aim 0, mouse aim off): the front hand is at the hip, `(0.45, +0.3)` from the
+  centre, and the gun is level from it, pointing forward. The arm glyph is `-` between shoulder and hand.
+  Running, jumping and landing move it with the torso.
+- **Aimed** (shooting, ↑/↓ held, or mouse aim on): as in "Shoot" above, with this art.
+- Facing left mirrors it; `╦`, `╤`, `═` and `°` map to themselves.
+
+```
+  carried (rifle)     level shot (sniper)            45° up (rifle)
+                                                          /
+   O                   O                                 /
+  /|═╦╤══             /|-═╦═°═══ *                    O /
+  / \                 / \                             /|/
+                                                     / \
+```
+
+### Roll (0.30 s)
+
+The figure tucks into a ball on the feet (the lower 2 of its 3 rows; the top row is empty) and turns once,
+forward, in the roll's direction. No gun is drawn.
+
+| frame (`actT`) | 0–0.075 | 0.075–0.15 | 0.15–0.225 | 0.225–0.30 |
+|---|---|---|---|---|
+| upper row | `.o.` | `.-.` | `.-.` | `o-.` |
+| lower row | `'-'` | `'-o` | `'o'` | `'-'` |
+
+- The head `o` goes top, front, bottom, back: one full forward turn. Facing left mirrors it.
+- A puff `~` (tone `fx`) stays where the roll started for 0.1 s.
+- A jump ends the roll: the next frame is the rise pose.
+- The figure is drawn at full opacity throughout: the dodge window is not shown, the movement says it.
 
 ### Punch (0.25 s)
 
@@ -418,6 +466,7 @@ angle.)
 | protection (`safe`) | `a` pulses 0.35–0.8, 3 times a second |
 | respawn | fly-in 0.35, flash to 0.45 s |
 | whoosh `)` | 0.05 s |
+| roll | 4 frames of 0.075 s; puff 0.1 s |
 
 ## 5. Drawing
 
@@ -521,7 +570,8 @@ angle.)
 
 | | with Reduce Motion |
 |---|---|
-| run frames, action poses, aim | **kept** (you cause them, and they carry meaning) |
+| run frames, action poses, aim, roll frames | **kept** (you cause them, and they carry meaning) |
+| roll puff | off |
 | breathing, run bob and lean easing, landing squash | off (static offsets: lean still applies, without bob) |
 | hurt and respawn white flashes | off; hurt shows the recoil pose only |
 | muzzle flash | kept (one glyph, it shows a shot happened) |
@@ -583,7 +633,7 @@ angle.)
   - **Shape**:
     - every non-dead pose has a head and a torso;
     - every glyph stays within `|dx| ≤ 2.5` and `−1.6 ≤ dy ≤ 1.2` (labels aren't part of the pose);
-    - only printable ASCII is used.
+    - only printable ASCII is used, plus the gun glyphs `═ ╦ ╤ °`.
   - **Purity**:
     - the same input gives deep-equal output;
     - `state` is not mutated;
@@ -601,7 +651,12 @@ angle.)
       screen (`atan2(2·dy, dx·facing)` within 1e-6, apart from recoil);
     - the arm glyph follows the 8-direction table;
     - the flash is present only for `actT < 0.06`;
-    - recoil moves the gun back at `actT` 0.02 and not at 0.2.
+    - recoil moves the gun back at `actT` 0.02 and not at 0.2;
+    - each gun has its `GUN_ART` length along the ray, and the flash is at its `MUZZLE_R`;
+    - beyond 35° the gun glyphs are the arm's glyph, and the sniper keeps its `°`;
+    - carried: with `act` idle, aim 0 and mouse aim off, the gun is level at the hip.
+  - **Roll**: the head is at the table's position in each of the 4 frames; no gun glyph; nothing in the top
+    row; mirrored when facing left.
   - **Punch**: the fist reaches `dx ≥ 1.5` at `actT` 0.06 and 0.1, but not at 0 or 0.3.
   - **Kick**: the foot reaches `dx ≥ 1.4` at `dy ≈ 0.55` at `actT` 0.06 and 0.15, and it does so in the
     air too.
@@ -710,10 +765,13 @@ with each new shot restarting `actT`; `punch` 0.25 s; `kick` 0.4 s; `hurt` for t
    - A punch and a kick are **fully extended at `actT` 0.06**. A punch is out until 0.16; a kick until
      0.26.
    - The gun hand is on the aim ray from `SHOULDER = { dx: 0.15, dy: −0.3 }` (1.8 rows above the feet).
-     The muzzle flash is at `MUZZLE_R = 2.3` screen units along that ray; both are exported from
+     The muzzle flash is at the held gun's `MUZZLE_R` (2.8, 4.8 or 6.8) screen units along that ray; both are exported from
      `src/stick.js`.
      - Bullets start at the muzzle, so a shot leaves from the drawn gun (reconciled 2026-10-14; the PvP
        spec says the same).
    - A `dead` body should still be stepped by `stepBody` with no input, so someone popped mid-air lands
      and their pieces settle on whatever they land on. The pieces are gone by 2.0 s.
    - The figure doesn't use `hp`, and draws no health.
+8. **Added 2026-10-14 with the PvP spec's three guns and rolls**: the state gains `gun`
+   (`'deagle'|'rifle'|'sniper'`) and the act `roll` (0.30 s). `GUN_ART` and each gun's `MUZZLE_R` are
+   exported from `src/stick.js`; bullets start at the held gun's muzzle.

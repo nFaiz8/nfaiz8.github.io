@@ -18,13 +18,18 @@ as fluidly on your screen as you do on theirs, and the server, not the browsers,
 
 - **Drop-in free-for-all**: no lobby, no rounds. Walking in is joining. A small kill scoreboard shows
   while you are in the arena.
-- **Gun + melee**: one gun with visible bullets and a short cooldown, plus a punch/kick with knockback.
+- **Three guns + melee**, all drawn as ASCII guns: the **deagle** you spawn with, and a **rifle** and a
+  **sniper** picked up from platforms (they come back 10 s after being taken). Plus a punch/kick with
+  knockback. (Added 2026-10-14.)
+- **Rolls**: double-tap left or right to roll that way. (Added 2026-10-14.)
 - **Aiming**: you shoot the way you face; holding ↑ or ↓ while shooting angles the shot 45°. J shoots,
   K punches or kicks. Phones get FIRE and HIT buttons near JUMP. On a desktop the mouse aims too: click
   anywhere to shoot toward the cursor, at any angle.
 - **Fluid movement**: the animation may be a bit choppy, the movement must not be. Remote fighters must
   not look like straight segments.
 - **Server-decided hits**: no client ever says "I hit him".
+- **Hosting**: the Cloudflare Worker, as today. If the free tier can't take it, the user can run the
+  server on their own machine instead (§11).
 - **Stickmen** in the arena (the other spec). Fake visitors never enter the arena. Nothing outside the
   arena changes.
 
@@ -48,6 +53,12 @@ Each of these is a judgment call. The alternative is what I would do if you want
 | **Bullets pass through `═` platforms**, and stop at `▓`, walls, floor and ceiling (§2.2) | Platforms stop bullets too |
 | **Opening a photo, the map or the grid, or hiding the tab, takes you out of the fight** (§8) | You stay in and can be hit while away |
 | **Spawn points are marked in `arena.txt`** with `S` (§2.5) | A fixed list in code |
+| **Pickup guns have limited ammo** (rifle 40, sniper 5), then you're back to the deagle (§2.7) | Keep it until you die |
+| **Two rifles and one sniper**: a rifle on each side of the room at mid height, the sniper high in the middle (§2.7) | Other counts or places (they're letters in `arena.txt`) |
+| **The sniper shows everyone a faint aim line** while someone holds it (§10) | No line: a sniper is invisible until it fires |
+| **A roll dodges by timing**: bullets and strikes pass through you for most of it (§2.8) | The body shrinks to 1 row, so only shots at head and chest height miss |
+| **Jumping out of a roll keeps its speed** (a long jump) (§2.8) | Jumping is locked until the roll ends |
+| **No shooting or striking while rolling** (§2.8) | Shoot while rolling |
 
 ### Success criteria
 
@@ -55,7 +66,9 @@ Each of these is a judgment call. The alternative is what I would do if you want
   damage number) and the health shown is the same on both screens.
 - Someone jumping, landing on a platform and turning around on the other screen moves in smooth arcs,
   never in straight segments, and never pops more than a fraction of a cell between frames.
-- Bullets can be dodged at medium range by jumping or dropping through a platform.
+- Bullets can be dodged at medium range by jumping, dropping through a platform or rolling.
+- The three guns feel different: the deagle punchy, the rifle a stream, the sniper one big hit from far
+  away. Picking one up shows it in your hands and on everyone else's screen.
 - Popping, respawning, the scoreboard and the kill feed work with 2 to 30 people.
 - Mouse aiming works at any angle on a desktop; FIRE and HIT work on a phone in landscape.
 - Alone, offline, or with the server down, the arena still works and the dummy can be fought.
@@ -84,26 +97,36 @@ the unit of `RUN`) and rows (vertical, the unit of `GRAVITY`); a row is twice as
 - You can never damage yourself. Your bullets never hit you, and there are no hazards, pits or fall
   damage.
 
-### 2.2 Gun
+### 2.2 Guns
 
-| | value | why |
-|---|---|---|
-| bullet speed | **80 cells/s** on screen (so 40 rows/s straight up or down) | about 2.7× running speed: fast enough to matter, slow enough to see |
-| damage | **12** | 9 hits to pop from full |
-| cooldown | **0.3 s** (3.3 shots/s) | a sustained gun-only kill takes at least 2.4 s, leaving time to react |
-| range | **0.8 s** of flight: 64 cells across, 32 rows up | no cross-map sniping in a 160-wide room; it pushes fights close, where melee lives |
-| bullets in flight per person | at most **3** | follows from range and cooldown; enforced anyway |
-| knockback | **8 cells/s** away, **0.08 s** stun | a nudge you feel, not a launch |
+Three guns, in `GUNS` in `fight.js`. You spawn with the deagle, and the other two are picked up (§2.7).
 
-- **Dodging**: at 28 cells away a bullet takes 0.35 s to arrive, about a reaction plus a round trip.
-  Jumping clears a 1-row bullet in about 0.03 s. So bullets are dodgeable from about a fifth of the
-  room, not point-blank.
-- A bullet starts at the muzzle of the drawn gun: `MUZZLE_R` along the aim ray from the shoulder
-  (`SHOULDER`, 1.8 rows above the feet; both exported from the stickman's `src/stick.js`). The server
-  uses the same two constants.
+| | deagle | rifle | sniper |
+|---|---|---|---|
+| how you get it | you spawn with it; endless ammo | a pickup; **40** rounds | a pickup; **5** rounds |
+| damage (hits to pop) | **25** (4) | **9** (12) | **70** (2) |
+| cooldown | **0.4 s**; held, it keeps firing | **0.1 s**: held, a stream | **1.2 s** |
+| bullet speed | **80** cells/s | **90** cells/s | **220** cells/s |
+| range (flight time) | 0.8 s: 64 cells | 0.7 s: 63 cells | 0.75 s: the whole room |
+| bullets in flight, at most | 2 | 7 | 1 |
+| knockback | 10 cells/s, 0.1 s stun | 3 cells/s, 0.05 s stun | 30 cells/s, 0.3 s stun |
+| why | steady and readable: four clean hits | wins up close if you keep it on target; weak per bullet | one shot takes most of your health; slow to fire, so a miss is costly |
+
+- Speeds are on screen: straight up or down a bullet covers half as many rows (rows are twice as tall).
+- Sustained damage: deagle 62 hp/s, rifle 90, sniper 58. A kill takes at least 1.2 s (deagle), 1.1 s
+  (rifle) or 1.2 s (sniper), so every gun leaves a moment to react.
+- When a pickup gun's ammo runs out you're back to the deagle at once. Popping also puts you back to
+  the deagle.
+- **Dodging**: at 28 cells away a deagle bullet takes 0.35 s to arrive, about a reaction plus a round
+  trip, so it is dodgeable from about a fifth of the room, not point-blank. A sniper bullet crosses the
+  room in under 0.75 s: you dodge a sniper by watching its aim line (§10) and moving or rolling before it
+  fires.
+- A bullet starts at the muzzle of the drawn gun: the held gun's `MUZZLE_R` along the aim ray from
+  the shoulder (`SHOULDER`, 1.8 rows above the feet; both exported from the stickman's `src/stick.js`).
+  The server uses the same constants.
 - It flies in a straight line, with no gravity. It stops at `▓`, at anything outside the 160 × 34
-  interior (walls, floor, ceiling, the door), and at the first unprotected, living body it touches. It
-  passes through `═`.
+  interior (walls, floor, ceiling, the door), and at the first body it touches that is alive, unprotected and not inside a
+  roll's dodge window (§2.8). It passes through `═`.
 - The **hurtbox** is 1.0 cell wide and `FIGURE_ROWS` (3) rows tall, centred on `(x, y)`: the body's
   0.8 × 3-row physics box (the stickman spec's), a little wider. The feet are at `y + 1.5`.
   `FIGURE_ROWS` is exported from `fight.js` (see Interface changes).
@@ -185,12 +208,50 @@ ground if `ky` is upward, and starts the stun.
 - **Resets**: kills belong to your connection. They survive walking out and back in, and reset when you
   reconnect (a reload, or the tab hidden for 30 s). Nothing is stored.
 
+### 2.7 Pickups
+
+- **Where**: `arena.txt` marks them with letters in the feet row (like `S`): **`R`** a rifle, **`N`** a
+  sniper. `parseLevel` treats them as air and returns them in order; their index is their number `n`.
+  - On the Penn Station level: a rifle on the train's side ribs west of the left pillar (row 18, col
+    26), a rifle on the railing east of the right pillar (row 15, col 150), and the sniper on the right
+    ceiling tube in the middle (row 3, col 118), high and exposed.
+- **Taking one**: walk into it. When your body box touches an available pickup, your browser sends
+  `pk` (at most one every 0.5 s). The server checks it (§6) and gives you the gun with full ammo. Your
+  browser waits for the reply (about one round trip) before showing the gun in your hands.
+  - Holding the deagle or the other pickup gun: you swap to this one. The gun you had is gone, not
+    dropped.
+  - Holding the same gun: it refills.
+- **Coming back**: a taken pickup returns **10 s** later, in the same place. Until then a dim outline
+  shows where it will be (§10). Nobody needs a timer: the server stores when it was taken.
+- Two people touching it at once: the first `pk` the server receives wins.
+- Alone with the dummy or offline (§9), the browser applies the same rules itself.
+
+### 2.8 Rolls
+
+| | value |
+|---|---|
+| how | **double-tap** ←/→ or A/D within **0.25 s**, while on the ground. Phones: double-tap ◀ or ▶ |
+| speed and length | **48 cells/s** for **0.30 s** (about 14 cells) in the tapped direction; steering is ignored |
+| dodge window | from **0.04 s to 0.26 s** of the roll, bullets and strikes pass through you |
+| cooldown | **0.5 s** after it ends |
+| during it | no shooting or striking (presses are dropped); you can jump: the roll ends and you keep its speed, then air control eases you back to your normal speed |
+| off a ledge | the roll ends and you fall, keeping its speed |
+| while stunned | no roll |
+
+- The roll lives in `arena.js` (`stepBody` gains a roll state), so the browser, the remote predictor
+  and the dummy all use it. It is gameplay, so it is the same with Reduce Motion on.
+- The roll is input bit **32** while it lasts, sent at once when it starts (an urgent send, §5), so
+  other browsers predict it and the server knows when your dodge window is open (§6).
+- A double-tap of the same key with the first tap's run in between is fine: the first tap runs, the
+  second rolls.
+
 ## 3. Controls and aiming
 
 ### Keyboard
 
 - Movement, jumping, sprinting and dropping are unchanged.
-- **J**: shoot. Held, it keeps firing every 0.3 s.
+- **J**: shoot. Held, it keeps firing at the gun's rate.
+- **Double-tap ←/→ or A/D**: roll (§2.8).
 - **K**: punch or kick (§2.3). Each press is one strike; holding does nothing more.
 - **Aim**: straight ahead in the direction you face. Holding **W/↑** tilts the shot 45° up; holding
   **S/↓** tilts it 45° down. ↑ also jumps and ↓ also drops through a `═` you stand on, as in the arena
@@ -215,7 +276,7 @@ ground if `ky` is upward, and starts the stun.
 - The pad gains **FIRE** and **HIT**. The right-hand cluster becomes a 2 × 2 block: `HIT ▼` on top,
   `FIRE JUMP` below, with FIRE beside JUMP so a thumb can roll between them. Every target is at least
   56 px; FIRE and JUMP are 64 px.
-- Holding FIRE keeps firing. HIT strikes once per tap.
+- Holding FIRE keeps firing. HIT strikes once per tap. A double-tap on ◀ or ▶ rolls.
 - **Aim**: FIRE shoots the way you face. FIRE while holding JUMP angles it 45° up; FIRE while holding ▼
   angles it 45° down. The same rule as the keyboard.
 - The buttons use the pad's existing pointer capture, so several fingers work at once.
@@ -235,7 +296,7 @@ This is the interface the stickman spec consumes. The PvP layer produces it for 
 fighter and for the dummy, every frame.
 
 ```
-{ x, y, vx, vy, facing: -1|1, ground: bool, aim, act, actT, hp, safe, combo }
+{ x, y, vx, vy, facing: -1|1, ground: bool, aim, act, actT, hp, safe, combo, gun }
 ```
 
 - `x, y`: map cells, the centre of the body's 0.8 × 3-row box (feet at `y + 1.5`), where the renderers
@@ -244,6 +305,7 @@ fighter and for the dummy, every frame.
 - `vx, vy`: cells/s and rows/s, as in `arena.js`. `facing` may disagree with the sign of `vx` (mouse
   aim, §3).
 - `aim`: §3. `hp`: 0..`MAX_HP`, regeneration included. `safe` and `combo`: see Interface changes.
+- `gun`: `'deagle'`, `'rifle'` or `'sniper'`.
 - `act` and how long it lasts:
 
 | act | starts when | lasts |
@@ -254,6 +316,7 @@ fighter and for the dummy, every frame.
 | `kick` | a kick | 0.4 s |
 | `hurt` | damage taken | the stun (0.08 / 0.2 / 0.4 s) |
 | `dead` | popped | until respawn (2 s) |
+| `roll` | a roll starts (input bit 32 rising) | 0.30 s, or until a jump ends it |
 
 - **Where acts come from**: your own `shoot`, `punch` and `kick` start the moment you press (the
   browser predicts which strike it is by the same rule as the server). `hurt` and `dead` come only
@@ -290,8 +353,9 @@ below is 95 bytes). Server messages have no limit but stay small.
 | `{t:'f', x, y, a, ts}` | 54 | I fired from (x, y) at on-screen angle `a` (absolute: 0 = east, + = down, −π..π) |
 | `{t:'m', k, ts}` | 31 | I struck; `k` is `'p'` or `'k'`, what my browser predicted |
 | `{t:'rs'}` | 10 | respawn me (sent 2 s after popping) |
+| `{t:'pk', n}` | 17 | I touched pickup `n` |
 
-- **Input bits** `i`: 1 left, 2 right, 4 jump held, 8 down held, 16 sprint. Other browsers need these
+- **Input bits** `i`: 1 left, 2 right, 4 jump held, 8 down held, 16 sprint, 32 rolling. Other browsers need these
   to predict you (§7).
 - **`ts`**: milliseconds since I entered the arena, an integer. It restarts at each `ae`.
 
@@ -299,12 +363,14 @@ below is 95 bytes). Server messages have no limit but stay small.
 
 | Message | Bytes (typical) | Meaning |
 |---|---|---|
-| `{t:'aw', lv, you:{hp, kills}, fighters:[{id, hp, kills, alive, safe, x, y, vx, vy, f, g, i, a}]}` | ~130 per fighter | arena welcome: everyone already inside (about 3.8 kB with 30) |
+| `{t:'aw', lv, you:{hp, kills, w, ammo}, pk:[{n, at}], fighters:[{id, hp, kills, alive, safe, w, x, y, vx, vy, f, g, i, a}]}` | ~135 per fighter | arena welcome: everyone already inside (about 4 kB with 30), and each pickup's `at`: ms until it is back, 0 if it is there |
 | `{t:'aj', id, hp, kills}` / `{t:'ax', id}` | 48 / 26 | someone entered / left the fight |
 | `{t:'a', id, …}` | 111 | someone's state, as they sent it (or clamped, §6) |
-| `{t:'s', id, n, x, y, a}` | 66 | someone fired bullet number `n` |
+| `{t:'s', id, n, x, y, a, w}` | 72 | someone fired bullet number `n` from gun `w` |
+| `{t:'pk', id, n, at}` | 45 | `id` took pickup `n`; it is back in `at` ms |
+| `{t:'w', id, w, ammo}` | 45 | `id`'s gun is now `w`, with `ammo` rounds (a pickup, or running dry) |
 | `{t:'mm', id, k}` | 34 | someone struck (sent for misses too, so everyone sees the swing) |
-| `{t:'h', id, by, w, n, d, hp, kx, ky}` | 93 | `id` took `d` damage from `by` with weapon `w` (`b`/`p`/`k`), bullet `n` if any; new hp; knockback velocity |
+| `{t:'h', id, by, w, n, d, hp, kx, ky}` | 93 | `id` took `d` damage from `by` with weapon `w` (`d`eagle, `r`ifle, s`n`iper, `p`unch, `k`ick), bullet `n` if any; new hp; knockback velocity |
 | `{t:'k', id, by, kills, fled}` | 63 | `id` popped (or fled); `by` now has `kills` |
 | `{t:'sp', id, x, y}` | 45 | `id` respawned here, protected |
 
@@ -317,7 +383,7 @@ below is 95 bytes). Server messages have no limit but stay small.
 - **Outside the arena**: unchanged (`p`, at most 5 a second).
 - **Inside**: `a` at most **15 a second** (every 67 ms) while anything changes: position, velocity,
   facing, ground, input bits, or aim by more than 0.05 rad.
-- **Urgent sends**: a change in input bits, a take-off, a landing, a facing flip or a knockback sends
+- **Urgent sends**: a change in input bits (a roll starting is one), a take-off, a landing, a facing flip or a knockback sends
   at once, as long as 30 ms have passed since the last `a`. Otherwise it goes out at the 30 ms mark.
   These are the moments where prediction would otherwise go wrong.
 - **Cap**: never more than **20** `a` per rolling second. Beyond that, urgent sends wait for the next
@@ -346,10 +412,14 @@ In the socket attachment, so it survives hibernation (well under the 2 kB limit)
 | `kills` | kills this connection |
 | `combo`, `strikeAt`, `airAt` | combo count, last strike time, last time seen in the air |
 | `hitBy` | who last damaged me, for the flee rule |
+| `gun`, `ammo` | the gun held and its rounds left |
+| `rollAt` | when the current roll started (server clock), for the dodge window |
 | buckets | new token buckets for `a`, `f`, `m`, `ae`/`al` and `rs` |
 
-In memory only: the bullets in flight and the tick timer. These live for under a second, so losing
-them to an eviction costs nothing.
+In memory only: the bullets in flight, the tick timer, and when each pickup was taken (an eviction
+makes every pickup available again, which costs nothing).
+
+The bullets and the tick live for under a second, so losing them to an eviction costs nothing.
 
 ### Checks
 
@@ -360,7 +430,8 @@ them to an eviction costs nothing.
 | kind | capacity | refill | note |
 |---|---|---|---|
 | `a` | 24 | 20/s | the browser's cap plus jitter |
-| `f` | 2 | 3.4/s | the 0.3 s cooldown, with room for two shots bunched up by the network |
+| `f` | 2 | 1.15 ÷ the held gun's cooldown: 2.9/s deagle, 11.5/s rifle, 0.96/s sniper | the cooldown, with room for two shots bunched up by the network |
+| `pk` | 2 | 2/s | |
 | `m` | 2 | 3.4/s | the punch cooldown; after a kick, the next strike also needs 0.5 s (the 0.55 s cooldown less jitter) |
 | `ae`/`al` | 4 | 1/s | |
 | `rs` | 2 | 1/s | also needs 1.9 s since popping |
@@ -368,8 +439,8 @@ them to an eviction costs nothing.
 - Messages over the limit are dropped silently and count toward the existing flood limit (50 drops in
   10 s closes the connection).
 - **State sanity** (`a`):
-  - Numbers must be finite and in range; `|vx|, |vy| ≤ 60`; `f` ±1; `g` 0/1; `i` 0..31;
-    `|a| ≤ π/2`.
+  - Numbers must be finite and in range; `|vx|, |vy| ≤ 60`; `f` ±1; `g` 0/1; `i` 0..63;
+    `|a| ≤ π/2`; `i` may now be up to 63.
   - The body's centre must not be inside `▓`. If it is, the state is dropped.
   - **Speed**: the move from the previous state may be at most `60 × gap × 1.25 + 0.5` cells across
     and rows down, where `gap` is the `ts` difference. A sender's `ts` may not run more than 300 ms
@@ -377,9 +448,17 @@ them to an eviction costs nothing.
     the same line, and the clamped state is what the server stores, tests hits against, and forwards.
     A speed-hacker is therefore seen, and hit, where they could legally be.
   - States from a popped fighter are dropped without counting as flood (some are always in flight).
-- **Shots** (`f`): the shooter must be alive and in the arena, and have fewer than 3 bullets in flight.
+- **Shots** (`f`): the shooter must be alive, in the arena, not rolling, and have fewer bullets in
+  flight than the held gun allows. Each accepted shot uses one round of a pickup gun; at 0 the server
+  switches them to the deagle and sends `w`.
   The origin must be within 3 cells across and 2 rows down of the server's estimate of their hand;
   otherwise the estimate is used instead. Firing ends protection.
+- **Pickups** (`pk`): the person must be alive and in the arena, the pickup there (10 s since it was
+  last taken), and the server's estimate of their body within 1 cell across and 2 rows of its spot.
+  Then: their gun and full ammo, `pk` and `w` to everyone in the arena.
+- **Rolls**: when an accepted `a` turns input bit 32 on, `rollAt` is the time its `ts` gives on the
+  server's clock, but never more than 150 ms before it arrived. The dodge window is `rollAt + 0.04` to
+  `rollAt + 0.26`. A roll that arrives after a bullet already hit doesn't undo the hit.
 - **Strikes** (`m`): a claimed kick is accepted if the striker was in the air within the last 150 ms,
   or it is the 3rd strike of a combo. Otherwise it becomes a punch. Striking ends protection.
 
@@ -409,8 +488,10 @@ them to an eviction costs nothing.
     movement.
   The cost: on a slow connection, a running target you strike at the edge of your reach can get away.
 - **Popping and respawning**: at 0 hp the server sets `alive: false`, credits the killer, and sends
-  `k`. A later `rs` (at least 1.9 s on) gets a spawn point (§2.5), full health and 1.5 s of protection,
-  and `sp` goes to everyone in the arena.
+  `k`. A later `rs` (at least 1.9 s on) gets a spawn point (§2.5), full health, the deagle and 1.5 s of
+  protection, and `sp` goes to everyone in the arena.
+- **Dodging**: a target inside its roll's dodge window is skipped by bullets (they fly on) and by
+  strikes.
 - **Leaving** (`al`, or the socket closing): `ax` goes to the arena. If `hitBy` damaged them within
   3 s, that person gets the kill and `k` with `fled: 1` goes out.
 
@@ -477,8 +558,8 @@ they are, which is what hits are tested against.
 
 - **When**: in side view, when no other fighter is in the arena. That covers being alone, multiplayer
   off or down, all instances full, the free tier exhausted, and a `fight` version mismatch.
-- **What**: a stickman labelled `dummy`, drawn grey, standing on the floor at column 80 (or the
-  nearest clear floor), facing the door.
+- **What**: a stickman labelled `dummy`, drawn grey, holding a deagle it never fires, standing on the
+  yellow line at column 80 (or the nearest clear standing spot), facing the door.
   - It never moves on its own and never attacks.
   - It takes hits by the same `fight.js` rules, run locally: damage numbers, knockback (it can be
     juggled), and popping.
@@ -496,10 +577,13 @@ Everything the PvP layer adds is either an entity in `world.entities` (`{x, y, g
 
 | What | How |
 |---|---|
-| bullet | 2 glyphs: a bright head and one dimmer tail glyph behind it. The glyph follows the direction: `-` within 22.5° of horizontal, `\` or `/` for diagonals, `\|` for vertical. Colour: the shooter's colour mixed 50% toward white (yours: the player colour) |
+| bullet | by gun. **Deagle**: a bright `•` head and one dimmer tail glyph. **Rifle**: one short glyph, no tail. **Sniper**: a 4-glyph streak, fading over 0.15 s behind it. Tails and streaks follow the direction: `-` within 22.5° of horizontal, `\` or `/` for diagonals, `\|` for vertical. Colour: the shooter's colour mixed 50% toward white (yours: the player colour) |
+| sniper aim line | while someone holds the sniper, a faint dotted line (`·` every 2 cells, 25% opacity, their colour) along their aim to the first `▓` or wall, seen by everyone; brighter (50%) for the 0.3 s before their next shot is ready |
+| pickup | the gun's ASCII art (the stickman spec's `GUN_ART`) floating one row above its spot, glowing warm white with a small halo, bobbing 0.15 rows every 1.5 s. Taken: a dim dotted outline of the same art until it returns, with no countdown |
+| ammo | beside your hp in the HUD: `rifle 32`, `sniper 4`; nothing for the deagle |
 | muzzle flash | `*` at the gun hand for 0.06 s |
 | hit spark | 3 glyphs (`*`, `+`, `·`) flying out from the hit point for 0.25 s, in warm white |
-| damage number | `-12` rising 1 row over 0.6 s and fading, above the body hit |
+| damage number | `-25` (the damage dealt) rising 1 row over 0.6 s and fading, above the body hit |
 | hp bar | 5 cells above the head, `█` per 20 hp and `░` for the rest, in red-orange; shown for anyone below full health, hidden at full |
 | dummy label | `dummy` on the row beneath it, like a name |
 | scoreboard, own hp, kill feed | DOM (§2.6) |
@@ -511,7 +595,8 @@ Everything the PvP layer adds is either an entity in `world.entities` (`{x, y, g
 - Hit sparks appear in place for 0.2 s instead of flying out.
 - Damage numbers appear in place for 0.6 s instead of rising.
 - Protection is shown steadily (the stickman spec dims rather than blinks).
-- Bullets, knockback and remote movement are gameplay and are unchanged.
+- Pickups don't bob.
+- Bullets, knockback, rolls and remote movement are gameplay and are unchanged.
 
 ## 11. Free tier
 
@@ -522,21 +607,25 @@ messages are not billed.
 | | messages per fighter-hour | requests per fighter-hour |
 |---|---|---|
 | state, typical (15/s while moving, about 70% of the time, plus urgent sends) | ~43,000 | ~2,150 |
-| shots and strikes, typical (~2/s) | ~7,000 | ~350 |
-| **typical total** | ~50,000 | **~2,500** |
-| worst case (20 states + 3.3 shots + 3.3 strikes every second) | ~96,000 | ~4,800 |
+| shots and strikes, typical (~3/s, more while someone holds a rifle) | ~11,000 | ~550 |
+| **typical total** | ~54,000 | **~2,700** |
+| worst case (20 states + 10 rifle shots + 3.3 strikes every second) | ~120,000 | ~6,000 |
 | for comparison: walking the gallery non-stop today | 18,000 | 900 |
 
-- The daily allowance covers about **40 fighter-hours** of typical play (20 at the worst case), less
+- The daily allowance covers about **37 fighter-hours** of typical play (16 at the worst case), less
   whatever gallery walking uses. For a hobby site this is far more than expected; two people fighting
   for half an hour use about 2.5% of a day.
 - **Duration** barely changes. An instance is already awake whenever anyone in it is moving, and the
   bullet tick only runs during fights, for at most 0.8 s after a shot. Duration grows with the hours
   instances are busy, not with the number of people in them.
-- **CPU** per message is a parse, a few checks and up to 29 sends. A tick is at most 90 bullets × 29
+- **CPU** per message is a parse, a few checks and up to 29 sends. A tick is at most 210 bullets (30 rifles) × 29
   targets of box tests. Both are trivial.
 - **At the limit**, connections fail, and the arena falls back to the dummy (§9), as the rest of the
   gallery falls back to working alone.
+- **If it outgrows the free tier**, the user can host the server on their own machine. The rules live
+  in pure modules (`server/rules.js`, `src/fight.js`, `src/level.js`), so the move is a small Node
+  WebSocket wrapper around them in place of `server/worker.js`, plus the site's `?live=` server address.
+  That move is not part of this release.
 - **Deploying**: `.github/workflows/server.yml` also runs on changes to `src/fight.js`, `src/level.js`,
   `src/stick.js` (for its `SHOULDER` and `MUZZLE_R`, so it must stay pure, with no browser APIs) and
   `src/arena.txt`, since the Worker bundles them. The `fight` hash (§5) covers the gap while one
@@ -546,13 +635,13 @@ messages are not billed.
 
 | File | Change |
 |---|---|
-| `src/fight.js` (new, pure) | numbers, aim, bullets (spawn, ray cast, relative sweep), strikes, combo, damage, regeneration, protection, spawn choice, flee rule, the dummy |
-| `src/level.js` (new, pure, no imports) | `parseLevel` (now with `S` spawn markers) and the cell kinds; the level hash |
-| `src/arena.js` | stun and `knock()`; door-as-wall while stunned; re-exports `level.js` |
+| `src/fight.js` (new, pure) | numbers, `GUNS`, aim, bullets (spawn, ray cast, relative sweep), strikes, combo, damage, regeneration, protection, pickups, ammo, the dodge window, spawn choice, flee rule, the dummy |
+| `src/level.js` (new, pure, no imports) | `parseLevel` (now with `S` spawn markers and `R`/`N` pickups) and the cell kinds; the level hash |
+| `src/arena.js` | stun and `knock()`; the roll; door-as-wall while stunned; re-exports `level.js` |
 | `src/fighters.js` (new, pure) | remote fighters: prediction, correction, acts, bullets on screen |
 | `src/live.js`, `src/net.js` | the `a` ticker and its rates, the new messages, `fight` check |
 | `src/world.js` | the player's body state, facing from the mouse, camera shake |
-| `src/input.js`, `src/main.js`, `index.html`, `src/style.css` | J, K, mouse, FIRE and HIT, the scoreboard, kill feed, notes, entities |
+| `src/input.js`, `src/main.js`, `index.html`, `src/style.css` | J, K, mouse, FIRE and HIT, double-tap rolls, the scoreboard, kill feed, ammo, notes, entities, pickups |
 | `src/render/canvas.js`, `src/render/gl.js` | `pointAt` |
 | `src/config.js` | `ARENA.pvp: true`; `false` turns fighting off and leaves the arena as its own spec describes |
 | `server/rules.js`, `server/gallery.js` | new messages, checks, buckets, the bullet tick, arena-only broadcast |
@@ -577,6 +666,12 @@ messages are not billed.
 | Both pop each other | Both kills count |
 | Knocked toward the door | The door is a wall while stunned |
 | Opening a photo, the map or the grid, or hiding the tab | Out of the fight (`al`); back in with fresh health; the flee rule applies |
+| Two people touch a pickup at once | The first `pk` the server receives wins; the other keeps their gun |
+| A pickup claimed from too far away (a hack or a bad estimate) | Refused; the claimer keeps their gun |
+| A pickup gun runs dry mid-stream | The next shot is a deagle shot at the deagle's rate |
+| A roll's start reaches the server after a bullet already hit | The hit stands |
+| A fire-rate hack with the rifle | Shots beyond the rifle's bucket are dropped like any other |
+| No `R`/`N` markers in `arena.txt` | The unit test fails before it ships; at runtime everyone keeps the deagle |
 | Fewer than 4 `S` markers in `arena.txt` | The unit test fails before it ships; at runtime the floor centre and the door are the spawns |
 | Window resized, phone rotated, renderer switched or WebGL lost mid-fight | The view re-fits; the fight goes on; everything is drawn the same by either renderer |
 | Durable Object evicted mid-fight | Bullets in flight vanish; health and kills survive in the attachments |
@@ -597,12 +692,20 @@ messages are not billed.
     - regeneration starts 4 s after damage, at 20 hp/s, and stops at 100;
     - the flee rule credits a hit 2.9 s earlier, but not one 3.1 s earlier;
     - spawn choice picks the spawn farthest from everyone alive;
-    - bullet glyphs by angle.
+    - bullet glyphs by angle;
+    - each gun's damage, cooldown, speed, range, in-flight cap and ammo; running dry switches to the
+      deagle; popping and respawning give the deagle;
+    - a pickup is refused while taken and allowed again 10 s later; taking the same gun refills it;
+    - a body inside the dodge window is skipped by a bullet that would otherwise hit it, and hit just
+      before and after the window.
   - `test/arena.test.js`:
     - 4 to 8 `S` markers, each air with something to stand on below, none within 10 columns of the door;
     - `S` is air for physics;
     - while stunned, input is ignored and speed decays with a 0.35 s time constant;
-    - the door blocks a stunned body but not a walking one.
+    - the door blocks a stunned body but not a walking one;
+    - two `R` and one `N` marker, each air with something to stand on below and 3 rows of headroom;
+    - a roll moves 14 ± 1 cells in 0.30 s and ignores steering; no roll in the air, while stunned or
+      within 0.5 s of the last; a jump during a roll keeps its speed; a roll off a ledge falls.
   - `test/fighters.test.js`:
     - a scripted run with a jump, a platform landing, a drop-through and a turn, recorded at 60 fps, is
       sent at 15 Hz with 50 ms latency and 0–40 ms jitter;
@@ -611,7 +714,8 @@ messages are not billed.
     - the jump's peak is within 0.3 rows of the real one;
     - silence for 300 ms stops the body;
     - an error over 4 cells snaps;
-    - an `h` knocks the body back at once.
+    - an `h` knocks the body back at once;
+    - a remote roll (bit 32) is predicted: the body covers the roll's distance without a correction.
   - `test/rules.test.js`:
     - the new messages parse, and malformed ones don't;
     - the worst-case `a` and `f` are under 200 bytes;
@@ -624,15 +728,19 @@ messages are not billed.
   - `welcome` carries `fight`;
   - two fighters entering get `aw` and `aj`; someone outside the arena receives none of the arena
     messages;
-  - a shot at a standing target gives `h` with hp 88; a shot with a `▓` block in the way does not;
+  - a deagle shot at a standing target gives `h` with hp 75; a shot with a `▓` block in the way does not;
   - a protected target is not hit;
   - five shots sent within 100 ms give at most two bullets;
-  - 9 hits give `k` with `kills: 1`;
+  - 4 deagle hits give `k` with `kills: 1`;
   - `rs` 1 s after popping is ignored, and at 2 s gives `sp` at a marked spawn;
   - a teleporting state is clamped;
   - `al` within 3 s of a hit gives `k` with `fled: 1`;
   - `a`, `f` and `m` from someone not in the arena are dropped;
   - a ground kick outside a combo comes back as a punch;
+  - a `pk` within reach gives `pk` and `w` with the rifle and 40 rounds; a second `pk` for it is
+    refused; it can be taken again 10 s later;
+  - 40 rifle shots, then the next `s` carries `w: 'd'` and a `w` message switched them back;
+  - a shot reaching a target inside its roll's dodge window doesn't hit;
   - the old `p`, emotes and chat still work as before.
 - **e2e** (`e2e/multiplayer.mjs`, two browsers against `wrangler dev`):
   - both walk into the arena and see each other as fighters;
@@ -644,10 +752,14 @@ messages are not billed.
     its peak is within 0.5 rows of B's own;
   - a mouse click above and to the left of A fires a bullet at that angle;
   - B opens a photo: B leaves the fight on A's screen and comes back on closing it;
+  - A walks into the rifle: A holds a rifle on both screens, and B sees A's shots as rifle bullets;
+  - A double-taps → and rolls about 14 cells on both screens;
   - the shot-and-hit check runs once with `?r=canvas` and once with `?r=gl`;
   - stopping the server mid-fight: both get the dummy and no page errors.
 - **e2e** (`e2e/run.mjs`, one browser, no server):
   - the dummy is there, can be shot, knocked back and popped, and comes back;
+  - walking into the sniper pickup gives the sniper (offline rules) and shows its aim line;
+  - a double-tap of D rolls; a double-tap of ▶ on the phone pad rolls;
   - at 852 × 393 with touch, FIRE and HIT are shown and work, including FIRE with JUMP held (up 45°);
   - with Reduce Motion, nothing shakes and there are no page errors.
 
@@ -689,3 +801,6 @@ The body state in §4 is the agreed one, plus these. The stickman spec should ta
 7. **Not in the body state**: name, colour and the hp bar. Names and colours stay with `live.js`, and
    the hp bar is drawn by the PvP layer (§10), so the stickman doesn't draw health.
 8. **`MAX_HP = 100`**, exported from `src/fight.js`.
+9. **`gun: 'deagle'|'rifle'|'sniper'`** (new field, added 2026-10-14): the stickman draws the held gun
+   from it, and exports `GUN_ART` for the pickups (§10).
+10. **`act: 'roll'`** (new act, added 2026-10-14): 0.30 s, or until a jump ends it.
