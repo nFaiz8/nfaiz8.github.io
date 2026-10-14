@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseLevel, AIR, SOLID, PLATFORM } from '../src/level.js';
 import {
-  buildTrain, tunnel, lightAt, frameAt, lookChar, cellColor, paint, paintWindow, halation, SPEED, CARS, TRAIN_GLYPHS, COLLISION, ACCENT, FLICKER_HZ,
+  buildTrain, tunnel, lightAt, frameAt, lookChar, cellColor, paint, paintWindow, halation, flashGlows, SPEED, CARS, TRAIN_GLYPHS, COLLISION, ACCENT, FLICKER_HZ,
 } from '../src/train.js';
 
 const level = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
@@ -22,17 +22,30 @@ test('buildTrain: the level\'s size, and deterministic (two builds are the same)
   assert.deepEqual(CARS, [[2, 98], [104, 200]]);
 });
 
-test('art and physics can\'t drift apart: collision roles are solid or platform, and every solid or platform cell is drawn as collision', () => {
+test('art and physics can\'t drift apart: every solid or platform cell is drawn as collision, as the car under it, or (the ceiling only) as tunnel rock', () => {
   const COLL = new Set(['solid', 'lintel']);
+  const SLAB = new Set(['body', 'livery', 'stripe', 'coupler']); // a slab's inside, under the top you stand on
+  let ceiling = 0;
   for (let y = 0; y < T.H; y++) for (let x = 0; x < T.W; x++) {
     const i = at(x, y), k = kind(x, y), r = T.role[i];
     if (COLL.has(r)) assert.notEqual(k, AIR, `${r} at ${x},${y} is air in the level`);
     assert.equal(T.solid[i], k === AIR ? 0 : 1, `collision mask at ${x},${y}`);
-    // What you stand on (a top) and what you bump into from the side (a lintel) is drawn warm white.
-    const top = k !== AIR && y > 0 && kind(x, y - 1) === AIR;
-    if (top || (k === SOLID && y >= 11 && y <= 13)) assert.ok(COLL.has(r), `${x},${y} (${k === PLATFORM ? '═' : '▓'}) is drawn as ${r}`);
+    if (k === AIR) continue;
     if (k === PLATFORM) assert.equal(T.ch[i], '═');
+    // The one exemption (a ruling): the tunnel ceiling, rows 0–1, is drawn as the tunnel's rock, not warm white.
+    if (y <= 1) {
+      assert.equal(r, null, `${x},${y}: the ceiling is the tunnel's`);
+      assert.equal(tunnel(y, x)[1], 'rock', `${x},${y}: drawn as rock`);
+      ceiling++;
+      continue;
+    }
+    // Everything else: what you stand on (a top) and what you bump into from the side (a lintel, rows 11–13) is
+    // drawn warm white; the slabs' insides are the car (its body, livery, stripe and coupler), never a hole.
+    const top = kind(x, y - 1) === AIR;
+    if (top || (k === SOLID && y >= 11 && y <= 13)) assert.ok(COLL.has(r), `${x},${y} (${k === PLATFORM ? '═' : '▓'}) is drawn as ${r}`);
+    else assert.ok(SLAB.has(r) && T.ch[i] !== null, `${x},${y}: a slab's inside is drawn as the car (${r})`);
   }
+  assert.equal(ceiling, 2 * T.W, 'the exemption is exactly the two ceiling rows');
 });
 
 test('windows are holes you see the tunnel through, ad cards above them, and the shaft mask sits under them', () => {
@@ -176,8 +189,11 @@ test('brightness follows importance: collision is warm white, at least 62%, and 
   for (const v of [0, 0.05, 0.1, 0.2, 0.4, 0.7, 1, 1.4, 2, 3]) for (const tint of [[1, 1, 1], [0.75, 1, 0.88], [1, 0.62, 0.25], [0.5, 0.5, 0.6]]) {
     const L = tint.map((c) => c * v);
     const solid = cellColor('solid', L, { solid: true }), lintel = cellColor('lintel', L, { solid: true });
-    assert.ok(solid[0] >= 0.62 * COLLISION[0] - 1e-9, `at least 62% (${solid[0]})`);
-    assert.ok(Math.abs(solid[1] / solid[0] - COLLISION[1] / COLLISION[0]) < 0.02 || solid[0] >= 254, 'warm white');
+    // Both collision roles: the slabs' tops (solid) and the end lintels you bump into.
+    for (const [name, c] of [['solid', solid], ['lintel', lintel]]) {
+      assert.ok(c[0] >= 0.62 * COLLISION[0] - 1e-9, `${name}: at least 62% (${c[0]})`);
+      assert.ok(Math.abs(c[1] / c[0] - COLLISION[1] / COLLISION[0]) < 0.02 || c[0] >= 254, `${name}: warm white (${c.map(Math.round)})`);
+    }
     const floor = Math.min(lum(solid), lum(lintel));
     for (const r of ROLES) for (const k of [0.05, 0.12, 1]) for (const glass of [false, true]) {
       const c = cellColor(r, L, { k, glass });
@@ -252,4 +268,25 @@ test('halation: glow spreads a couple of cells sideways and a cell up and down, 
   // Extra sources (a tracer, a muzzle flash) in window cells.
   const e = halation(new Float32Array(w * h * 3), w, h, [{ x: 3, y: 2, c: [255, 220, 160] }]);
   assert.ok(e[(2 * w + 3) * 4] > 0);
+});
+
+test('halation reuses its buffers frame to frame, the output too (no garbage per frame)', () => {
+  const w = 21, h = 9, src = new Float32Array(w * h * 3), scratch = { a: new Float32Array(0), b: new Float32Array(0) };
+  src[(4 * w + 10) * 3] = 255;
+  const one = halation(src, w, h, [], undefined, scratch);
+  const before = one[(4 * w + 10) * 4];
+  const two = halation(new Float32Array(w * h * 3), w, h, [], undefined, scratch);
+  assert.equal(two, one, 'the same output array');
+  assert.equal(two[(4 * w + 10) * 4], 0, `and cleared: last frame's glow is gone (was ${before})`);
+  assert.equal(halation(src, 7, 3, [], undefined, scratch).length, 7 * 3 * 4, 'a new size gets a new buffer');
+});
+
+test('muzzle flashes glow too (the halation), not only light the train: warm, brighter while fresh', () => {
+  assert.deepEqual(flashGlows([]), []);
+  const [fresh, old] = flashGlows([{ x: 40.3, y: 12.6, k: 1.8 }, { x: 60, y: 20, k: 0.3 }]);
+  assert.deepEqual([fresh.x, fresh.y], [40.3, 12.6]);
+  assert.ok(fresh.c[0] >= 255 && fresh.c[0] > fresh.c[1] && fresh.c[1] > fresh.c[2], `warm and bright (${fresh.c.map(Math.round)})`);
+  assert.ok(old.c[0] < fresh.c[0] && old.c[0] > 0, 'fades with the flash');
+  const w = 80, h = 30, g = halation(new Float32Array(w * h * 3), w, h, flashGlows([{ x: 40.3, y: 12.6, k: 1.8 }]));
+  assert.ok(g[(12 * w + 41) * 4] > 0 && g[(13 * w + 40) * 4] > 0, 'a glow around the muzzle');
 });

@@ -1,7 +1,7 @@
 import { SITE, ARENA } from './config.js';
 import levelText from './arena.txt?raw';
 import { parseLevel, sideZoom } from './arena.js';
-import { buildTrain, frameAt } from './train.js';
+import { buildTrain, frameAt, flashGlows } from './train.js';
 import { levelHash } from './level.js';
 import { createPvp } from './pvp.js';
 import { createFightHud } from './fighthud.js';
@@ -125,9 +125,9 @@ function toggleLook() {
 }
 
 // The side view's zoom by the gun in hand (train level addendum §2), and on touch how far the figure keeps
-// clear of the pad: its top, in rows above the screen's bottom (measured when the pad shows or the screen
-// changes).
-let zoom = null, padTop = null;
+// clear of the pad: its top above the screen's bottom, and how far its two clusters reach in from the
+// screen's sides, in CSS pixels (measured when the pad shows or the screen changes).
+let zoom = null, padTop = null, padLeft = 0, padRight = 0;
 function sideView(t) {
   if (world.mode !== 'side' || !map.arena) {
     zoom = null;
@@ -144,11 +144,18 @@ function sideView(t) {
   if (first) { syncView(); snapCamera(world); }
   if (!padEl.hidden) {
     if (padTop === null) {
-      padTop = innerHeight;
-      for (const b of padEl.querySelectorAll('button')) if (!b.hidden) padTop = Math.min(padTop, b.getBoundingClientRect().top);
+      padTop = innerHeight; padLeft = 0; padRight = 0;
+      for (const b of padEl.querySelectorAll('button')) {
+        if (b.hidden) continue;
+        const r = b.getBoundingClientRect();
+        padTop = Math.min(padTop, r.top);
+        if (r.left + r.width / 2 < innerWidth / 2) padLeft = Math.max(padLeft, r.right);
+        else padRight = Math.max(padRight, innerWidth - r.left);
+      }
     }
+    // The feet clear the pad's top only over a cluster (the figure's 2 cells of reach either side).
     const m = renderer.metrics;
-    world.inset = { bottom: (innerHeight - padTop) / m.ch + 0.5, side: 4 };
+    world.inset = { bottom: (innerHeight - padTop) / m.ch + 0.5, side: 4, left: padLeft / m.cw + 2, right: padRight / m.cw + 2 };
   } else world.inset = null;
 }
 
@@ -452,7 +459,10 @@ function loop(now) {
   // The train, both side-on and top-down: its frame of the moment, the look, muzzle flashes and glows.
   if (train) {
     const F = frameAt(trainAt ?? t, { reducedMotion });
-    if (side && fight.length) F.flashes = pvp.flashes(t);
+    if (side && fight.length) {
+      F.flashes = pvp.flashes(t); // they light the train (lightAt) and glow (the halation), as tracers do
+      trainGlows.push(...flashGlows(F.flashes));
+    }
     world.train = { T: train, F, look, glows: trainGlows };
   }
   trainGlows = [];

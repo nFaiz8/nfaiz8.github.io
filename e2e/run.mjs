@@ -401,6 +401,42 @@ await withBrowser(async ({ page, url, errors }) => {
       });
     }
   }
+  // Phone framing (fix round 1 ruling): the sniper shows the whole room, its spare rows above it, so a figure on a
+  // roof is clear of the top HUD; mid-room nothing pushes the view up for the pad, which only has clusters at the ends.
+  for (const r of ['canvas', 'gl']) {
+    await check(`${r} on a phone with the sniper: a figure on a roof is clear of the top HUD; mid-floor, of the pad`, async () => {
+      await page.setViewport({ width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true });
+      await page.goto('about:blank');
+      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      await page.waitForFunction(() => window.__ascii.pvp().entered && !window.__ascii.tilting(), { timeout: 8000 });
+      await page.evaluate(() => { window.__ascii.pvp().me.gun = 'sniper'; });
+      const placed = [['car A\'s roof', 40.5, 'roof'], ['car B\'s roof', 150.5, 'roof'], ['mid-floor', 120.5, 'floor']];
+      for (const [where, col, on] of placed) {
+        await page.evaluate((c, roof) => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + c, roof ? a.y + 1 + 8 - 1.5 : a.floorY - 1.5); }, col, on === 'roof');
+        await sleep(1200);
+        const got = await page.evaluate(() => {
+          const { world, metrics } = window.__ascii, m = metrics(), p = world.player, a = window.__ascii.map.arena;
+          const left = world.cam.x - innerWidth / m.cw / 2, top = world.cam.y - innerHeight / m.ch / 2;
+          const fig = world.figures.filter((g) => Math.abs(g.x - p.x) < 3 && Math.abs(g.y - p.y) < 3 && !g.strip);
+          const xs = fig.map((g) => (g.x - left) * m.cw), ys = fig.map((g) => (g.y - top) * m.ch);
+          const box = { x0: Math.min(...xs) - m.cw / 2, x1: Math.max(...xs) + m.cw / 2, y0: Math.min(...ys) - m.ch / 2, y1: Math.max(...ys) + m.ch / 2 };
+          const hud = [...document.querySelectorAll('#caption, #fight-hp, .hud-btn, .hud-name, #pad button')].filter((el) => !el.closest('[hidden]') && (el.id !== 'caption' || el.textContent.trim()))
+            .map((el) => { const q = el.getBoundingClientRect(); return { id: el.id || el.className, x0: q.left, x1: q.right, y0: q.top, y1: q.bottom }; }).filter((q) => q.x1 > q.x0 && q.y1 > q.y0);
+          return { box, under: hud.filter((q) => q.x0 < box.x1 && q.x1 > box.x0 && q.y0 < box.y1 && q.y1 > box.y0).map((q) => q.id), rowTop: top - (a.y + 1), rows: innerHeight / m.ch };
+        });
+        console.log(`  ${r} phone sniper, ${where}: ${got.rows.toFixed(1)} rows, the view's top at row ${got.rowTop.toFixed(2)}, the figure at y ${got.box.y0.toFixed(0)}–${got.box.y1.toFixed(0)}`);
+        assert.ok(got.rowTop <= 1e-6, `${where}: row 0 on screen (${got.rowTop.toFixed(2)})`);
+        assert.deepEqual(got.under, [], `${where}: the figure (y ${got.box.y0.toFixed(0)}–${got.box.y1.toFixed(0)}) is under ${got.under.join(', ')}`);
+        await page.screenshot({ path: `${SHOTS}/phone-${r}-sniper-${on}-${col}.png` });
+      }
+      // A shot's muzzle flash glows (the halation) as well as lighting the train: a fresh flash is brighter than
+      // any tracer (whose glow is at most its colour, 255).
+      await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
+      await page.keyboard.down('KeyJ');
+      await page.waitForFunction(() => (window.__ascii.world.train.glows || []).some((g) => g.c[0] > 300), { timeout: 1500, polling: 'raf' });
+      await page.keyboard.up('KeyJ');
+    });
+  }
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   await check('Reduce Motion: the train holds still (one frame, no station passing, the dying tube dim and steady)', async () => {
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
@@ -598,8 +634,8 @@ await withBrowser(async ({ page, url, errors }) => {
     // A kill: in the feed box, and in the polite screen-reader region; the note keeps the key hint.
     const hint = await page.$eval('#note', (e) => e.textContent);
     await page.evaluate(() => {
-      const p = window.__ascii.pvp(), now = performance.now();
-      p.onMessage({ t: 'aw', you: {}, fighters: [{ id: 'x1', x: 60.5, y: 32.5, kills: 0 }] }, now);
+      const p = window.__ascii.pvp(), now = performance.now(), floor = window.__ascii.map.arena.level.door.y; // on the floor
+      p.onMessage({ t: 'aw', you: {}, fighters: [{ id: 'x1', x: 60.5, y: floor, kills: 0 }] }, now);
       p.onMessage({ t: 'k', id: 'x1', by: p.me.id, kills: 1 }, now);
     });
     await page.waitForFunction(() => document.getElementById('fight-sr').textContent === 'you popped someone', { timeout: 2000 });
@@ -665,25 +701,20 @@ await withBrowser(async ({ page, url, errors }) => {
         const base = await raw(await shoot({ act: 'dead', actT: 5 }));
         const k = base.w / clip.width; // screenshot pixels per CSS pixel
         const o = Math.max(2, Math.round(0.14 * v.cw * v.dpr)), ringR = Math.ceil((o / v.dpr + 1) * k);
-        const tiles = [], log = [], stats = [];
-        for (const [name, o2] of POSES) {
-          const buf = await shoot(o2);
-          tiles.push(buf);
-          const fig = await raw(buf), { w, h } = fig;
-          const dead = o2.act === 'dead', ink = o2.act === 'hurt' ? isWhite : isAmber;
-          // The body's 2.1 × 3-cell area; the dead pieces scatter, so for them a wider one.
-          const ax = dead ? 7.5 : 1.05, ay0 = dead ? -3.5 : -1.5;
-          const mask = new Uint8Array(w * h);
+        // The figure's ink pixels (new since base) in the body's area (ax cells either side, ay0 to 1.5 rows of
+        // the centre), and the ring within the outline's reach of them. Dark: under 40 and darkened by the
+        // outline (the train is dark already in places, so "dark before" alone would hide an outline drawn over
+        // it). bright: ring pixels that were bright before (over 150: the ═ floor line's strokes); brightDark: of
+        // those, the ones the outline put under 60.
+        const measure = (base, fig, ink, ax, ay0) => {
+          const { w, h } = fig, mask = new Uint8Array(w * h);
           let n = 0;
           for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
             const dx = x / k / v.cw - 8, dy = y / k / v.ch - 4.5, i = (y * w + x) * 3;
             if (Math.abs(dx) > ax || dy < ay0 || dy > 1.5) continue;
             if (ink(fig.data[i], fig.data[i + 1], fig.data[i + 2]) && !ink(base.data[i], base.data[i + 1], base.data[i + 2])) { mask[y * w + x] = 1; n++; }
           }
-          // The ring: within the outline's reach of those pixels.
-          // Dark: under 40 and darkened by the outline (the train is dark already in places, so "dark before" alone
-          // would hide an outline drawn over it).
-          let ring = 0, dark = 0, baseDark = 0;
+          let ring = 0, dark = 0, baseDark = 0, bright = 0, brightDark = 0;
           const seen = new Uint8Array(w * h);
           for (let j = 0; j < w * h; j++) {
             if (!mask[j]) continue;
@@ -695,8 +726,19 @@ await withBrowser(async ({ page, url, errors }) => {
               const lf = lum(fig.data, q * 3), lb = lum(base.data, q * 3);
               if (lf < 40 && lf < lb - 12) dark++;
               if (lb < 40) baseDark++;
+              if (lb > 150) { bright++; if (lf < 60) brightDark++; }
             }
           }
+          return { n, ring, dark, baseDark, bright, brightDark };
+        };
+        const tiles = [], log = [], stats = [];
+        for (const [name, o2] of POSES) {
+          const buf = await shoot(o2);
+          tiles.push(buf);
+          const fig = await raw(buf);
+          const dead = o2.act === 'dead', ink = o2.act === 'hurt' ? isWhite : isAmber;
+          // The body's 2.1 × 3-cell area; the dead pieces scatter, so for them a wider one.
+          const { n, ring, dark, baseDark } = measure(base, fig, ink, dead ? 7.5 : 1.05, dead ? -3.5 : -1.5);
           log.push(`${name}: ${n} ${ink === isWhite ? 'white' : 'amber'}, ring ${ring} (${dark} dark, ${baseDark} before)`);
           // Faded poses (dead after 1.4 s, the respawn's fly-in) fade their outline too.
           const full = !(dead && o2.actT > 1.4) && !(o2.spawnT < 0.45);
@@ -713,7 +755,21 @@ await withBrowser(async ({ page, url, errors }) => {
         const grip = await page.evaluate((p) => window.__ascii.world.figures.find((g) => g.bold && g.ch === '╦' && g.color[1] === 206 && Math.abs(g.x - p.x) < 3 && Math.abs(g.y - p.y) < 3), pin);
         assert.ok(grip && grip.y - pin.y < 0.1 && grip.rot > 0.3 && grip.rot < 0.4, `the carried grip at the chest, pointing 20° down (${grip && [grip.x - pin.x, grip.y - pin.y, grip.rot].map((v) => v.toFixed(2))})`);
         await page.screenshot({ path: `${SHOTS}/stick-${r}-${size}-view.png` });
+        // And over the brightest thing in the scene: the warm-white ═ floor line, the body's centre on it, mid-screen
+        // (between the pad's clusters on a phone).
+        const fl = await page.evaluate(() => window.__ascii.map.arena.floorY);
+        const onFloor = { ...pin, x: v.left + Math.round(v.W / v.cw / 2) + 0.5, y: fl + 0.5 };
+        const floorClip = { x: (onFloor.x - 8 - v.left) * v.cw, y: (onFloor.y - 4.5 - v.top) * v.ch, width: 16 * v.cw, height: 7 * v.ch };
+        assert.ok(floorClip.y >= 0 && floorClip.y + floorClip.height <= v.H, `the floor line is on screen (${floorClip.y})`);
+        const shootAt = async (s2) => { await page.evaluate((s) => window.__ascii.pose(s), s2); await sleep(150); return page.screenshot({ clip: floorClip }); };
+        const floorBase = await raw(await shootAt({ ...onFloor, act: 'dead', actT: 5 }));
+        const floorBuf = await shootAt(onFloor);
+        await sharp(floorBuf).png().toFile(`${SHOTS}/stick-${r}-${size}-floor.png`);
+        const fm = measure(floorBase, await raw(floorBuf), isAmber, 1.05, -1.5);
+        console.log(`  ${r} ${size}: over the floor line: ${fm.n} amber, ring ${fm.ring}, ${fm.bright} bright before, ${fm.brightDark} of them dark now`);
         await page.evaluate(() => window.__ascii.pose(null));
+        assert.ok(fm.n >= 4, `over the floor line: ${fm.n} amber pixels`);
+        assert.ok(fm.bright >= 10 && fm.brightDark >= Math.max(6, 0.25 * fm.bright), `over the floor line: the outline darkens the bright ═ (${fm.brightDark} of ${fm.bright})`);
         for (const st of stats) {
           assert.ok(st.n >= 4, `${st.name}: ${st.n} ${st.ink} pixels in the body's area`);
           if (st.full) assert.ok(st.dark >= Math.max(6, 0.1 * st.n), `${st.name}: a dark outline (${st.dark} new dark pixels around ${st.n})`);

@@ -183,16 +183,22 @@ function moveY(b, dy, kindAt, dropping) {
 }
 
 // Where the side-view camera centres. a = the room with its walls, view = {cols, rows} on screen. lead is
-// the look-ahead for a 150-cell view; a narrower (zoomed-in) view leads less. inset (touch: rows and cells)
-// keeps the feet that far above the screen's bottom and the body that far from its sides, past the room's
-// edges if it must, so the figure stays clear of the pad.
+// the look-ahead for a 150-cell view; a narrower (zoomed-in) view leads less. inset (touch, in cells): side
+// keeps the body that far from the screen's sides (past the room's edges if it must); bottom keeps the feet
+// that far above the screen's bottom, but only while the figure is over a pad cluster (left: the bottom-left
+// one's width, right: the bottom-right one's; without them, anywhere). A view as tall as the room (the
+// sniper's) shows all of it, its spare rows above: the inset never pushes its first or last row off screen.
 export const LEAD_COLS = 150;
 export const FLOOR_BELOW = 5;
 export function sideCamera(a, view, p, lead = 0, inset = null) {
   const fit = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
   let x = fit(p.x + (lead * view.cols) / LEAD_COLS, a.x + view.cols / 2, a.x + a.w - view.cols / 2);
+  // The rows that must show for "the whole room": the level's (inside the walls) when it has them.
+  const y0 = a.rows != null ? a.y + 1 : a.y, h = a.rows != null ? a.rows : a.h;
+  const whole = view.rows >= h;
   let y;
-  if (view.rows >= a.h) y = a.y + a.h / 2;
+  // The whole room: its last row at the bottom, the spare rows above it (under the top HUD).
+  if (whole) y = y0 + h - view.rows / 2;
   else {
     // Near the floor, keep it on screen; higher up, keep you a little above the middle. A room with a floor
     // line (the train) shows FLOOR_BELOW rows under it (the slab and the bogies), not all its undercarriage.
@@ -203,7 +209,10 @@ export function sideCamera(a, view, p, lead = 0, inset = null) {
   if (inset) {
     const side = Math.min(inset.side || 0, view.cols / 2), bottom = Math.min(inset.bottom || 0, view.rows / 2);
     x = Math.max(p.x + side - view.cols / 2, Math.min(p.x - side + view.cols / 2, x));
-    y = Math.max(y, p.y + 1.5 + bottom - view.rows / 2); // the feet are 1.5 rows under the centre
+    const sx = p.x - (x - view.cols / 2); // the figure's column on screen
+    const overPad = inset.left == null && inset.right == null ? true : sx < (inset.left || 0) || sx > view.cols - (inset.right || 0);
+    if (overPad) y = Math.max(y, p.y + 1.5 + bottom - view.rows / 2); // the feet are 1.5 rows under the centre
+    if (whole) y = Math.min(y, y0 + view.rows / 2); // row 0 stays on screen
   }
   return { x, y };
 }

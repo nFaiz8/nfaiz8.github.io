@@ -69,6 +69,7 @@ export function createCanvasRenderer() {
     chunks.clear();
     atlasM = null;
     layerCv = null;
+    useAtlas(m); // as GL does: while the zoom eases, setView keeps the atlas it has (drawn scaled), so there must be one
     setView(zoom);
     return m;
   }
@@ -116,9 +117,12 @@ export function createCanvasRenderer() {
     const cwd = M.cw * dpr, chd = M.ch * dpr;
     const X = (cx) => Math.round((cx - left) * cwd), Y = (cy) => Math.round((cy - top) * chd);
     const px0 = X(ox + x0), py0 = Y(oy + y0), pw = X(ox + x1) - px0, ph = Y(oy + y1) - py0;
+    // A field canvas keeps its ImageData; the data arrays are reused too (paintWindow, halation), so a frame
+    // of the same size makes nothing new.
     const field = (cv, data) => {
       if (!cv || cv.width !== w || cv.height !== h) cv = new OffscreenCanvas(w, h);
-      cv.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0);
+      if (!cv.img || cv.img.data !== data) cv.img = new ImageData(data, w, h);
+      cv.getContext('2d').putImageData(cv.img, 0, 0);
       return cv;
     };
     bgCv = field(bgCv, trainWin.bg);

@@ -197,7 +197,7 @@ export const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
 const BASE = {
   rock: [58, 52, 46], tun: [120, 110, 96], rib: [96, 90, 80], cable: [84, 80, 76], sigR: [255, 70, 50], sigG: [80, 255, 140],
   stile: [215, 215, 200], sband: ACCENT, tab: [200, 200, 190], tabtx: [250, 248, 236], rail: [190, 190, 196], ballast: [80, 72, 62],
-  lamp: [255, 196, 120], solid: COLLISION, lintel: [230, 214, 192], body: [150, 160, 170], livery: [205, 212, 220], stripe: ACCENT,
+  lamp: [255, 196, 120], solid: COLLISION, lintel: COLLISION, body: [150, 160, 170], livery: [205, 212, 220], stripe: ACCENT,
   wall: [96, 128, 124], tube: [225, 255, 240], ad: [240, 216, 190], wframe: [150, 165, 170], grab: [140, 152, 158], pole: [205, 215, 222],
   seat: [235, 125, 55], seatd: [150, 76, 36], leg: [90, 96, 100], post: [110, 120, 128], gang: [90, 92, 100], coupler: [110, 110, 116],
   frame: [96, 98, 104], wheel: [140, 140, 146], spoke: [176, 176, 182],
@@ -206,7 +206,7 @@ const BG = { wall: [24, 38, 36], body: [40, 44, 50], livery: [40, 44, 50], ad: [
 const SOLID_BG = [64, 50, 38];
 const EMISSIVE = new Set(['sigR', 'sigG', 'lamp', 'tube']);
 const COLLISION_ROLES = new Set(['solid', 'lintel']);
-// Decor stays below this share of the lintel's brightness (the dimmer collision colour) at the same light.
+// Decor stays below this share of collision's brightness at the same light.
 const DECOR_CAP = 0.8;
 
 const solidShade = (l) => Math.min(1.15, 0.62 + 0.45 * l);
@@ -223,7 +223,7 @@ export function cellColor(role, L, { solid = false, k = 1, glass = false } = {})
   if (glass) fg = [fg[0] * 0.6, fg[1] * 0.75, fg[2] * 0.8];
   fg = clamp255(fg);
   if (!COLLISION_ROLES.has(role)) {
-    const cap = DECOR_CAP * lum(clamp255(BASE.lintel.map((v) => v * solidShade(lum(L))))), l = lum(fg);
+    const cap = DECOR_CAP * lum(clamp255(COLLISION.map((v) => v * solidShade(lum(L))))), l = lum(fg);
     if (l > cap) fg = fg.map((v) => (v * cap) / l);
   }
   return fg;
@@ -317,8 +317,13 @@ export function paintWindow(T, F, look, x0, y0, w, h, out = null) {
 // Halation: the glow sources (emissive cells, and extras: { x, y, c } in window cells for tracers and
 // muzzle flashes) blurred a couple of cells sideways and a cell up and down (a cell is twice as tall as
 // wide), as RGBA bytes one pixel per cell for an additive pass. Visible, but never a smear over the scene.
+// Muzzle flashes (pvp.flashes: arena-local, k fading from 1.8) as halation sources, like tracers: the
+// flash's warm colour, brighter while fresh.
+export const flashGlows = (list) => list.map((f) => ({ x: f.x, y: f.y, c: FLASH.map((v) => v * 255 * f.k) }));
+
 export const HALATION_GAIN = 1.1;
 const HX = [1, 2, 3, 2, 1], HY = [1, 2, 1];
+// scratch: { a, b, out }, kept by the caller and reused while the window's size holds (the result is scratch.out).
 export function halation(src, w, h, extra = [], gain = HALATION_GAIN, scratch = null) {
   const n = w * h;
   const a = scratch && scratch.a.length === n * 3 ? scratch.a : new Float32Array(n * 3);
@@ -340,7 +345,8 @@ export function halation(src, w, h, extra = [], gain = HALATION_GAIN, scratch = 
       b[j] += a[k] * f; b[j + 1] += a[k + 1] * f; b[j + 2] += a[k + 2] * f;
     }
   }
-  const out = new Uint8ClampedArray(n * 4);
+  // Every byte is written below, so a reused output needs no clearing.
+  const out = scratch && scratch.out && scratch.out.length === n * 4 ? scratch.out : new Uint8ClampedArray(n * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const o = (y * w + x) * 4;
     for (let c = 0; c < 3; c++) {
@@ -353,6 +359,6 @@ export function halation(src, w, h, extra = [], gain = HALATION_GAIN, scratch = 
     }
     out[o + 3] = 255;
   }
-  if (scratch) { scratch.a = a; scratch.b = b; }
+  if (scratch) { scratch.a = a; scratch.b = b; scratch.out = out; }
   return out;
 }

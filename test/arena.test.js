@@ -612,7 +612,7 @@ test('the side camera leads, clamps to the room, and keeps the floor in view', (
   const high = sideCamera(a, view, { x: 200, y: a.y + 3 });
   assert.equal(high.y - view.rows / 2, a.y, 'clamped at the ceiling');
   const tall = sideCamera(a, { cols: 150, rows: 60 }, floor);
-  assert.equal(tall.y, a.y + a.h / 2, 'a tall view shows the whole room, centred');
+  assert.equal(tall.y + 60 / 2, a.y + a.h, 'a tall view shows the whole room, its floor wall the bottom row');
 });
 
 import { indexData } from '../src/data.js';
@@ -689,19 +689,46 @@ test('the train: on its floor the camera keeps the floor line near the bottom, 5
   // On the roof the camera follows up, and the whole room (the sniper's) is still centred.
   const roof = sideCamera(a, { cols: 90, rows: 20 }, { x: 200, y: a.y + 1 + 6.5 });
   assert.ok(roof.y - 10 <= a.y + 1, `the roof's top is in view (${roof.y})`);
-  assert.equal(sideCamera(a, { cols: 150, rows: 35 }, feet).y, a.y + a.h / 2);
+  assert.equal(sideCamera(a, { cols: 150, rows: 35 }, feet).y, a.y + a.h / 2, 'exactly as tall: the whole room');
 });
 
-test('on touch the side camera keeps an inset: the feet stay above the pad, the figure off the screen\'s side, even at the door', () => {
+test('on touch the side camera keeps an inset: the figure off the screen\'s side; the feet above the pad only where a pad cluster is (the room\'s ends, the door)', () => {
   const a = { x: 100, y: 10, w: 206, h: 35 };
   const view = { cols: 64, rows: 20 };
-  const inset = { bottom: 9, side: 5 };
-  for (const p of [{ x: a.x + a.w - 1.5, y: a.y + 25.5 }, { x: a.x + 1.5, y: a.y + 25.5 }, { x: a.x + 100, y: a.y + 25.5 }]) {
-    const c = sideCamera(a, view, p, 0, inset);
+  // The pad: a cluster 14 cells wide at the bottom left, 16 at the bottom right; its top 9 rows up.
+  const inset = { bottom: 9, side: 5, left: 14, right: 16 };
+  const plain = (p) => sideCamera(a, view, p);
+  for (const p of [{ x: a.x + a.w - 1.5, y: a.y + 25.5 }, { x: a.x + 1.5, y: a.y + 25.5 }]) {
+    const c = sideCamera(a, view, p, 0, inset), sx = p.x - (c.x - view.cols / 2);
+    assert.ok(sx < inset.left || sx > view.cols - inset.right, `at an end the figure is over a cluster (${sx})`);
     assert.ok(c.y + view.rows / 2 >= p.y + 1.5 + inset.bottom - 1e-9, `feet ${inset.bottom} rows above the bottom (${c.y})`);
-    assert.ok(p.x - (c.x - view.cols / 2) >= inset.side - 1e-9 && c.x + view.cols / 2 - p.x >= inset.side - 1e-9, `off the sides (${c.x})`);
+    assert.ok(sx >= inset.side - 1e-9 && view.cols - sx >= inset.side - 1e-9, `off the sides (${c.x})`);
+  }
+  // Mid-room the figure is between the clusters: nothing under it to clear, so the camera is as without touch.
+  for (const lead of [0, 8, -8]) {
+    const p = { x: a.x + 100, y: a.y + 25.5 }, c = sideCamera(a, view, p, lead, inset), sx = p.x - (c.x - view.cols / 2);
+    assert.ok(sx >= inset.left && sx <= view.cols - inset.right, `between the clusters (${sx})`);
+    assert.deepEqual(c, sideCamera(a, view, p, lead), `lead ${lead}: no bottom inset mid-room`);
   }
   // Without an inset, the room's edges clamp as before.
-  const c = sideCamera(a, view, { x: a.x + a.w - 1.5, y: a.y + 25.5 });
+  const c = plain({ x: a.x + a.w - 1.5, y: a.y + 25.5 });
   assert.equal(c.x + view.cols / 2, a.x + a.w);
+});
+
+test('a view as tall as the room shows the whole room: row 0 at the top or below it, never pushed off by the touch inset', () => {
+  const a = { x: 100, y: 10, w: 206, h: 35, cols: 204, rows: 33, floorY: 10 + 1 + 26 };
+  const inset = { bottom: 13.8, side: 4, left: 16, right: 18 }; // an 852 × 393 phone with the sniper
+  for (const rows of [33, 34.62, 35.7, 40]) {
+    const view = { cols: 77, rows };
+    for (const p of [{ x: a.x + a.w - 1.5, y: a.floorY - 1.5 }, { x: a.x + 1.5, y: a.floorY - 1.5 }, { x: a.x + 100, y: a.floorY - 1.5 }, { x: a.x + 40, y: a.y + 1 + 6.5 }]) {
+      for (const ins of [null, inset]) {
+        const c = sideCamera(a, view, p, 8, ins), top = c.y - rows / 2, bottom = c.y + rows / 2;
+        assert.ok(top <= a.y + 1 + 1e-9, `${rows} rows, ${p.x},${p.y}${ins ? ', touch' : ''}: row 0 on screen (top ${top})`);
+        assert.ok(bottom >= a.y + 1 + a.rows - 1e-9, `${rows} rows: the last row on screen (bottom ${bottom})`);
+        // The spare rows go above the room, under the top HUD (a phone's caption, hp and buttons), so a figure on
+        // a roof sits clear of it; the touch inset can only move the view up to row 0.
+        if (!ins) assert.ok(Math.abs(bottom - (a.y + 1 + a.rows)) < 1e-9, `${rows} rows: the room's last row at the bottom (${bottom})`);
+      }
+    }
+  }
 });
