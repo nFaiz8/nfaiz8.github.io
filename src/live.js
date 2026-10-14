@@ -82,3 +82,31 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, onAnnounce
     get state() { return net.state; },
   };
 }
+
+// What I do shows on my own screen straight away, with the same limits the server enforces.
+export function localEcho() {
+  const me = createPeers({ delay: 0 });
+  me.apply({ t: 'welcome', id: 'me', peers: [{ id: 'me', name: '', x: 0, y: 0 }] }, 0);
+  let lastEmote = -Infinity, lastHeart = -Infinity;
+  return {
+    emote(kind, now) {
+      if (now - lastEmote < 1000) return false;
+      lastEmote = now;
+      me.apply({ t: 'e', id: 'me', e: kind }, now);
+      return true;
+    },
+    heart(f, now) {
+      if (now - lastHeart < 2000) return false;
+      lastHeart = now;
+      me.apply({ t: 'r', id: 'me', f }, now);
+      return true;
+    },
+    entities(player, frames, now, opts) {
+      const [p] = me.list(now);
+      const out = [];
+      if (p && p.emote) out.push(...peerEntities([{ ...p, id: 'me', name: '', x: player.x, y: player.y }], opts).filter((e) => e.glyph !== '@'));
+      out.push(...heartEntities(me.hearts(now), frames, opts));
+      return out;
+    },
+  };
+}

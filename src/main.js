@@ -1,5 +1,6 @@
 import { SITE } from './config.js';
-import { createLive, peerEntities, heartEntities } from './live.js';
+import { createLive, peerEntities, heartEntities, localEcho } from './live.js';
+import { EMOTES_ORDER, EMOTE_GLYPH } from './peers.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
@@ -92,6 +93,16 @@ function updateCaption() {
     k.className = 'key';
     k.textContent = '[E] open';
     captionEl.append(k);
+    if (f !== 'kiosk') {
+      const h = document.createElement('button');
+      h.type = 'button';
+      h.className = 'heart';
+      h.textContent = '♥';
+      h.title = 'Send a heart (H)';
+      h.setAttribute('aria-label', 'Send a heart to this photo');
+      h.addEventListener('click', () => sendHeart(world.focus));
+      captionEl.append(h);
+    }
   }
   captionEl.classList.toggle('on', !!f);
 }
@@ -142,6 +153,9 @@ function onKey(e) {
     setRenderer(names[(names.indexOf(renderer.name) + 1) % names.length]);
     return true;
   }
+  const digit = /^Digit([1-5])$/.exec(e.code);
+  if (digit) { sendEmote(EMOTES_ORDER[digit[1] - 1]); return true; }
+  if (e.code === 'KeyH') { sendHeart(world.focus); return true; }
   return false;
 }
 
@@ -202,6 +216,7 @@ function loop(now) {
     world.others = list.filter((p) => p.alpha === 1);
     world.entities.push(...peerEntities(list, { reducedMotion }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion }));
   }
+  world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
   world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
   if (renderer.lost) {
     note('WebGL context lost, switched to the canvas renderer');
@@ -225,6 +240,15 @@ function loop(now) {
 }
 
 let live = null;
+const echo = localEcho();
+function sendEmote(kind) {
+  if (!echo.emote(kind, performance.now())) return;
+  if (live) live.emote(kind);
+}
+function sendHeart(f) {
+  if (!f || !echo.heart(f.id, performance.now())) return;
+  if (live) live.heart(f.id);
+}
 
 async function boot() {
   let data;
@@ -275,6 +299,18 @@ async function boot() {
     },
   });
   document.getElementById('map-btn').addEventListener('click', () => mapView.toggle());
+  const emoteBtn = document.getElementById('emote-btn'), emoteBar = document.getElementById('emote-bar');
+  emoteBtn.hidden = false;
+  EMOTES_ORDER.forEach((kind, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = EMOTE_GLYPH[kind];
+    b.title = `${kind} (${i + 1})`;
+    b.setAttribute('aria-label', kind);
+    b.addEventListener('click', () => { sendEmote(kind); emoteBar.hidden = true; emoteBtn.setAttribute('aria-expanded', 'false'); });
+    emoteBar.append(b);
+  });
+  emoteBtn.addEventListener('click', () => { emoteBar.hidden = !emoteBar.hidden; emoteBtn.setAttribute('aria-expanded', String(!emoteBar.hidden)); });
   const hereEl = document.getElementById('hud-here');
   live = createLive({
     version: data.generated,

@@ -28,3 +28,17 @@ test('hearts rise from the top of their frame unless motion is reduced', () => {
   assert.equal(still.y, early.y);
   assert.deepEqual(heartEntities([{ f: 'nope', age: 0 }], frames, {}), []);
 });
+
+import { localEcho } from '../src/live.js';
+
+test('my own emote and heart show at once, at most one emote a second and one heart every 2 s', () => {
+  const echo = localEcho();
+  assert.equal(echo.emote('star', 0), true);
+  assert.equal(echo.emote('heart', 500), false, 'too soon');
+  const es = echo.entities({ x: 3.5, y: 3.5 }, [{ id: 'p1', x: 1, y: 10, w: 4, h: 3 }], 600, { reducedMotion: true });
+  assert.ok(es.some((e) => e.glyph === '★' && e.y === 2.5));
+  assert.equal(echo.heart('p1', 600), true);
+  assert.equal(echo.heart('p1', 1500), false);
+  assert.ok(echo.entities({ x: 3.5, y: 3.5 }, [{ id: 'p1', x: 1, y: 10, w: 4, h: 3 }], 700, { reducedMotion: true }).some((e) => e.glyph === '♥'));
+  assert.equal(echo.emote('wave', 1100), true);
+});

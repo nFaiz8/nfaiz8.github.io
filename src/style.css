@@ -111,3 +111,8 @@ body { font: 13px/1.4 var(--mono); }
 .map-peer { position: absolute; transform: translate(-50%, -50%); color: rgb(150 190 230); pointer-events: none; }
 .hud-here { color: var(--mute); padding: 4px 6px; }
 .hud-here[hidden] { display: none; }
+.emote-bar { position: fixed; top: 48px; right: 16px; display: flex; gap: 6px; z-index: 3; }
+.emote-bar[hidden] { display: none; }
+.emote-bar button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); padding: 6px 10px; cursor: pointer; }
+.caption .heart { pointer-events: auto; cursor: pointer; color: rgb(235 96 120); margin-left: 1ch; background: none; border: 0; font: inherit; padding: 0; }
+.caption.on { pointer-events: auto; }

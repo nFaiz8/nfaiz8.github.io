@@ -1,6 +1,7 @@
 // Other real visitors: positions smoothed a little behind real time, emotes, hearts at photos, and who
 // is still here. Pure data; main.js draws it.
 export const EMOTE_GLYPH = { heart: '♥', bang: '!', ask: '?', star: '★', wave: '~o/' };
+export const EMOTES_ORDER = ['heart', 'bang', 'ask', 'star', 'wave'];
 
 export function createPeers({ delay = 150, fade = 3000, emoteFor = 2500, heartFor = 2000 } = {}) {
   const peers = new Map(); // id → { id, name, track: [{t,x,y}], left: number|null, emote, emoteAt, dx, dy }
