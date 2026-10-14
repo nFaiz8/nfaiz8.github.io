@@ -1,15 +1,17 @@
-import { SITE } from './config.js';
+import { SITE, ARENA } from './config.js';
+import levelText from './arena.txt?raw';
+import { parseLevel } from './arena.js';
 import { createLive, peerEntities, heartEntities, localEcho } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
 import { cleanName, cleanText } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout, isWalkable } from './layout.js';
-import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
+import { createWorld, step, walkTo, frameAtCell, teleport, roomAt, enterSide, exitSide, inArena } from './world.js';
 import { createInput } from './input.js';
 import { createCanvasRenderer } from './render/canvas.js';
 import { createGlRenderer } from './render/gl.js';
 import { C } from './render/palette.js';
-import { createLighting } from './light.js';
+import { createLighting, createArenaLighting } from './light.js';
 import { createViewer } from './viewer.js';
 import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router.js';
 import { createMap } from './map.js';
@@ -60,6 +62,7 @@ function setRenderer(name) {
   try {
     renderer = RENDERERS[name]();
     renderer.init(canvas, map);
+    renderer.onLoad.add((f) => loadedIds.add(f.id));
   } catch (err) {
     console.warn(err);
     if (name === 'canvas') throw err;
@@ -75,7 +78,8 @@ function setRenderer(name) {
 }
 
 function resize() {
-  renderer.resize(innerWidth, innerHeight, Math.min(2, devicePixelRatio || 1));
+  const m = renderer.resize(innerWidth, innerHeight, Math.min(2, devicePixelRatio || 1));
+  if (world && m) world.view = { cols: innerWidth / m.cw, rows: innerHeight / m.ch };
 }
 
 // Where a frame's picture is on screen right now, in CSS pixels (its grid tile while the grid is open).
@@ -141,6 +145,7 @@ const inKiosk = (x, y) => { const k = map.kiosk; return x >= k.x && x < k.x + k.
 
 function onTap(px, py) {
   if (viewer.isOpen || mapView.isOpen || grid.isOpen) return;
+  if (world.mode === 'side' || tilting) return; // in the arena you run and jump
   const cell = renderer.cellAt(world, px, py);
   const peer = peerAtCell(cell.x, cell.y);
   if (peer) { following = { id: peer.id }; followAt = 0; return; }
@@ -162,8 +167,9 @@ function onKey(e) {
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
   if (e.code === 'KeyG') { openGrid(); return true; }
+  if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
   if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') {
-    if (world.focus) openFrame(world.focus);
+    if (world.focus) openFrame(world.focus, world.mode === 'side' ? { instant: true } : undefined);
     else if (world.atKiosk) openGrid();
     return true;
   }
@@ -213,12 +219,15 @@ function applyRoute(route) {
 
 let last = performance.now();
 const stats = { frames: 0, times: [] };
-const NO_INPUT = { x: 0, y: 0, run: false };
+const NO_INPUT = { x: 0, y: 0, run: false, jump: false, down: false };
 function loop(now) {
   // Real per-frame dt, capped so a background tab doesn't teleport you on return.
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
   step(world, dt, viewer.isOpen || mapView.isOpen || grid.isOpen ? NO_INPUT : input.state());
+  if (world.want) tilt();
+  world.lighting = world.mode === 'side' ? lightingSide : lightingTop;
+  if (world.mode !== lastMode) lastMode = world.mode;
   world.people = [];
   const att = map.kiosk.attendant;
   world.people.push({ x: att.x + 0.5, y: att.y + 0.5, glyph: '☺', color: [240, 204, 140] });
@@ -235,17 +244,21 @@ function loop(now) {
     live.tick(world.player);
     const list = live.peers.list(now);
     world.others = list.filter((p) => p.alpha === 1);
+    // People in the arena are drawn only in its side view, and the side view shows only them.
+    const inside = (p) => inArena(map, p.x, p.y);
+    const shown = list.filter((p) => inside(p) === (world.mode === 'side'));
     if (following) {
       const input0 = input.state();
       const target = list.find((p) => p.id === following.id && p.alpha === 1);
-      if (!target || input0.x || input0.y) stopFollowing();
+      if (!target || input0.x || input0.y || world.mode === 'side' || inside(target)) stopFollowing();
       else if (now - followAt > 500) {
         followAt = now;
         const c = followCell(map, target, (x, y) => isWalkable(map, x, y));
         if (c) walkTo(world, c.x, c.y);
       }
     }
-    world.entities.push(...peerEntities(list, { reducedMotion, muted }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion }));
+    const posOf = (id) => list.find((p) => p.id === id) || null;
+    world.entities.push(...peerEntities(shown, { reducedMotion, muted }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion, posOf }));
   }
   world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
   world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
@@ -271,9 +284,33 @@ function loop(now) {
 }
 
 let live = null;
+let lightingTop = null, lightingSide = null, tilting = false, lastMode = 'top';
+const loadedIds = new Set();
 let following = null, followAt = 0;
 const muted = new Set(); // ids whose chat you've hidden, for this visit
 function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }
+
+// Through the arena door the view tilts away, switches between top-down and side-on, and tilts back in.
+// Input waits for it. Reduce Motion: an instant cut.
+async function tilt() {
+  if (tilting || !world.want) return;
+  tilting = true;
+  world.frozen = true;
+  const to = world.want, s = to === 'side' ? 1 : -1;
+  const pose = (deg, o) => ({ transform: `perspective(900px) rotateX(${deg}deg)`, opacity: o });
+  if (!reducedMotion) {
+    const out = stage.animate([pose(0, 1), pose(55 * s, 0.15)], { duration: 300, easing: 'ease-in', fill: 'forwards' });
+    await out.finished;
+    (to === 'side' ? enterSide : exitSide)(world);
+    const back = stage.animate([pose(-55 * s, 0.15), pose(0, 1)], { duration: 300, easing: 'ease-out' });
+    out.cancel();
+    await back.finished;
+  } else {
+    (to === 'side' ? enterSide : exitSide)(world);
+  }
+  world.frozen = false;
+  tilting = false;
+}
 function peerAtCell(cx, cy) {
   if (!live) return null;
   return live.peers.list(performance.now()).find((p) => p.alpha === 1 && Math.abs(p.x - (cx + 0.5)) <= 1 && Math.abs(p.y - (cy + 0.5)) <= 1) || null;
@@ -291,14 +328,18 @@ function sendHeart(f) {
 async function boot() {
   let data;
   try {
-    data = await loadData();
+    data = await loadData(undefined, ARENA.enabled ? [ARENA.photo] : []);
   } catch (err) {
     fatal(err);
     return;
   }
-  map = buildLayout(data, SITE);
+  const arenaPhoto = ARENA.enabled ? data.byId.get(ARENA.photo) || null : null;
+  if (ARENA.enabled && !arenaPhoto) console.warn(`ARENA.photo "${ARENA.photo}" isn't in photos.json: the arena has a plain dark backdrop`);
+  map = buildLayout(data, SITE, { arena: ARENA.enabled ? { photo: arenaPhoto, level: parseLevel(levelText) } : null });
   world = createWorld(map, { reducedMotion });
-  world.lighting = createLighting(map);
+  lightingTop = createLighting(map);
+  lightingSide = map.arena ? createArenaLighting(map) : null;
+  world.lighting = lightingTop;
   input = createInput(stage, { onTap, onKey });
   grid = createGrid(map, {
     onPick: (f) => viewer.open(f, { instant: true, plain: true }),
@@ -332,6 +373,7 @@ async function boot() {
     onOpen: () => { input.clear(); stopFollowing(); },
     onClose: () => stage.focus({ preventScroll: true }),
     onGo: (room) => {
+      if (room.arena && world.mode === 'side') return; // already here
       const to = room.entry || { x: Math.floor(map.spawn.x), y: Math.floor(map.spawn.y) };
       if (!walkTo(world, to.x, to.y, null, { quick: true })) note(`can't find a way to ${room.name}`);
     },
@@ -460,7 +502,7 @@ async function boot() {
   addEventListener('hashchange', () => applyRoute(parseRoute(location.hash)));
 
   // Test hook for the e2e scripts.
-  window.__ascii = { map, world, stats, viewer, teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
+  window.__ascii = { map, world, stats, viewer, mode: () => world.mode, tilting: () => tilting, loaded: (id) => loadedIds.has(id), teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
     open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; } };
   requestAnimationFrame((t) => { last = t; loop(t); });
 }

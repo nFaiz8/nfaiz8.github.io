@@ -18,7 +18,7 @@ await withBrowser(async ({ page, url, errors }) => {
       const rooms = await page.evaluate(() => window.__ascii.map.rooms.filter((x) => x.entry).map((x) => ({ id: x.id, ...x.entry })));
       for (const room of rooms) {
         await page.evaluate((e) => window.__ascii.walkTo(e.x, e.y), room);
-        await page.waitForFunction(() => !window.__ascii.world.path, { timeout: 90000 });
+        await page.waitForFunction(() => { const w = window.__ascii.world; return !w.path && !w.want && !w.frozen; }, { timeout: 90000 });
         const at = await page.evaluate(() => ({ x: Math.floor(window.__ascii.world.player.x), y: Math.floor(window.__ascii.world.player.y) }));
         assert.deepEqual(at, { x: room.x, y: room.y }, `reached ${room.id}`);
       }
@@ -175,6 +175,64 @@ await withBrowser(async ({ page, url, errors }) => {
     const cells = await page.evaluate(() => ({ cols: Math.floor(innerWidth / window.__ascii.metrics().cw), rows: Math.floor(innerHeight / window.__ascii.metrics().ch) }));
     assert.ok(cells.cols >= 120 && cells.rows >= 28, `${cells.cols}×${cells.rows}`);
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  });
+  const arenaInfo = (p) => p.evaluate(() => { const a = window.__ascii.map.arena; return { door: a.door, floorY: a.floorY, entry: a.entry, x: a.x, y: a.y, w: a.w, h: a.h, id: a.backdrop && a.backdrop.id }; });
+  await check('arena: with Reduce Motion, walking west through the door cuts to the side view, and east cuts back', async () => {
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.goto(url); await ready(page);
+    const a = await arenaInfo(page);
+    await page.evaluate((d) => window.__ascii.teleport(d.x + 4.5, d.y + 1.5), a.door);
+    await page.keyboard.down('ArrowLeft');
+    await page.waitForFunction(() => window.__ascii.mode() === 'side', { timeout: 5000 });
+    await page.keyboard.up('ArrowLeft');
+    await sleep(300);
+    const p = await page.evaluate(() => ({ ...window.__ascii.world.player }));
+    assert.ok(Math.abs(p.y - (a.floorY - 0.5)) < 0.01, `on the floor (${p.y})`);
+    await page.keyboard.down('ArrowRight');
+    await page.waitForFunction(() => window.__ascii.mode() === 'top', { timeout: 5000 });
+    await page.keyboard.up('ArrowRight');
+    assert.ok(await page.evaluate((x) => window.__ascii.world.player.x > x, a.door.x), 'in the corridor');
+    await page.emulateMediaFeatures([]);
+  });
+  await check('arena: the door tilts the view (about 0.6 s, input waits), and the stage ends flat', async () => {
+    await page.emulateMediaFeatures([]);
+    await page.goto(url); await ready(page);
+    const a = await arenaInfo(page);
+    await page.evaluate((d) => window.__ascii.teleport(d.x + 4.5, d.y + 1.5), a.door);
+    await page.keyboard.down('ArrowLeft');
+    await page.waitForFunction(() => window.__ascii.tilting(), { timeout: 5000 });
+    const t0 = Date.now();
+    await page.keyboard.up('ArrowLeft');
+    await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 5000 });
+    const took = Date.now() - t0;
+    assert.ok(took >= 450 && took < 2000, `took ${took} ms`);
+    assert.equal(await page.$eval('#stage', (s) => getComputedStyle(s).transform), 'none');
+  });
+  await check('arena: a jump from the floor lands on a platform, and ↓ drops back through it', async () => {
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    assert.equal(await page.evaluate(() => window.__ascii.mode()), 'side', '#/room/arena lands in the side view');
+    const spot = await page.evaluate(() => {
+      const a = window.__ascii.map.arena, L = a.level, r = L.rows - 5;
+      for (let c = 2; c < L.cols - 2; c++) {
+        const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] === 1);
+        const clear = [1, 2, 3, 4].every((k) => [-1, 0, 1].every((d) => !L.cells[(r + k) * L.cols + c + d]));
+        if (run && clear) return { x: a.x + 1 + c + 0.5, y: a.floorY - 0.5, top: a.y + 1 + r };
+      }
+      return null;
+    });
+    assert.ok(spot, 'a platform 5 rows up with clear space under it');
+    await page.evaluate((s) => window.__ascii.teleport(s.x, s.y), spot);
+    await sleep(200);
+    await page.keyboard.down('Space');
+    await sleep(450);
+    await page.keyboard.up('Space');
+    await sleep(800);
+    assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - (spot.top - 0.5)) < 0.01, 'standing on the platform');
+    await page.keyboard.down('ArrowDown');
+    await sleep(120);
+    await page.keyboard.up('ArrowDown');
+    await sleep(800);
+    assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - spot.y) < 0.01, 'back on the floor');
   });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
