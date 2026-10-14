@@ -235,13 +235,62 @@ test('knock: sets the velocity, leaves the ground when ky is upward, and stuns; 
   assert.ok(Math.abs(r.vx - 20 * Math.exp(-1 / 60 / 0.35)) < 1e-9, 'Reduce Motion does not change the decay');
 });
 
-test('a bullet-style knock (ky 0) keeps a jump going', () => {
+test('a bullet-style knock (add) keeps a jump going, adds to vy, and the jump can still be cut', () => {
+  const J = { ...IDLE, jump: true };
   const b = newBody(10.5, 18.5);
   sim(b, 0.2);
-  sim(b, 0.1, { ...IDLE, jump: true });
+  sim(b, 0.1, J);
   const vy = b.vy;
-  knock(b, 10, 0, 0.1);
+  knock(b, 10, 0, 0.1, true);
   assert.equal(b.vy, vy);
+  const c = newBody(10.5, 18.5);
+  sim(c, 0.2);
+  sim(c, 0.1, J);
+  const vc = c.vy;
+  knock(c, 10, -5, 0.1, true);
+  assert.equal(c.vy, vc - 5, 'adds');
+  // Stun over, jump released while still rising: the cut still applies after a sideways bullet.
+  const d = newBody(10.5, 18.5);
+  sim(d, 0.2);
+  sim(d, 0.05, J);
+  knock(d, 10, 0, 0.02, true);
+  sim(d, 0.05, J);
+  const rising = d.vy;
+  assert.ok(rising < -10 && d.cut === false, 'still rising, cut available');
+  stepBody(d, 1 / 60, IDLE, kindAt);
+  assert.ok(d.vy > rising / 2 - 3, `cut (${d.vy} from ${rising})`);
+  const g = newBody(10.5, 18.5);
+  sim(g, 0.2);
+  knock(g, 0, -5, 0.1, true);
+  assert.equal(g.onGround, false, 'an upward bullet knock lifts a grounded body');
+});
+
+test('a strike knock mid-jump with jump held replaces vy and is not halved; a short stun ending with the key released is not halved either', () => {
+  const J = { ...IDLE, jump: true };
+  const up = newBody(10.5, 18.5);
+  sim(up, 0.2);
+  sim(up, 0.05, J);
+  knock(up, 20, -22, 0.4);
+  assert.equal(up.vy, -22);
+  stepBody(up, 1 / 60, J, kindAt);
+  assert.ok(Math.abs(up.vy - (-22 + 133 / 60)) < 1e-9, `vy1 ${up.vy}`);
+  const s = newBody(10.5, 18.5);
+  sim(s, 0.2);
+  sim(s, 0.05, J);
+  knock(s, 20, -22, 0.03);
+  sim(s, 0.03, J);
+  stepBody(s, 1 / 60, IDLE, kindAt); // stun over, key released while still rising
+  assert.ok(s.vy < -14, `knock vy not halved (${s.vy})`);
+});
+
+test('a roll that ends in the air eases its speed back with air control', () => {
+  const b = newBody(5.5, 18.5);
+  sim(b, 0.2);
+  stepBody(b, 1 / 60, { ...IDLE, roll: 1 }, kindAt);
+  sim(b, 0.1);
+  stepBody(b, 1 / 60, { ...IDLE, jump: true }, kindAt);
+  sim(b, 0.1, { ...IDLE, jump: true });
+  assert.ok(b.vx < 48 && b.vx > 0, `eased (${b.vx})`);
 });
 
 test('the door blocks a stunned body but not a walking one', () => {

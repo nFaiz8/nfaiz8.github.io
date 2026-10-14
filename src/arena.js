@@ -27,13 +27,19 @@ export function newBody(x, y) {
 
 export const rolling = (b) => b.rollT >= 0;
 
-// A hit: set the velocity and stun for a while. An upward ky leaves the ground; ky 0 leaves vy alone.
-export function knock(b, kx, ky, stun) {
+// A hit: set the horizontal velocity and stun for a while. A strike (default) replaces vy when ky is
+// non-zero, and a let-go of jump must not halve it. A bullet (add) adds to vy, so it never cancels a jump
+// and leaves the jump-cut alone. Either way an upward result takes a grounded body off the ground.
+export function knock(b, kx, ky, stun, add = false) {
   b.vx = kx;
-  if (ky) { b.vy = ky; if (ky < 0) b.onGround = b.onPlatform = false; }
+  if (add) {
+    if (ky) { b.vy += ky; if (b.onGround && b.vy < 0) b.onGround = b.onPlatform = false; }
+  } else {
+    if (ky) { b.vy = ky; if (ky < 0) b.onGround = b.onPlatform = false; }
+    b.cut = true;
+  }
   b.stun = Math.max(b.stun, stun);
   b.rollT = -1;
-  b.cut = true; // a let-go of jump must not halve the knock's vy
 }
 
 // Start a roll: on the ground, not stunned, not already rolling, and cooled down.

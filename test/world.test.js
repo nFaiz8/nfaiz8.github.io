@@ -273,3 +273,16 @@ test('teleporting into the arena at the old one-row centre settles onto the floo
   for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: -1 });
   assert.ok(x0 - w.player.x > 3, `walked ${x0 - w.player.x}`);
 });
+
+test('teleporting from the side view into the side view also settles onto the floor', () => {
+  const w = createWorld(amap);
+  teleport(w, A.entry.x + 0.5, A.floorY - 1.5);
+  for (let i = 0; i < 12; i++) step(w, 1 / 60, SIDE_IDLE);
+  assert.equal(w.mode, 'side');
+  teleport(w, A.entry.x + 0.5, A.entry.y + 0.5);
+  for (let i = 0; i < 30; i++) step(w, 1 / 60, SIDE_IDLE);
+  assert.equal(w.player.y, A.floorY - 1.5);
+  const x0 = w.player.x;
+  for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: -1 });
+  assert.ok(x0 - w.player.x > 3, `walked ${x0 - w.player.x}`);
+});
