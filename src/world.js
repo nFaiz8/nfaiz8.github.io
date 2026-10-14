@@ -2,6 +2,7 @@
 import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
+import { newBody, stepBody, sideCamera, kindsFor } from './arena.js';
 
 const SPEED = 30; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
 const SPRINT = 1.5; // holding Shift
@@ -26,6 +27,11 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     onArrive: null,
     camTarget: null, // when set (a photo being opened), the camera centres here instead of on you
     visitors: createVisitors(map),
+    mode: 'top', // 'side' inside the arena
+    want: null, // 'side' | 'top' when you've crossed the arena door; main.js tilts, then switches
+    frozen: false, // input ignored (during the tilt)
+    view: { cols: 150, rows: 50 }, // cells on screen; main.js keeps it current
+    kindAt: map.arena ? kindsFor(map) : null,
   };
 }
 
@@ -95,6 +101,10 @@ export function smoothPath(map, from, cells) {
 }
 
 export function walkTo(world, cx, cy, onArrive = null, { quick = false } = {}) {
+  if (world.mode === 'side') {
+    if (inArena(world.map, cx + 0.5, cy + 0.5)) return false; // in the arena you run and jump instead
+    exitSide(world);
+  }
   const { map, player } = world;
   const path = findPath(map.W, map.H, (x, y) => isWalkable(map, x, y), Math.floor(player.x), Math.floor(player.y), cx, cy);
   world.path = path && smoothPath(map, player, path);
@@ -122,6 +132,12 @@ export function teleport(world, x, y) {
   world.cam.vx = world.cam.vy = 0;
   world.path = null;
   world.onArrive = null;
+  // Landing somewhere else (a link, ← → in the viewer) switches view at once, without the tilt.
+  if (world.map.arena) {
+    const side = inArena(world.map, x, y);
+    if (side && world.mode !== 'side') enterSide(world, { place: false });
+    else if (!side && world.mode === 'side') exitSide(world, { place: false });
+  }
 }
 
 // Critically damped spring toward a target (Unity's SmoothDamp). Mutates o.{x|y} and o.v{x|y}.
@@ -137,18 +153,21 @@ function spring(o, axis, target, time, dt) {
 // input: { x: -1..1, y: -1..1, run: bool }
 export function step(world, dt, input) {
   world.t += dt;
+  if (world.mode === 'side') return stepSide(world, dt, input);
   const p = world.player;
   const speed = SPEED * (input.run ? SPRINT : 1);
 
   // Where we want to be going, in horizontal-cell units per second.
   let tx = 0, ty = 0;
-  if (input.x || input.y) {
+  if (world.frozen) {
+    p.vx = p.vy = 0;
+  } else if (input.x || input.y) {
     world.path = null;
     world.onArrive = null;
     const len = Math.hypot(input.x, input.y) || 1;
     tx = (input.x / len) * speed;
     ty = (input.y / len) * speed;
-  } else if (world.path) {
+  } else if (world.path && !world.frozen) {
     let wp = world.path[0];
     let dx = wp.x - p.x, dy = (wp.y - p.y) * CELL_ASPECT, d = Math.hypot(dx, dy);
     const pace = PATH_SPEED * (world.pathQuick ? 2.5 : 1);
@@ -187,17 +206,36 @@ export function step(world, dt, input) {
   if (hit.hitY) p.vy *= 0.5;
   p.moving = Math.hypot(p.vx, p.vy) > 0.5;
   if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);
+  // Through the arena door: main.js plays the tilt, then calls enterSide.
+  if (!world.frozen && !world.want && inArena(world.map, p.x, p.y)) { world.want = 'side'; world.path = null; world.onArrive = null; }
 
   stepVisitors(world, dt);
-
-  // Camera: a spring that leads slightly in the direction you're walking.
-  const t = world.camTarget;
-  const ax = t ? t.x : p.x + p.vx * LOOK_AHEAD, ay = t ? t.y : p.y + (p.vy / CELL_ASPECT) * LOOK_AHEAD;
-  if (world.reducedMotion || (t && t.snap)) { world.cam.x = ax; world.cam.y = ay; world.cam.vx = world.cam.vy = 0; }
-  else { const ct = t ? 0.12 : CAM_TIME; spring(world.cam, 'x', ax, ct, dt); spring(world.cam, 'y', ay, ct, dt); }
+  moveCamera(world, dt);
 
   world.focus = nearestFrame(world);
   world.atKiosk = !world.focus && atKiosk(world);
+}
+
+// Camera: a spring that leads slightly in the direction you're walking.
+function moveCamera(world, dt) {
+  const g = cameraGoal(world), t = world.camTarget;
+  if (world.reducedMotion || (t && t.snap)) { world.cam.x = g.x; world.cam.y = g.y; world.cam.vx = world.cam.vy = 0; }
+  else { const ct = t ? 0.12 : CAM_TIME; spring(world.cam, 'x', g.x, ct, dt); spring(world.cam, 'y', g.y, ct, dt); }
+}
+
+// Inside the arena: arena.js moves you (gravity, platforms); everything else carries on as usual.
+function stepSide(world, dt, input) {
+  const p = world.player;
+  if (!world.frozen) {
+    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion });
+    p.moving = Math.abs(p.vx) > 0.5 || !p.onGround;
+    if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);
+    if (!world.want && !inArena(world.map, p.x, p.y)) world.want = 'top';
+  }
+  stepVisitors(world, dt);
+  moveCamera(world, dt);
+  world.focus = world.map.arena.backdrop;
+  world.atKiosk = false;
 }
 
 // In front of the lobby kiosk (the one that opens every photo as a grid).
@@ -212,6 +250,44 @@ function atKiosk({ map, player }) {
 export function roomAt(map, x, y) {
   const i = Math.floor(y) * map.W + Math.floor(x);
   return i >= 0 && i < map.roomOf.length ? map.roomOf[i] : -1;
+}
+
+export const inArena = (map, x, y) => !!map.arena && roomAt(map, x, y) === map.arena.index;
+
+function cameraGoal(world) {
+  const p = world.player;
+  if (world.camTarget) return world.camTarget;
+  if (world.mode === 'side') return sideCamera(world.map.arena, world.view, p, p.vx * LOOK_AHEAD);
+  return { x: p.x + p.vx * LOOK_AHEAD, y: p.y + (p.vy / CELL_ASPECT) * LOOK_AHEAD };
+}
+
+function snapCamera(world) {
+  const g = cameraGoal(world);
+  world.cam.x = g.x; world.cam.y = g.y; world.cam.vx = world.cam.vy = 0;
+}
+
+// Into the side view: on the floor just inside the door, facing west (or where you already are).
+export function enterSide(world, { place = true } = {}) {
+  const { player: p, map } = world, a = map.arena;
+  if (place) { p.x = a.entry.x + 0.5; p.y = a.floorY - 0.5; p.facing = -1; }
+  // prevJump: a key still held from walking in through the door (W, ↑, Space) must not fire a jump on
+  // arrival. A teleport (a link, the viewer) has no such key, so the first press there jumps.
+  Object.assign(p, newBody(p.x, p.y), { prevJump: place });
+  world.mode = 'side';
+  world.want = null;
+  world.path = null;
+  world.onArrive = null;
+  snapCamera(world);
+}
+
+// Back to top-down: in the corridor just outside the door, facing east (or where you already are).
+export function exitSide(world, { place = true } = {}) {
+  const { player: p, map } = world, a = map.arena;
+  if (place) { p.x = a.door.x + 2.5; p.y = a.door.y + 1.5; p.facing = 1; }
+  p.vx = p.vy = 0;
+  world.mode = 'top';
+  world.want = null;
+  snapCamera(world);
 }
 
 function nearestFrame(world) {
@@ -248,7 +324,7 @@ function rng(seed) {
 
 export function createVisitors(map, n = 6) {
   const r = rng(97);
-  const rooms = map.rooms.filter((room) => room.frames && room.frames.length);
+  const rooms = map.rooms.filter((room) => room.frames && room.frames.length && !room.arena);
   if (!rooms.length) return [];
   return Array.from({ length: n }, (_, i) => {
     const room = rooms[i % rooms.length];
@@ -266,7 +342,7 @@ const near = (a, b, d) => Math.hypot(a.x - b.x, (a.y - b.y) * CELL_ASPECT) < d;
 
 function planVisitor(world, v) {
   const { map } = world;
-  const rooms = map.rooms.filter((room) => room.frames && room.frames.length);
+  const rooms = map.rooms.filter((room) => room.frames && room.frames.length && !room.arena);
   let room = map.rooms[v.room];
   if (v.r() < 0.3 && rooms.length > 1) {
     room = rooms[(rooms.indexOf(room) + 1) % rooms.length];
@@ -277,7 +353,7 @@ function planVisitor(world, v) {
   const gy = f.stand.y;
   const others = [world.player, ...world.visitors.filter((o) => o !== v)];
   const occupied = (x, y) => others.some((o) => Math.floor(o.x) === x && Math.floor(o.y) === y);
-  const cells = findPath(map.W, map.H, (x, y) => isWalkable(map, x, y) && !occupied(x, y), Math.floor(v.x), Math.floor(v.y), gx, gy, 60000);
+  const cells = findPath(map.W, map.H, (x, y) => isWalkable(map, x, y) && !occupied(x, y) && !inArena(map, x + 0.5, y + 0.5), Math.floor(v.x), Math.floor(v.y), gx, gy, 60000);
   if (!cells) { v.wait = 1; return; }
   v.path = smoothPath(map, v, cells);
   v.looking = false;

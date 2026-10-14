@@ -1,7 +1,7 @@
 // The arena: a side-scrolling room. Pure: the level, platform physics, the side-view camera and the
 // backdrop crop. world.js hands the player to stepBody while you're inside.
 
-import { CELL_ASPECT } from './layout.js';
+import { CELL_ASPECT, isWalkable } from './layout.js';
 
 export const AIR = 0, PLATFORM = 1, SOLID = 2;
 export const LEVEL_COLS = 240, LEVEL_ROWS = 50;
@@ -123,4 +123,14 @@ export function coverCrop(w, h, cols, rows) {
   if (w / h > want) { const sw = h * want; return { sx: (w - sw) / 2, sy: 0, sw, sh: h }; }
   const sh = w / want;
   return { sx: 0, sy: (h - sh) / 2, sw: w, sh };
+}
+
+// What fills a map cell in the side view: the level inside the arena, the building's walls outside it.
+export function kindsFor(map) {
+  const a = map.arena;
+  return (cx, cy) => {
+    const ix = cx - a.x - 1, iy = cy - a.y - 1;
+    if (ix >= 0 && iy >= 0 && ix < a.cols && iy < a.rows) return a.level.cells[iy * a.cols + ix];
+    return isWalkable(map, cx, cy) ? AIR : SOLID;
+  };
 }

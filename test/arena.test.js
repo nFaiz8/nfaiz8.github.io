@@ -189,3 +189,20 @@ test('coverCrop keeps the middle of the image at the room shape (cells are twice
   const tall = coverCrop(1000, 1000, 240, 50);
   assert.ok(Math.abs(tall.sw / tall.sh - 2.4) < 1e-9 && tall.sx === 0 && tall.sy > 0);
 });
+
+import { indexData } from '../src/data.js';
+import { buildLayout } from '../src/layout.js';
+import { kindsFor } from '../src/arena.js';
+
+test('kindsFor: level cells inside, walls solid, the door open', () => {
+  const json = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
+  const d = indexData(json, ['IMG_1003']);
+  const map = buildLayout(d, { name: 'Faiz' }, { arena: { photo: d.byId.get('IMG_1003'), level: parseLevel(text) } });
+  const a = map.arena, k = kindsFor(map), L = a.level;
+  const i = L.cells.indexOf(PLATFORM);
+  assert.equal(k(a.x + 1 + (i % L.cols), a.y + 1 + Math.floor(i / L.cols)), PLATFORM);
+  assert.equal(k(a.x, a.y + 5), SOLID, 'west wall');
+  assert.equal(k(a.x + 5, a.floorY), SOLID, 'floor');
+  assert.equal(k(a.door.x, a.door.y + 1), AIR, 'door');
+  assert.equal(k(a.door.x + 1, a.door.y + 1), AIR, 'corridor');
+});
