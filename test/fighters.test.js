@@ -43,16 +43,15 @@ function playback() {
   const shown = [];
   let q = 1;
   for (let ms = sends[0].arrive; ms <= 3000; ms += 1000 / 60) {
-    let snap = 0; // a state never moves the drawn body by itself, unless it snaps (over 4 cells, rows counted double)
     while (q < sends.length && sends[q].arrive <= ms) {
       const a = F.list(ms)[0].state;
       F.apply({ t: 'a', id: 'b', ...wire(sends[q++]) }, ms);
-      const b = F.list(ms)[0].state, jump = Math.hypot(b.x - a.x, 2 * (b.y - a.y));
-      if (jump > 1e-9) { assert.ok(jump > 4, `moved ${jump} on a state without snapping`); snap = jump; }
+      const b = F.list(ms)[0].state;
+      assert.ok(Math.hypot(b.x - a.x, b.y - a.y) < 1e-9, `at ${ms.toFixed(0)} ms a state snapped the drawn body`);
     }
     F.step(1 / 60, ms);
     const st = F.list(ms)[0].state;
-    shown.push({ ms, x: st.x, y: st.y, snap });
+    shown.push({ ms, x: st.x, y: st.y });
   }
   return { T, sends, shown };
 }
@@ -60,31 +59,60 @@ const wire = (s) => ({ x: s.x, y: s.y, vx: s.vx, vy: s.vy, f: s.vx < 0 ? -1 : 1,
 
 test('played back at 60 fps with 50 ms latency and jitter: smooth, close to the truth, and the jump peaks where it really did', () => {
   const { T, sends, shown } = playback();
-  // The take-off is known only when its state arrives, ~87 ms late here: by then they are ~3.3 rows up,
-  // over the snap limit, so that one frame snaps. Every other frame must glide.
-  assert.ok(shown.filter((s) => s.snap).length <= 1, `snapped at ${shown.filter((s) => s.snap).map((s) => s.ms.toFixed(0))}`);
   const truthAt = (ms) => T[Math.min(T.length - 1, Math.max(0, Math.round(ms / (1000 / 60))))];
+  const changes = T.filter((s, k) => k > 0 && s.i !== T[k - 1].i).map((s) => s.t * 1000);
+  // Within 200 ms of an input change a frame also carries the gliding correction (a take-off: ~3 rows).
   for (let k = 1; k < shown.length; k++) {
-    if (shown[k].snap) continue;
     const d = Math.hypot(shown[k].x - shown[k - 1].x, shown[k].y - shown[k - 1].y);
     const v = Math.max(...[-2, -1, 0, 1, 2].map((o) => { const s = truthAt(shown[k].ms + o * 16.7); return Math.hypot(s.vx, s.vy); }));
-    assert.ok(d <= v / 60 + 0.3, `frame ${k}: moved ${d.toFixed(3)} at speed ${v.toFixed(1)}`);
+    const gliding = changes.some((c) => shown[k].ms >= c && shown[k].ms - c <= 200);
+    assert.ok(d <= v / 60 + (gliding ? 0.6 : 0.3), `frame ${k}: moved ${d.toFixed(3)} at speed ${v.toFixed(1)}`);
   }
-  const changes = T.filter((s, k) => k > 0 && s.i !== T[k - 1].i).map((s) => s.t * 1000);
   // Nobody can show a change before the first state sent after it arrives (50–90 ms later): until then
   // the error is the change's own motion over the latency (a take-off: ~3 rows), so it isn't bounded here.
+  // Once it arrives, that error glides out (spec §7: "glides back in about 80 ms") on top of the 1.0 allowance.
   const known = (c) => Math.min(...sends.filter((s) => s.ts >= c - 1).map((s) => s.arrive));
+  const unknown = new Map(); // change → the error on its last frame before it was known
   for (const s of shown) {
     if (s.ms > 2900) break;
-    if (changes.some((c) => s.ms >= c && s.ms < known(c))) continue;
     const tr = truthAt(s.ms), since = Math.min(...changes.map((c) => (s.ms >= c ? s.ms - c : Infinity)));
     const err = Math.hypot(s.x - tr.x, s.y - tr.y);
+    const blind = changes.filter((c) => s.ms >= c && s.ms < known(c));
+    if (blind.length) { for (const c of blind) unknown.set(c, err); continue; }
+    const glide = Math.max(0, ...changes.filter((c) => s.ms >= c && unknown.has(c)).map((c) => unknown.get(c) * Math.exp(-(s.ms - known(c)) / 80)));
     if (since > 400) assert.ok(err <= 0.2, `at ${s.ms.toFixed(0)} ms: ${err.toFixed(3)} off`);
-    else assert.ok(err <= 1.0, `right after a change, at ${s.ms.toFixed(0)} ms: ${err.toFixed(3)} off`);
+    else assert.ok(err <= 1.0 + glide, `right after a change, at ${s.ms.toFixed(0)} ms: ${err.toFixed(3)} off (glide ${glide.toFixed(3)})`);
   }
   const peakTrue = Math.min(...T.filter((s) => s.t < 1).map((s) => s.y));
   const peakShown = Math.min(...shown.filter((s) => s.ms < 1150).map((s) => s.y));
   assert.ok(Math.abs(peakTrue - peakShown) <= 0.3, `peak ${peakShown} vs ${peakTrue}`);
+});
+
+test('a remote jump seen 50 ms late glides onto its arc: no frame jumps more than 1.5 cells', () => {
+  // The sender stands, then jumps (right, then straight up); states every 67 ms or at once on a change, 50 ms on the way.
+  const b = newBody(60.5, 27.5);
+  for (let i = 0; i < 12; i++) stepBody(b, 1 / 60, {}, kinds);
+  const sends = [];
+  let lastAt = -1e9, last = null;
+  for (let k = 0; k <= 90; k++) {
+    const ms = k * 1000 / 60, inp = k < 12 ? {} : k < 40 ? { jump: true, x: k < 24 ? 1 : 0 } : {};
+    const s = { x: b.x, y: b.y, vx: b.vx, vy: b.vy, f: 1, g: b.onGround ? 1 : 0, i: bits(inp), a: 0, ts: Math.round(ms) };
+    const urgent = last && (s.i !== last.i || s.g !== last.g);
+    if ((urgent && ms - lastAt >= 30) || ms - lastAt >= 67) { sends.push(s); lastAt = ms; last = s; }
+    stepBody(b, 1 / 60, inp, kinds);
+  }
+  const F = createFighters({ kindAt: kinds, rtt: () => 100 });
+  one(F, 0);
+  let q = 0, prev = F.list(0)[0].state, worst = 0;
+  for (let ms = 0; ms <= 1500; ms += 1000 / 60) {
+    while (q < sends.length && sends[q].ts + 50 <= ms) F.apply({ t: 'a', id: 'b', ...sends[q++] }, ms);
+    F.step(1 / 60, ms);
+    const st = F.list(ms)[0].state;
+    worst = Math.max(worst, Math.hypot(st.x - prev.x, st.y - prev.y));
+    prev = st;
+  }
+  assert.ok(Math.min(...sends.map((s) => s.y)) < 24, 'the sender really jumped');
+  assert.ok(worst <= 1.5, `a frame moved ${worst.toFixed(3)}`);
 });
 
 const one = (F, now, o = {}) => F.apply({ t: 'aw', fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ...o }] }, now);

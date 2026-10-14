@@ -7,7 +7,7 @@ import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME } from './fig
 
 const SILENT = 300; // ms since the last state was sent before their input counts as released
 const CORR_TAU = 0.08, AIM_TAU = 0.06; // seconds
-const SNAP = 4; // cells: a bigger correction snaps
+const SNAP = 4; // cells and rows as they are: a bigger correction (a respawn, a clamp) snaps; a take-off glides
 const AGE_MAX = 150, BASE_SPAN = 2000; // ms
 const STEP = 1 / 60;
 const NONE = {};
@@ -79,7 +79,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     advance(b, age, input);
     if (F.body && !fresh) {
       const cx = F.body.x + F.corr.x - b.x, cy = F.body.y + F.corr.y - b.y;
-      F.corr = Math.hypot(cx, 2 * cy) > SNAP ? { x: 0, y: 0 } : { x: cx, y: cy };
+      F.corr = Math.hypot(cx, cy) > SNAP ? { x: 0, y: 0 } : { x: cx, y: cy };
     } else F.corr = { x: 0, y: 0 };
     F.body = b;
     F.bits = i;
