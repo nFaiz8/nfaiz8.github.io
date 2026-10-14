@@ -142,3 +142,5 @@ body { font: 13px/1.4 var(--mono); }
   .chat-form input { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .chat-log { transition: none; } }
+/* Our own focus style for the text boxes, in place of the browser's blue ring. */
+.chat-form input:focus, .name-form input:focus { outline: none; border-color: var(--mute); }

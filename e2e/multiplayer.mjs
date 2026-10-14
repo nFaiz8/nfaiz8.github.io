@@ -71,6 +71,7 @@ try {
       await a.focus('#stage');
       await a.keyboard.press('KeyN');
       await a.waitForSelector('#name-form:not([hidden])');
+      assert.equal(await a.$eval('#name-input', (e) => getComputedStyle(e).outlineStyle), 'none', 'browser focus ring on the name box');
       await a.keyboard.type('5gmh');
       await sleep(400);
       assert.equal(await b.evaluate(() => window.__ascii.live().peers.list(performance.now())[0]?.emote ?? null), null);
@@ -117,6 +118,10 @@ try {
       const before = await a.evaluate(() => [window.__ascii.world.player.x, window.__ascii.world.player.y]);
       await a.keyboard.press('KeyT');
       await a.waitForSelector('#chat-form:not([hidden])');
+      const ring = await a.$eval('#chat-input', (e) => { const c = getComputedStyle(e); return { outline: c.outlineStyle, border: c.borderColor }; });
+      assert.equal(ring.outline, 'none', 'browser focus ring on the chat box');
+      const idle = await a.$eval('#chat-input', (e) => { e.blur(); const c = getComputedStyle(e).borderColor; e.focus(); return c; });
+      assert.notEqual(ring.border, idle, 'no focus style at all');
       await a.keyboard.type('wasd 15 gmh hello');
       await sleep(400);
       assert.deepEqual(await a.evaluate(() => [window.__ascii.world.player.x, window.__ascii.world.player.y]), before, 'typing moved me');
