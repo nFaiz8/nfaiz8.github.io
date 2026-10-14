@@ -3132,3 +3132,38 @@ Spec: docs/specs/2026-10-14-arena-headshots-double-jump.md. Task 17 runs alongsi
 4. Run `npm test`, `cd server && npm test`, and `e2e/run.mjs` and `e2e/multiplayer.mjs` through the e2e lock.
 5. Look at the pose sheet with the flip, in both renderers.
 6. Commit with the message `Arena PvP: the double jump: one air jump with a redirect and a flip`.
+
+---
+
+## Amendment (2026-10-14, user request: a bigger arena, zoom by gun)
+
+Spec: docs/specs/2026-10-14-arena-bigger-zoom.md. Order from here: 14R and 17 (running), the Task 15 fixes, then 19, then 18 (double jump, tuned on the bigger room), then 16 (e2e), then the final review.
+
+### Task 19: A bigger room (240 × 51) and a side view that zooms in by gun
+
+**Spec:** `docs/specs/2026-10-14-arena-bigger-zoom.md` (binding).
+
+**Files:**
+- Modify:
+  - `src/arena.txt` (the new 240 × 51 trace), `src/level.js` (size), and `src/arena.js` (`SIDE_ROWS`, a
+    pure `sideZoom` helper, camera lead);
+  - `src/layout.js`, only if the arena box needs it;
+  - `server/gallery.js`, only if `DOOR` or `levelHash` is not derived;
+  - `src/render/canvas.js`, `src/render/gl.js`, `src/render/shaders.js`: the side-view cell size, crisp
+    rebuild on settle, `cellAt`/`pointAt`;
+  - `src/main.js`: `world.view` from the side cell size; drive the zoom from my gun;
+  - `src/world.js`, if the camera needs the zoom.
+- Test:
+  - `test/level.test.js`, `test/arena.test.js`, `test/world.test.js`, `server/test/server.test.js`;
+  - `e2e/run.mjs` and `e2e/multiplayer.mjs`: update every check that hard-codes the old level, and add
+    the zoom checks.
+
+**Steps (TDD):**
+1. Write the failing tests from spec §3.
+2. Watch them fail.
+3. Build the level. Write a small scaling script in the scratchpad, not the repo, then hand-tune
+   `src/arena.txt`. Render it as text and compare it against the photo's lines.
+4. Add the zoom, then the renderers.
+5. Run `npm test`, `cd server && npm test`, and all three e2e scripts through the e2e lock.
+6. Look at desktop and phone screenshots in both renderers, at the deagle and sniper zooms.
+7. Commit with the message `Arena: a bigger room traced on the photo, and a side view that zooms in by gun`.
