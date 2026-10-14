@@ -4,3 +4,5 @@ public/photos/
 .DS_Store
 e2e/shots/
 preview/
+server/node_modules
+server/.wrangler

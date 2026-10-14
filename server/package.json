@@ -1,0 +1,11 @@
+{
+  "name": "faiz-live",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787 --ip 127.0.0.1",
+    "deploy": "wrangler deploy",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "devDependencies": { "wrangler": "^4.150.0", "ws": "^8.18.0" }
+}
