@@ -35,13 +35,20 @@ export function peerEntities(list, { reducedMotion, muted, figure = true } = {})
   return out;
 }
 
-export function heartEntities(hearts, frames, { reducedMotion } = {}) {
+export function heartEntities(hearts, frames, { reducedMotion, posOf = () => null } = {}) {
   const out = [];
   for (const h of hearts) {
     const f = frames.find((fr) => fr.id === h.f);
     if (!f) continue;
-    const y = f.y - 0.5 - (reducedMotion ? 0 : h.age * 3);
-    out.push({ x: f.x + f.w / 2, y, glyph: '♥', color: mix([235, 96, 120], 1 - h.age * 0.8) });
+    const rise = reducedMotion ? 0 : h.age * 3;
+    const color = mix([235, 96, 120], 1 - h.age * 0.8);
+    if (f.backdrop) {
+      // The arena's photo is the whole back wall and its top edge is the ceiling: rise from the sender instead.
+      const p = posOf(h.id);
+      if (p) out.push({ x: p.x, y: p.y - 1 - rise, glyph: '♥', color });
+      continue;
+    }
+    out.push({ x: f.x + f.w / 2, y: f.y - 0.5 - rise, glyph: '♥', color });
   }
   return out;
 }
@@ -128,7 +135,7 @@ export function localEcho() {
       const [p] = me.list(now);
       const out = [];
       if (p && (p.emote || p.say)) out.push(...peerEntities([{ ...p, id: 'me', name: '', x: player.x, y: player.y }], { ...opts, figure: false }));
-      out.push(...heartEntities(me.hearts(now), frames, opts));
+      out.push(...heartEntities(me.hearts(now), frames, { ...opts, posOf: () => player }));
       return out;
     },
   };

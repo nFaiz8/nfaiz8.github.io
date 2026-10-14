@@ -34,7 +34,7 @@ test('emotes show for 2.5 s; hearts last 2 s; renames apply; unknown ids are ign
   assert.equal(ps.list(1000)[0].emote, EMOTE_GLYPH.wave);
   assert.equal(ps.list(2700)[0].emote, null);
   ps.apply({ t: 'r', id: 'a', f: 'p1' }, 0);
-  assert.deepEqual(ps.hearts(1000), [{ f: 'p1', age: 0.5 }]);
+  assert.deepEqual(ps.hearts(1000), [{ f: 'p1', id: 'a', age: 0.5 }]);
   assert.deepEqual(ps.hearts(2100), []);
   ps.apply({ t: 'n', id: 'a', name: 'Annie' }, 0);
   assert.equal(ps.get('a').name, 'Annie');

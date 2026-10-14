@@ -78,3 +78,13 @@ test('my own chat shows at once, at most one line every 2 s', () => {
   assert.equal(echo.entities({ x: 3.5, y: 3.5 }, [], 5200, { reducedMotion: true }).length, 0);
   assert.equal(echo.say('later', 2000), true);
 });
+
+test('a heart at the arena photo rises from whoever sent it, not from the ceiling', () => {
+  const frames = [{ id: 'bg', x: 0, y: 0, w: 242, h: 52, backdrop: true }];
+  const posOf = (id) => (id === 'p9' ? { x: 40.5, y: 30.5 } : null);
+  const [h] = heartEntities([{ f: 'bg', id: 'p9', age: 0 }], frames, { posOf });
+  assert.deepEqual([h.x, h.y, h.glyph], [40.5, 29.5, '♥']);
+  const [later] = heartEntities([{ f: 'bg', id: 'p9', age: 0.5 }], frames, { posOf });
+  assert.ok(later.y < h.y, 'rises');
+  assert.deepEqual(heartEntities([{ f: 'bg', id: 'gone', age: 0 }], frames, { posOf }), [], 'sender gone: nothing');
+});

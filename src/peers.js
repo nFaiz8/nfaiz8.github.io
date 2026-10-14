@@ -5,7 +5,7 @@ export const EMOTES_ORDER = ['heart', 'bang', 'ask', 'star', 'wave'];
 
 export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFor = 2000, sayFor = 5000 } = {}) {
   const peers = new Map(); // id → { id, name, track: [{t,x,y}], left: number|null, emote, emoteAt, dx, dy }
-  let hearts = []; // { f, at }
+  let hearts = []; // { f, id, at }
   const api = {
     myId: null,
     apply(m, now) {
@@ -28,7 +28,7 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
       } else if (m.t === 'e') { p.emote = EMOTE_GLYPH[m.e] || null; p.emoteAt = now; }
       else if (m.t === 'n') p.name = m.name;
       else if (m.t === 'c') { p.say = m.text; p.sayAt = now; }
-      else if (m.t === 'r') hearts.push({ f: m.f, at: now });
+      else if (m.t === 'r') hearts.push({ f: m.f, id: m.id, at: now });
     },
     list(now) {
       const out = [];
@@ -44,7 +44,7 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
     },
     hearts(now) {
       hearts = hearts.filter((h) => now - h.at < heartFor);
-      return hearts.map((h) => ({ f: h.f, age: (now - h.at) / heartFor }));
+      return hearts.map((h) => ({ f: h.f, id: h.id, age: (now - h.at) / heartFor }));
     },
     get: (id) => peers.get(id) || null,
     count: () => [...peers.values()].filter((p) => p.left == null).length,
