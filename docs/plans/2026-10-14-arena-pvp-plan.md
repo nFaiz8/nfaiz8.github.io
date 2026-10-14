@@ -2998,3 +2998,68 @@ await check('arena PvP: the fight HUD shows hp in the side view, and the pad has
   - Record every such fix in your report.
 - [ ] **Step 3: Run the full set** (`npm test`, `cd server && npm test`, the three e2e files) and confirm it all passes.
 - [ ] **Step 4: Commit**: `Arena PvP: end-to-end checks for the fight, alone and with two browsers`.
+
+---
+
+## Amendment (2026-10-14, after user feedback on the gun)
+
+### Task 14R: The rig — a jointed stickman of rotatable glyph sprites, the gun in the hand
+
+**Why:** the user saw the stickman's carried deagle `╦═` jutting level from the hip and said it looks like a
+penis, "because it's at the crotch and not the hands", and asked for a rendering that isn't strictly ASCII,
+so that parts can rotate and move more fluidly.
+
+**Spec:** `docs/specs/2026-10-14-arena-stickman-rig.md` (the rig addendum). It wins over
+`docs/specs/2026-10-14-arena-stickman-design.md` wherever they disagree. Read the addendum in full, and the
+stickman spec's §3, §4 and §5 for everything the addendum keeps.
+
+**Files:**
+- Modify:
+  - `src/stick.js` (the pose function becomes the rig);
+  - `src/render/figures.js` (pass `rot`, `len`, `flip` through);
+  - `src/render/canvas.js` (draw rotated, stretched, flipped sprites);
+  - `src/render/gl.js` and `src/render/shaders.js` (instance `rot`, `len`, `flip`; rotate in pixel space).
+- Test:
+  - `test/stick.test.js` (rewrite for the rig, per addendum §7);
+  - `test/figures.test.js` (pass-through fields, perf budget kept);
+  - `e2e/run.mjs` pose checks: only after Task 15's commit, see the dispatch.
+- Don't touch:
+  - `src/main.js`, `src/pvp.js`, `src/fight.js`, `src/fx.js`, `src/referee.js`, `server/`;
+  - `index.html`, `src/style.css`, `src/config.js`.
+
+**Interfaces:**
+- Consumes (unchanged):
+  - the exports `SHOULDER`, `HAND_R`, `MUZZLE_R` and `GUN_ART` (fight.js and fx.js import them; keep the
+    names and values);
+  - `createMotionMemory` and the motion-memory behaviour.
+- Produces:
+  - `stickPose(state, t, opts, out)` with the same signature. Each entry is
+    `{ dx, dy, ch, part, tone, a, rot, len, flip }`; `rot` defaults to 0, `len` to 1, `flip` to false.
+  - `figureGlyphs` entries gain `rot`, `len` and `flip`. Labels and strips have rot 0, len 1 and no flip.
+  - Both renderers honour them.
+
+- [ ] **Step 1: Write the failing tests.**
+  - Rewrite `test/stick.test.js` per addendum §7: connected skeleton, bone lengths, IK bend directions,
+    hand holds the gun, carried gun above the hip and 20° down, aimed muzzle at `muzzleOf`, no steep glyph
+    substitution, continuity at 1 ms sampling, mirroring, death pieces settle, purity, `out` reuse.
+  - Keep the existing behaviour tests the addendum keeps: defaults, Reduce Motion, safe shimmer, motion
+    memory, respawn fly-in timing, and the act durations.
+  - Add a `figures.test.js` case: `rot`, `len` and `flip` pass through.
+- [ ] **Step 2: Run them and watch them fail.** `node --test test/stick.test.js test/figures.test.js < /dev/null`
+- [ ] **Step 3: Implement the rig in `src/stick.js`:**
+  - targets per pose, two-bone IK, continuous blends, bone sprites, gun along its axis from the hand,
+    mirroring by rot/flip;
+  - keep it pure and allocation-free;
+  - tune the starting numbers in addendum §4–§5 by eye on the pose sheet, and leave the final numbers in
+    named tables.
+- [ ] **Step 4: Renderers.**
+  - Canvas: `setTransform` per rotated or stretched sprite; snap only upright, unstretched ones.
+  - GL: new per-instance attributes; rotate the quad in pixel space; scale Y by len; mirror X by flip.
+  - Keep the two-pass outline/fill, the sprite cache and its cap, and the atlas.
+- [ ] **Step 5: Run everything.**
+  - `npm test < /dev/null`;
+  - e2e/run.mjs, editor.mjs and multiplayer.mjs, each through the e2e lock (see the dispatch).
+  - Look at the pose sheets `e2e/shots/stick-{canvas,gl}-{computer,phone}.png` and the `?bots=30` shots.
+    Every pose must read clearly, with the gun in the hand at chest height when carried. Canvas and GL
+    must match. It must hold 120 fps (30 fps exactly means the Mac is on battery).
+- [ ] **Step 6: Commit** with the message `Arena PvP: the stickman becomes a rig: jointed limbs, rotating glyph sprites, the gun in the hand`.
