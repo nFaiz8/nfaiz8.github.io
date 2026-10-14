@@ -3,7 +3,7 @@ import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
 
-const SPEED = 48; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
+const SPEED = 30; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
 const SPRINT = 1.5; // holding Shift
 const PATH_SPEED = SPEED; // tap/click-to-walk goes at walking pace
 const HALF = 0.3; // player half-size in cells
