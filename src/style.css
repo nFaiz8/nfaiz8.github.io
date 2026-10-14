@@ -106,3 +106,8 @@ body { font: 13px/1.4 var(--mono); }
   .viewer-tools .vbtn { padding: 6px 10px; }
   .caption { bottom: 12px; font-size: 11px; white-space: normal; }
 }
+
+/* Multiplayer */
+.map-peer { position: absolute; transform: translate(-50%, -50%); color: rgb(150 190 230); pointer-events: none; }
+.hud-here { color: var(--mute); padding: 4px 6px; }
+.hud-here[hidden] { display: none; }

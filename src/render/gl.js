@@ -131,6 +131,9 @@ export function createGlRenderer() {
     const chars = new Set(RAMP);
     const add = (s) => { for (const c of s) chars.add(c); };
     add('@☺☻&·?…─│┌┐└┘╥═║░▒▓█');
+    // Names and emotes of real visitors: any printable ASCII, plus the emote symbols.
+    for (let c = 32; c < 127; c++) chars.add(String.fromCharCode(c));
+    add('♥★');
     map.labels.forEach((l) => add(l.text));
     map.frames.forEach((f) => add(f.plaque.text));
     map.glyphs.forEach((g) => add(g.ch));

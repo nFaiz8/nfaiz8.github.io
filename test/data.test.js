@@ -105,3 +105,7 @@ test('loadData asks the server for a fresh photos.json instead of using a cached
   try { await loadData(); } finally { globalThis.fetch = real; }
   assert.equal(init?.cache, 'no-cache');
 });
+
+test('indexData passes on the manifest generated time (the multiplayer instance key)', () => {
+  assert.equal(indexData({ photos: [], generated: 'g' }).generated, 'g');
+});

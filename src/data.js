@@ -11,7 +11,7 @@ export function indexData(json, exclude = []) {
   const skip = new Set(exclude);
   // Alternate edits only appear through the viewer's Alt toggle, never on the walls.
   const rooms = groupByColor(json.photos.filter((p) => !p.hidden && !p.variantOf && !skip.has(p.id)));
-  return { byId, rooms };
+  return { byId, rooms, generated: json.generated || 'dev' };
 }
 
 export async function loadData(url = 'photos/photos.json', exclude = []) {

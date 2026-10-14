@@ -1,4 +1,5 @@
 import { SITE } from './config.js';
+import { createLive, peerEntities, heartEntities } from './live.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
@@ -192,14 +193,23 @@ function loop(now) {
     world.people.push({ x: v.x, y: v.y, glyph: v.glyph, color: v.color });
     if (v.looking && v.wait > 0) world.people.push({ x: v.x, y: v.y - 1, glyph: '·', color: v.color });
   }
-  world.entities = [{ x: world.player.x, y: world.player.y, glyph: '@', color: C.player }];
+  world.entities = [];
+  world.others = [];
+  if (live) {
+    const now = performance.now();
+    live.tick(world.player, world.player.moving);
+    const list = live.peers.list(now);
+    world.others = list.filter((p) => p.alpha === 1);
+    world.entities.push(...peerEntities(list, { reducedMotion }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion }));
+  }
+  world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
   if (renderer.lost) {
     note('WebGL context lost, switched to the canvas renderer');
     setRenderer('canvas');
   }
   renderer.draw(world);
   viewer.sync();
-  mapView.sync(world.player, roomAt(map, world.player.x, world.player.y));
+  mapView.sync(world.player, roomAt(map, world.player.x, world.player.y), world.others);
   updateCaption();
   stats.frames++;
   stats.times.push(dt);
@@ -208,10 +218,13 @@ function loop(now) {
     const t = stats.times.slice(-60);
     const avg = t.reduce((a, b) => a + b, 0) / t.length;
     const m = renderer.metrics;
-    debugEl.textContent = `${(1 / avg).toFixed(0)} fps  ${(avg * 1000).toFixed(1)} ms\n${renderer.name}  ${Math.round(innerWidth / m.cw)}×${Math.round(innerHeight / m.ch)} cells\n@ ${Math.floor(world.player.x)},${Math.floor(world.player.y)}  ${currentRoomId()}`;
+    debugEl.textContent = `${(1 / avg).toFixed(0)} fps  ${(avg * 1000).toFixed(1)} ms\n${renderer.name}  ${Math.round(innerWidth / m.cw)}×${Math.round(innerHeight / m.ch)} cells\n@ ${Math.floor(world.player.x)},${Math.floor(world.player.y)}  ${currentRoomId()}` +
+      `\nnet: ${live ? `${live.state} #${live.net.instance} · ${live.peers.count()} peers · ${live.net.ping ?? '–'} ms` : 'off'}`;
   }
   requestAnimationFrame(loop);
 }
+
+let live = null;
 
 async function boot() {
   let data;
@@ -262,6 +275,19 @@ async function boot() {
     },
   });
   document.getElementById('map-btn').addEventListener('click', () => mapView.toggle());
+  const hereEl = document.getElementById('hud-here');
+  live = createLive({
+    version: data.generated,
+    getName: () => { try { return localStorage.getItem('faiz-live-name') || ''; } catch { return ''; } },
+    onCount: (n) => { hereEl.hidden = !n; hereEl.textContent = `${n} here`; },
+    onAnnounce: (kind, m) => {
+      // Only people in your room are announced, to keep screen readers quiet.
+      if (roomAt(map, m.x, m.y) !== roomAt(map, world.player.x, world.player.y)) return;
+      captionEl.setAttribute('aria-live', 'polite');
+      note(`${m.name || 'someone'} ${kind === 'join' ? 'joined' : 'left'}`, 2000);
+    },
+    onRejected: () => note('try another name'),
+  });
   if (debug) debugEl.hidden = false;
 
   // A hidden list of every photo, so screen readers have a way in.
@@ -282,7 +308,7 @@ async function boot() {
 
   // Test hook for the e2e scripts.
   window.__ascii = { map, world, stats, viewer, teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
-    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, get renderer() { return renderer.name; } };
+    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, get renderer() { return renderer.name; } };
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 

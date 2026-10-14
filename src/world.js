@@ -287,8 +287,9 @@ function stepVisitors(world, dt) {
   const { map, player } = world;
   for (const v of world.visitors) {
     // Step aside when you walk into someone.
-    if (near(v, player, 0.9)) {
-      const dx = v.x - player.x, dy = (v.y - player.y) * CELL_ASPECT, d = Math.hypot(dx, dy) || 1;
+    const bump = [player, ...(world.others || [])].find((o) => near(v, o, 0.9));
+    if (bump) {
+      const dx = v.x - bump.x, dy = (v.y - bump.y) * CELL_ASPECT, d = Math.hypot(dx, dy) || 1;
       const mx = (dx / d) * 3 * dt, my = (dy / d) * 3 * dt / CELL_ASPECT;
       if (!blocked(map, v.x + mx, v.y)) v.x += mx;
       if (!blocked(map, v.x, v.y + my)) v.y += my;
@@ -305,7 +306,7 @@ function stepVisitors(world, dt) {
     if (d <= s) { v.x = wp.x; v.y = wp.y; v.path.shift(); continue; }
     const nx = v.x + (dx / d) * s, ny = v.y + (dy / d) * s / CELL_ASPECT;
     const ahead = { x: nx + (dx / d) * 0.4, y: ny + (dy / d) * 0.4 / CELL_ASPECT };
-    const blocker = [player, ...world.visitors.filter((o) => o !== v)].some((o) => near(ahead, o, 0.8));
+    const blocker = [player, ...(world.others || []), ...world.visitors.filter((o) => o !== v)].some((o) => near(ahead, o, 0.8));
     if (blocker) {
       v.stuck += dt;
       if (v.stuck > 1) { v.stuck = 0; v.path = null; v.wait = 0.2 + v.r() * 0.5; }

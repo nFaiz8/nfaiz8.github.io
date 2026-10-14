@@ -104,6 +104,7 @@ export function createMap(map, { onGo, onOpen, onClose }) {
     onClose && onClose();
   }
   let current = 0;
+  const dots = [];
 
   close.addEventListener('click', hide);
   root.addEventListener('click', (e) => { if (e.target === root) hide(); });
@@ -125,11 +126,17 @@ export function createMap(map, { onGo, onOpen, onClose }) {
     toggle: () => (open ? hide() : show()),
     get isOpen() { return open; },
     // Keep the "you are here" marker on the player; called from the main loop.
-    sync(player, roomIndex) {
+    sync(player, roomIndex, others = []) {
       current = roomIndex;
       if (!open) return;
       you.style.left = `${(player.x / map.W) * 100}%`;
       you.style.top = `${(player.y / map.H) * 100}%`;
+      while (dots.length < others.length) { const d = document.createElement('span'); d.className = 'map-peer'; d.textContent = '@'; d.setAttribute('aria-hidden', 'true'); plan.append(d); dots.push(d); }
+      dots.forEach((d, i) => {
+        const o = others[i];
+        d.hidden = !o;
+        if (o) { d.style.left = `${(o.x / map.W) * 100}%`; d.style.top = `${(o.y / map.H) * 100}%`; }
+      });
       buttons.forEach((b, i) => b.classList.toggle('here', i === roomIndex));
       items.forEach((b, i) => b.classList.toggle('here', i === roomIndex));
     },

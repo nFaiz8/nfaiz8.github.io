@@ -143,3 +143,12 @@ test('standing at the lobby kiosk is noticed; walking away is too', () => {
   step(w, 1 / 60, { x: 0, y: 0 });
   assert.equal(w.atKiosk, false);
 });
+
+test('fake visitors step aside for real people too', () => {
+  const w = createWorld(map);
+  const v = w.visitors[0];
+  w.others = [{ x: v.x + 0.3, y: v.y }];
+  const before = v.x;
+  for (let i = 0; i < 30; i++) step(w, 1 / 60, { x: 0, y: 0 });
+  assert.ok(Math.abs(v.x - before) > 0.2, `moved ${v.x - before}`);
+});

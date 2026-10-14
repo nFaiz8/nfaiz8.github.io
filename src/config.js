@@ -5,3 +5,6 @@ export const SITE = {
   about: '', // optional line under the name in the lobby; empty shows nothing
 };
 
+
+// Real visitors seeing each other (server/ is the Cloudflare Worker). An empty url turns it off.
+export const MULTIPLAYER = { enabled: true, url: '' };
