@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import fs from 'node:fs';
-import { parseLevel, levelHash } from '../../src/level.js';
+import { parseLevel, levelHash, levelKind } from '../../src/level.js';
+import { newBody, stepBody, DOUBLE_V, AIR_JUMPS } from '../../src/arena.js';
 import { muzzleOf } from '../../src/fight.js';
 
 const PORT = 8797;
@@ -497,5 +498,41 @@ test('a flood of states from a popped fighter closes the socket', async () => {
   await b.next('k', 2000);
   for (let k = 0; k < 120; k++) at(b, 30.5, 27.5);
   assert.equal(await Promise.race([b.closed, sleepMs(3000).then(() => 'still open')]), 1008);
+  a.close(); b.close();
+});
+
+// The double jump (headshots and double jump addendum §2): the movement clamp still lets it through.
+test('an honest full jump plus a double jump is passed on exactly as sent, never clamped', async () => {
+  assert.equal(DOUBLE_V, 34);
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 60.5, 27.5]], [b]);
+  await sleepMs(300);
+  // A full jump, then the air jump at its top, held: states every 4 steps of 1/60 s, as the page's ticker.
+  const kinds = levelKind(LV), body = newBody(60.5, 27.5), states = [];
+  for (let i = 0; i < 12; i++) stepBody(body, 1 / 60, {}, kinds);
+  for (let k = 0; k <= 84; k++) {
+    const ms = (k * 1000) / 60;
+    const jump = ms < 300 || (ms >= 320 && ms < 700);
+    stepBody(body, 1 / 60, { jump }, kinds);
+    if (k % 4 === 0) states.push({ ms, x: +body.x.toFixed(2), y: +body.y.toFixed(2), vx: 0, vy: +body.vy.toFixed(1), f: 1, g: body.onGround ? 1 : 0, i: jump ? 4 : 0, a: 0, air: body.airJumps });
+  }
+  assert.ok(states.some((s) => s.air < AIR_JUMPS) && Math.min(...states.map((s) => s.vy)) <= -30, 'the air jump was taken');
+  const top = Math.min(...states.map((s) => s.y));
+  assert.ok(27.5 - top > 9, `it rose ${27.5 - top} rows`);
+  const start = Date.now(), base = start - a.t0;
+  for (const s of states) {
+    const wait = start + s.ms - Date.now();
+    if (wait > 0) await sleepMs(wait);
+    const { ms, air, ...m } = s;
+    a.send2({ t: 'a', ...m, ts: Math.round(base + ms) });
+  }
+  await sleepMs(300);
+  const seen = b.inbox.filter((m) => m.t === 'a' && m.id === a.id);
+  assert.equal(seen.length, states.length, `${seen.length} of ${states.length} passed on`);
+  for (const s of states) {
+    const m = seen.find((q) => q.ts === Math.round(base + s.ms));
+    assert.ok(m && m.x === s.x && m.y === s.y && m.vy === s.vy, `at ${s.ms.toFixed(0)} ms: sent ${s.y}, seen ${m && m.y}`);
+  }
   a.close(); b.close();
 });

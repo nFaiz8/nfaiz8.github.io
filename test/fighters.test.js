@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseLevel, levelKind } from '../src/level.js';
-import { newBody, stepBody } from '../src/arena.js';
+import { newBody, stepBody, AIR_JUMPS, JUMP_V } from '../src/arena.js';
 import { createFighters } from '../src/fighters.js';
+import { arenaTicker } from '../src/live.js';
 
 const L = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
 const kinds = levelKind(L);
@@ -334,4 +335,121 @@ test('a hurt fighter from aw keeps its hp and regenerates from it', () => {
   one(F, 0, { hp: 40 });
   assert.equal(F.list(0)[0].state.hp, 40);
   assert.equal(F.list(1000)[0].state.hp, 60);
+});
+
+// The double jump (headshots and double jump addendum §2). The sender as the page runs it: this frame's
+// input, then the step, then the ticker (urgent on an input-bit or ground change, 30 ms apart at least),
+// so a state already carries the jump its bit started. At the times in `forced` a state goes out ahead of
+// the step instead, as pvp.js forces one out ahead of a shot, and stands in for the ticker's next urgent send.
+function sender(start, script, { frames = 150, forced = [] } = {}) {
+  const b = newBody(start.x, start.y);
+  for (let i = 0; i < 12; i++) stepBody(b, 1 / 60, {}, kinds);
+  const T = [], sends = [];
+  let ahead = null;
+  const tick = arenaTicker((m) => {
+    const f = ahead;
+    ahead = null;
+    if (f && m.ts - f.ts < 30 && m.i === f.i && m.g === f.g) return true;
+    sends.push(m);
+    return true;
+  });
+  for (let k = 0; k <= frames; k++) {
+    const ms = (k * 1000) / 60, inp = script(ms);
+    const snap = () => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, f: 1, g: b.onGround ? 1 : 0, i: bits(inp), a: 0, ts: Math.round(ms) });
+    if (forced.some((t) => Math.abs(t - ms) < 1)) { ahead = { t: 'a', ...snap() }; sends.push(ahead); }
+    stepBody(b, 1 / 60, inp, kinds);
+    tick(snap(), ms);
+    T.push({ ms, x: b.x, y: b.y, vy: b.vy, g: b.onGround, flipT: b.t - b.airJumpT, airJumps: b.airJumps });
+  }
+  return { T, sends };
+}
+// Played back 50 ms late at 60 fps: what is shown each frame, and the fighter's state then.
+function watch({ T, sends }, start, late = 50) {
+  const F = createFighters({ kindAt: kinds, rtt: () => 2 * late });
+  F.apply({ t: 'aw', fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: start.x, y: start.y, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 }] }, 0);
+  const shown = [];
+  let q = 0;
+  for (let k = 0; k <= T.length - 1; k++) {
+    const ms = (k * 1000) / 60;
+    F.step(1 / 60, ms);
+    while (q < sends.length && sends[q].ts + late <= ms + 1e-6) F.apply({ id: 'b', ...sends[q++] }, ms);
+    const st = F.list(ms)[0].state;
+    shown.push({ ms, x: st.x, y: st.y, flipT: st.flipT, airJumps: F.get('b').body.airJumps, vy: F.get('b').body.vy });
+  }
+  return shown;
+}
+const press = (on) => (ms) => ({ jump: on.some(([a, b]) => ms >= a && ms < b) });
+
+test('a remote double jump is predicted from the bit edges: the ground jump is not taken for it, the air jump is, and it peaks where it really did', () => {
+  const start = { x: 60.5, y: 27.5 };
+  // Jump, let go while rising, the air jump just after the top, let go while rising again, then a third press (nothing).
+  const run = sender(start, press([[200, 350], [450, 600], [700, 760]]));
+  const { T } = run, shown = watch(run, start);
+  const airAt = T.find((s) => s.airJumps === 0).ms; // the sender's air jump
+  assert.ok(Math.abs(airAt - 450) < 20, `the sender's air jump at ${airAt}`);
+  // Until the state with the air jump's bit arrives, no flip; after it, the flip's clock is the sender's,
+  // late by no more than the ticker's 30 ms gap.
+  const known = run.sends.find((m) => m.ts >= airAt - 1).ts + 50;
+  for (const s of shown) {
+    const tr = T[Math.round(s.ms / (1000 / 60))];
+    if (s.ms + 1e-6 < known) assert.equal(s.flipT, Infinity, `no flip yet at ${s.ms.toFixed(0)} ms`);
+    else if (tr.airJumps === 0) assert.ok(s.flipT <= tr.flipT + 1e-9 && s.flipT >= tr.flipT - 0.035, `flipT ${s.flipT} vs ${tr.flipT} at ${s.ms.toFixed(0)} ms`);
+  }
+  // Close to the truth once each change has been known for 150 ms, and the same peaks.
+  const changes = [200, 350, 450, 600, 700, 760];
+  for (const s of shown) {
+    const tr = T[Math.round(s.ms / (1000 / 60))];
+    if (changes.some((c) => s.ms >= c && s.ms < c + 50 + 150)) continue;
+    assert.ok(Math.hypot(s.x - tr.x, s.y - tr.y) <= 0.3, `at ${s.ms.toFixed(0)} ms: ${Math.hypot(s.x - tr.x, s.y - tr.y).toFixed(3)} off`);
+  }
+  const peak = (a, from, to) => Math.min(...a.filter((s) => s.ms >= from && s.ms < to).map((s) => s.y));
+  const truePeak = peak(T, 450, 1000), shownPeak = peak(shown, 450, 1100);
+  assert.ok(truePeak < peak(T, 0, 450) - 3, 'the air jump went higher');
+  assert.ok(Math.abs(truePeak - shownPeak) <= 0.3, `peak ${shownPeak} vs ${truePeak}`);
+});
+
+test('a remote air jump whose state went out ahead of its step (ahead of a shot) is predicted too', () => {
+  const start = { x: 60.5, y: 27.5 };
+  const run = sender(start, press([[200, 350], [450, 600]]), { forced: [450] });
+  assert.ok(run.sends.some((m) => m.ts === 450 && m.i === 4 && m.vy > 0), 'the forced state: the bit on, still falling');
+  const { T } = run, shown = watch(run, start);
+  const peak = (a, from, to) => Math.min(...a.filter((s) => s.ms >= from && s.ms < to).map((s) => s.y));
+  assert.ok(Math.abs(peak(T, 450, 1000) - peak(shown, 450, 1100)) <= 0.3, `peak ${peak(shown, 450, 1100)} vs ${peak(T, 450, 1000)}`);
+  assert.ok(shown.some((s) => s.flipT < 0.36), 'the flip shows');
+});
+
+test('a remote jump just after running off a ledge (coyote time) is the ground jump, not the air jump', () => {
+  const start = { x: 76.5, y: 22.5 }; // on the ═ at row 24, cols 66–78
+  // Run right off the edge, and jump 50 ms after leaving it.
+  const go = (left) => sender(start, (ms) => ({ x: 1, jump: left != null && ms >= left + 50 && ms < left + 300 }), { frames: 60 });
+  const left = go(null).T.find((s) => !s.g).ms;
+  const again = go(left);
+  const shown = watch(again, start);
+  assert.ok(Math.min(...again.T.map((s) => s.vy)) < -JUMP_V + 3, 'the sender took the ground jump');
+  assert.equal(again.T.at(-1).airJumps, AIR_JUMPS);
+  assert.ok(shown.every((s) => s.flipT === Infinity), 'no flip');
+  assert.equal(shown.at(-1).airJumps, AIR_JUMPS, 'the air jump is still there');
+  // Once the jump's state is in, the predicted body moves as the sender's did (an air jump would be ~4 rows/s slower).
+  const jumpAt = again.T.findIndex((s) => s.vy < -20) * (1000 / 60);
+  const known = again.sends.find((m) => m.ts >= jumpAt - 1).ts + 50;
+  const k = shown.findIndex((s) => s.ms + 1e-6 >= known);
+  assert.ok(Math.abs(shown[k].vy - again.T[k].vy) < 0.2, `the predicted take-off (${shown[k].vy} vs ${again.T[k].vy})`);
+});
+
+test('a let-go is in the state already: the remote body does not cut the jump a second time', () => {
+  const F = createFighters({ kindAt: kinds, rtt: () => 0 });
+  one(F, 0, { y: 20.5, vy: -30, g: 0, i: 4 });
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 20.5, vx: 0, vy: -30, f: 1, g: 0, i: 4, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 20, vx: 0, vy: -15, f: 1, g: 0, i: 0, a: 0, ts: 30 }, 30);
+  assert.equal(F.get('b').body.vy, -15);
+  F.step(1 / 60, 46);
+  assert.ok(Math.abs(F.get('b').body.vy - (-15 + 133 / 60)) < 1e-9, `${F.get('b').body.vy}`);
+});
+
+test('flipT: Infinity before any air jump and after a respawn', () => {
+  const F = createFighters({ kindAt: kinds });
+  one(F, 0);
+  assert.equal(F.list(0)[0].state.flipT, Infinity);
+  F.apply({ t: 'sp', id: 'b', x: 20.5, y: 27.5 }, 100);
+  assert.equal(F.list(100)[0].state.flipT, Infinity);
 });

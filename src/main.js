@@ -475,7 +475,7 @@ const memory = {
 // fight: my state from pvp.js, when I'm in the fight.
 function myBody(now, fight = null) {
   const p = world.player;
-  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, act: 'idle', gun: 'deagle' };
+  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, flipT: p.t - p.airJumpT, act: 'idle', gun: 'deagle' };
   // A pinned pose is drawn as pinned: unprotected unless `safe` is pinned too.
   const state = posePin ? { ...own, safe: false, ...posePin } : { ...own };
   const emoting = mine.emote && now - mine.emoteAt < MY_EMOTE_MS;

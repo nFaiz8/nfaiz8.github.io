@@ -11,9 +11,12 @@ export const SPRINT = 1.5;
 export const JUMP_V = 40; // rows/s at take-off: with GRAVITY that is ~6 rows up, ~0.6 s in the air
 export const GRAVITY = 133;
 export const MAX_FALL = 60;
+export const AIR_JUMPS = 1; // jumps in the air per airtime, refilled on touching the ground
+export const DOUBLE_V = 34; // rows/s: the air jump's take-off, ~4.3 rows more height
 const ACCEL = 0.07; // seconds to reach about 63% of the target speed (as walking)
 const AIR_CONTROL = 0.6;
-const COYOTE = 0.1, BUFFER = 0.1, DROP = 0.25;
+export const COYOTE = 0.1; // seconds after leaving the ground that a jump is still the ground jump
+const BUFFER = 0.1, DROP = 0.25;
 export const BODY = { w: 0.8, h: 3 }; // cells across, rows down
 const HW = 0.4, HH = 1.5; // half width (cells), half height (rows); the feet are at y + 1.5
 export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
@@ -22,7 +25,7 @@ const NONE = {};
 const EPS = 1e-6;
 
 export function newBody(x, y) {
-  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0 };
+  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity };
 }
 
 export const rolling = (b) => b.rollT >= 0;
@@ -74,8 +77,8 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     b.prevJump = heldJump;
     b.sinceGround = b.onGround ? 0 : b.sinceGround + dt;
   } else {
-    const jump = !!input.jump;
-    if (jump && !b.prevJump) b.sinceJump = 0; else b.sinceJump += dt;
+    const jump = !!input.jump, press = jump && !b.prevJump;
+    if (press) b.sinceJump = 0; else b.sinceJump += dt;
     // Letting go while rising cuts the jump short.
     if (!jump && b.prevJump && b.vy < 0 && !b.cut) { b.vy *= 0.5; b.cut = true; }
     b.prevJump = jump;
@@ -89,6 +92,16 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
       b.sinceJump = b.sinceGround = Infinity;
       b.onGround = false;
       if (b.rollT >= 0) endRoll(b); // a jump out of a roll keeps its speed
+    } else if (press && !b.onGround && b.rollT < 0 && b.airJumps > 0) {
+      // The air jump: no ground jump to be had, so a fresh press takes it. It replaces vy (it can stop a
+      // fall), can be cut short again, and a held direction turns the speed that way at once.
+      b.airJumps--;
+      b.airJumpT = b.t;
+      b.vy = -DOUBLE_V;
+      b.cut = false;
+      b.sinceJump = Infinity; // the press is spent: no jump from it on landing
+      const dir = Math.sign(input.x || 0);
+      if (dir) b.vx = dir * Math.max(Math.abs(b.vx), RUN * (input.run ? SPRINT : 1));
     }
   }
 
@@ -108,6 +121,7 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
   b.vy = Math.min(MAX_FALL, b.vy + GRAVITY * dt);
   const my = ((vy0 + b.vy) / 2) * dt; // exact for constant gravity
   move(b, mx, my, kinds);
+  if (b.onGround) b.airJumps = AIR_JUMPS; // the floor, a platform or a ▓ top
   // The roll ends after its time, or when it runs off a ledge (keeping its speed).
   if (b.rollT >= 0 && (b.rollT >= ROLL.time - 1e-9 || !b.onGround)) endRoll(b);
 }

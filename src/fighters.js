@@ -2,7 +2,7 @@
 // own physics with that person's last input, so they run, jump in arcs and land exactly as they do on
 // their own screen. A new state is run forward to the present; the difference from where they were
 // drawn glides out over ~80 ms, or snaps when it is large. Pure: no DOM, no clocks; times in ms.
-import { newBody, stepBody, knock, rolling, ROLL } from './arena.js';
+import { newBody, stepBody, knock, rolling, ROLL, AIR_JUMPS, COYOTE } from './arena.js';
 import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME, REGEN_AFTER } from './fight.js';
 
 const SILENT = 300; // ms since the last state was sent before their input counts as released
@@ -62,12 +62,26 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       if (F.ts != null && m.ts <= F.ts) return; // overtaken by a newer state on the way
       F.ts = m.ts;
     }
-    const b = newBody(m.x + offset.x, m.y + offset.y);
+    const old = F.body, b = newBody(m.x + offset.x, m.y + offset.y);
     b.vx = num(m.vx) ? m.vx : 0;
     b.vy = num(m.vy) ? m.vy : 0;
     b.onGround = !!m.g;
     // Jump held since the last state is no new press; jump that came on with this state is the take-off.
-    b.prevJump = !!((F.body ? F.bits : i) & 4);
+    b.prevJump = !!((old ? F.bits : i) & 4);
+    // The air jump: the count, how long ago it was last taken and how long since the ground (as of when
+    // this state was sent) carry on from the body as predicted; touching the ground refills the count.
+    if (old) {
+      b.airJumps = old.airJumps;
+      b.airJumpT = old.airJumpT - old.t + age / 1000;
+      if (!b.onGround) b.sinceGround = Math.max(0, (old.onGround ? 0 : old.sinceGround) - age / 1000);
+    }
+    if (b.onGround) b.airJumps = AIR_JUMPS;
+    // A jump that came on with this state in the air, within coyote time of the ground, was the ground
+    // jump: its vy is in the state already, so it isn't taken again, and never for the air jump. Further
+    // from the ground the press is the air jump, and stepBody takes it below as the sender did.
+    if (i & 4 && !b.prevJump && !b.onGround && b.sinceGround <= COYOTE) b.prevJump = true;
+    // A let-go is in the state's vy already: not cut again.
+    b.cut = !(i & 4);
     const facing = m.f < 0 ? -1 : 1;
     // A roll (bit 32): its time so far is counted on the sender's clock from the state where bit 32 came
     // on, so running each state forward by its age never counts that age twice or restarts the roll.
@@ -179,7 +193,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       const b = F.body, { act, actT } = actOf(F, now);
       const hp = F.alive ? regenHp(F.hp, F.hurtAt / 1000, now / 1000) : 0;
       out.push({ id: F.id, kills: F.kills, alive: F.alive, state: {
-        x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround,
+        x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround, flipT: b.t - b.airJumpT,
         aim: F.aim, act, actT, hp, safe: now < F.safeUntil, gun: F.gun, aimed: F.aimTo !== 0, // the smoothed aim only nears 0
       } });
     }

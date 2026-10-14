@@ -47,6 +47,14 @@ const HURT = pose({ hx: -0.25, hy: 1.15, lean: -0.35, hdx: -0.15, hdy: 0.05, bx:
 // tucks down past the neck, the knees come up to the chest and the hands hold the shins.
 const TUCK = pose({ hx: -0.7, hy: 2.1, lean: 0.76, st: -0.4, hdx: 0.12, hdy: 0.85, bx: 0.1, by: 0.25, fx: 0.22, fy: 0.2, lbx: -0.2, lby: 2.65, lfx: -0.05, lfy: 2.6, ga: 0 });
 const PIVOT_Y = 1.6; // the ball's centre, so it rolls on the floor (rig addendum said a row above the feet)
+// The double jump's flip (headshots and double jump addendum §2): tucked round the body centre, the knees
+// up to the chest and the hands on the shins. Its lean is the air pose's own, so the torso turns only with
+// the rig. FLIP: how long the whole flip lasts, the tuck's way in, the untuck at its end, and with Reduce
+// Motion the tuck's length (no turn). PUFF2: the two ~ of the air jump: how long, how far they spread.
+const FLIP_TUCK = pose({ hx: -0.1, hy: 1.05, st: -0.4, hdx: 0.15, hdy: 0.25, bx: 0.4, by: 0.3, fx: 0.55, fy: 0.25, lbx: 0.15, lby: 1.25, lfx: 0.3, lfy: 1.2, ga: 0.5 });
+const FLIP = { time: 0.36, in: 0.05, out: 0.08, rm: 0.2, rmIn: 0.04, rmOut: 0.06 };
+const PUFF2 = { time: 0.15, r0: 0.5, r1: 2 };
+const G_ROWS = 133; // arena.js's GRAVITY (rows/s²), which stick.js may not import: the puff stays where the jump was
 
 // Timings and sizes (stickman spec §4 "Animation timing", rig addendum §4).
 const BREATH_PERIOD = 2.4, BREATH_U = 0.12;
@@ -78,8 +86,8 @@ const frac = (v) => v - Math.floor(v);
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const smooth = (v) => { const k = clamp01(v); return k * k * (3 - 2 * k); };
 
-// Scratch poses, reused: L is locomotion, A an act's target, P what is drawn.
-const L = pose({}), A = pose({}), P = pose({});
+// Scratch poses, reused: L is locomotion, A an act's target, P what is drawn, Q the flip's target.
+const L = pose({}), A = pose({}), P = pose({}), Q = pose({});
 function copy(dst, src) { for (const k of FIELDS) dst[k] = src[k]; }
 // Blend pose a into b by k (0..1), into dst; upper: only the upper body. The hands swing on arcs about the
 // shoulder and the feet about the hip, so a hand passing the shoulder never flips the arm.
@@ -226,15 +234,15 @@ function solve(p) {
   J.kfx = jx; J.kfy = jy; J.afx = tx; J.afy = ty;
 }
 
-// Turn the whole solved rig by phi about (0, PIVOT_Y): the roll.
+// Turn the whole solved rig by phi about (0, py): the roll (about its pivot), the flip (about the centre).
 const XS = ['hx', 'nx', 'ox', 'sx', 'ebx', 'wbx', 'efx', 'wfx', 'kbx', 'abx', 'kfx', 'afx'];
 const YS = ['hy', 'ny', 'oy', 'sy', 'eby', 'wby', 'efy', 'wfy', 'kby', 'aby', 'kfy', 'afy'];
-function turn(phi) {
+function turn(phi, py = PIVOT_Y) {
   const c = Math.cos(phi), s = Math.sin(phi);
   for (let i = 0; i < XS.length; i++) {
-    const x = J[XS[i]], y = J[YS[i]] - PIVOT_Y;
+    const x = J[XS[i]], y = J[YS[i]] - py;
     J[XS[i]] = x * c - y * s;
-    J[YS[i]] = x * s + y * c + PIVOT_Y;
+    J[YS[i]] = x * s + y * c + py;
   }
 }
 
@@ -427,8 +435,25 @@ function drawPose(st, t, opts, out) {
   }
 
   const phi = act(name, actT, s.ground);
-  solve(P);
   const rolling = ACT_RIG[name] && ACT_RIG[name].turns > 0 && actT < ACT_RIG[name].end;
+  // The flip, while flipT is short of its end; a kick, a hurt or a roll takes over from it.
+  const flipT = st.flipT >= 0 ? st.flipT : Infinity;
+  const over = (name === 'kick' || name === 'hurt' || name === 'roll') && actT < ACT_RIG[name].end;
+  const flipping = !over && flipT < (rm ? FLIP.rm : FLIP.time);
+  let spin = 0, ga = P.ga, handX = 0, handY = 0;
+  if (flipping) {
+    // Aimed, the hand and gun stay where they'd be without the flip: the hand as solved now.
+    if (aimed) { solve(P); handX = J.wfx; handY = J.wfy; }
+    const w = rm ? weight(flipT, FLIP.rmIn, FLIP.rm - FLIP.rmOut, FLIP.rm) : weight(flipT, FLIP.in, FLIP.time - FLIP.out, FLIP.time);
+    copy(Q, FLIP_TUCK);
+    Q.lean = P.lean;
+    copy(A, P);
+    mixInto(P, A, Q, w);
+    // One forward turn, eased out; none with Reduce Motion.
+    if (!rm) { const k = flipT / FLIP.time; spin = 2 * Math.PI * (1 - (1 - k) * (1 - k)); }
+    ga = aimed ? ga : P.ga + spin;
+  }
+  solve(P);
   let tone = 'body';
   if (name === 'hurt' && actT < HURT_FLASH && !rm) tone = 'flash';
 
@@ -437,17 +462,37 @@ function drawPose(st, t, opts, out) {
     figure(out, f, tone, sa);
     // The puff where the roll started: behind the body by the distance rolled.
     if (!rm && ACT_RIG[name].puff && actT < PUFF_T) put(out, f, '~', -actT * PUFF_V, 2, 'fx', 'fx', 1, 0, 1, false);
-    return out;
+    return airPuff(out, f, s, flipT, rm);
   }
 
+  if (flipping) {
+    turn(spin, 0);
+    // Aimed: the front arm reaches from the turning shoulder to the hand where it would be.
+    if (aimed) {
+      ik(J.sx, J.sy, handX, handY, RIG.upperArm, RIG.foreArm, 1);
+      J.efx = jx; J.efy = jy; J.wfx = tx; J.wfy = ty;
+    }
+  }
   figure(out, f, tone, sa);
-  gunAt(out, f, gun, P.ga, tone, sa);
+  gunAt(out, f, gun, ga, tone, sa);
   if (shooting && actT < FLASH_T) put(out, f, '*', tx, ty, 'fx', 'fx', 1, 0, 1, false);
   // The whoosh: 0.05 s at the end of a strike, just past the fist or the foot.
   if (actT >= WHOOSH_T0 && actT < WHOOSH_T1 && (name === 'punch' || name === 'kick')) {
     const ex = name === 'punch' ? J.wfx : J.afx, ey = name === 'punch' ? J.wfy : J.afy;
     put(out, f, f < 0 ? '(' : ')', ex + WHOOSH_D, ey, 'fx', 'fx', 1, 0, 1, false);
   }
+  return airPuff(out, f, s, flipT, rm);
+}
+
+// The air jump's puff: two ~ spreading sideways from the feet where the jump was, fading. The body has
+// moved on since by its speed and gravity, so the jump point is worked back from vx and vy.
+function airPuff(out, f, s, flipT, rm) {
+  if (rm || !(flipT < PUFF2.time)) return out;
+  const t = flipT, k = t / PUFF2.time;
+  const x = -s.vx * t, y = 2 * ((G_ROWS * t * t) / 2 - s.vy * t) + FEET;
+  const r = PUFF2.r0 + (PUFF2.r1 - PUFF2.r0) * (1 - (1 - k) * (1 - k));
+  put(out, f, '~', f * x - r, y, 'fx', 'fx', 1 - k, 0, 1, false);
+  put(out, f, '~', f * x + r, y, 'fx', 'fx', 1 - k, 0, 1, false);
   return out;
 }
 

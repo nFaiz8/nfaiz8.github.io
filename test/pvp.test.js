@@ -527,3 +527,17 @@ test('offline: shooting the dummy from mid-jump hits its head row: 50 damage, -5
   assert.equal(white, '-50!');
   assert.ok(shook);
 });
+
+test('my state carries flipT: Infinity until my air jump, then the seconds since it', () => {
+  const s = setup();
+  s.frames(15);
+  const me = () => s.pvp.bodies(s.now).find((b) => b.me).state;
+  assert.equal(me().flipT, Infinity);
+  s.frames(6, { jump: true });
+  s.frames(6);
+  assert.equal(me().flipT, Infinity, 'a ground jump is no flip');
+  s.frames(1, { jump: true });
+  assert.ok(Math.abs(me().flipT) < 1e-9, `${me().flipT}`);
+  s.frames(6, { jump: true });
+  assert.ok(Math.abs(me().flipT - 0.1) < 1e-6, `${me().flipT}`);
+});

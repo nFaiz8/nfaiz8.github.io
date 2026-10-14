@@ -82,7 +82,7 @@ test('parseLevel: ═ is a platform, ▓ is solid, anything else is air, and sho
   assert.equal(L.cells[33 * 160 + 159], AIR);
 });
 
-import { newBody, stepBody, sideCamera, coverCrop, knock, startRoll, BODY, ROLL } from '../src/arena.js';
+import { newBody, stepBody, sideCamera, coverCrop, knock, startRoll, BODY, ROLL, RUN, SPRINT, JUMP_V, GRAVITY, DOUBLE_V, AIR_JUMPS } from '../src/arena.js';
 
 // A small test room, 40 × 20: floor below row 19, walls left and right, a platform at row 15 (cols 10–19, 5 rows up),
 // a solid block at rows 16–19 (cols 30–33) and a low ▓ ceiling at row 15 (cols 0–5).
@@ -159,28 +159,30 @@ test('nothing tunnels at 20 fps', () => {
   assert.ok(r.x < 30, 'sprinting at 20 fps still stops at the block');
 });
 
-test('coyote time: a jump just after running off a ledge still works, a late one does not', () => {
+test('coyote time: a jump just after running off a ledge is the ground jump; a late one is the air jump', () => {
   const offEdge = (lateFrames) => {
     const b = newBody(17.5, 13.5);
     sim(b, 0.1);
-    let left = -1, frame = 0, jumped = false, landed = false;
+    let left = -1, frame = 0, landed = false, vy = 0;
     sim(b, 1, () => ({ ...IDLE, x: 1, jump: left >= 0 && frame - left >= lateFrames }), 1 / 60, (s) => {
       frame++;
       if (left < 0 && !s.onGround) left = frame;
       if (left >= 0 && s.onGround) landed = true; // a press held into the landing is the jump buffer's, not coyote time's
-      if (!landed && s.vy < -20) jumped = true;
+      if (!landed) vy = Math.min(vy, s.vy);
     });
-    return jumped;
+    return vy;
   };
-  assert.equal(offEdge(3), true, '0.05 s late');
-  assert.equal(offEdge(10), false, '0.17 s late');
+  assert.ok(offEdge(3) < -JUMP_V + 3, `0.05 s late: the ground jump (${offEdge(3)})`);
+  const late = offEdge(10);
+  assert.ok(late > -DOUBLE_V && late < -DOUBLE_V + 3, `0.17 s late: the air jump (${late})`);
 });
 
-test('jump buffer: pressing just before landing jumps on landing; too early does nothing', () => {
+test('jump buffer, the air jump spent: pressing just before landing jumps on landing; too early does nothing', () => {
   const land = () => { const b = newBody(7.5, 8.5); let f = 0; while (!b.onGround) { stepBody(b, 1 / 60, IDLE, kindAt); f++; } return f; };
   const L = land();
   const pressAt = (early) => {
     const b = newBody(7.5, 8.5);
+    b.airJumps = 0; // spent: a press in the air can only be buffered
     let f = 0, top = 99;
     sim(b, 1.5, () => ({ ...IDLE, jump: f >= L - early && f < L + 1 }), 1 / 60, (s) => { f++; if (f > L) top = Math.min(top, s.y); });
     return 18.5 - top;
@@ -396,6 +398,161 @@ test('a knock ends a roll', () => {
   startRoll(b, 1);
   knock(b, -10, 0, 0.1);
   assert.equal(b.rollT, -1);
+});
+
+// The double jump (headshots and double jump addendum §2).
+const J = { ...IDLE, jump: true };
+// Stand (holding `held`), jump for `frames` steps, let go, and carry on until vy reaches `at` (rows/s, + down).
+function airborne(at = 0, held = {}, frames = 1, x = 7.5) {
+  const b = newBody(x, 18.5);
+  sim(b, 0.2, { ...IDLE, ...held });
+  for (let i = 0; i < frames; i++) stepBody(b, 1 / 60, { ...IDLE, ...held, jump: true }, kindAt);
+  do stepBody(b, 1 / 60, { ...IDLE, ...held }, kindAt); while (b.vy < at && !b.onGround);
+  assert.equal(b.onGround, false, 'still in the air');
+  return b;
+}
+
+test('the double jump: AIR_JUMPS is 1 and DOUBLE_V 34; a fresh body has its air jump and none taken yet', () => {
+  assert.equal(AIR_JUMPS, 1);
+  assert.equal(DOUBLE_V, 34);
+  const b = newBody(7.5, 18.5);
+  assert.equal(b.airJumps, AIR_JUMPS);
+  assert.equal(b.airJumpT, -Infinity);
+});
+
+test('one air jump after a ground jump, none more until landing; airJumpT is the body time it was taken', () => {
+  const b = airborne();
+  stepBody(b, 1 / 60, J, kindAt);
+  assert.ok(Math.abs(b.vy - (-DOUBLE_V + GRAVITY / 60)) < 1e-9, `vy ${b.vy}`);
+  assert.equal(b.airJumps, 0);
+  assert.equal(b.airJumpT, b.t);
+  const t = b.t;
+  sim(b, 0.05);
+  const vy = b.vy;
+  stepBody(b, 1 / 60, J, kindAt); // a third press
+  assert.ok(Math.abs(b.vy - (vy + GRAVITY / 60)) < 1e-9, 'no second air jump');
+  assert.equal(b.airJumpT, t);
+  sim(b, 2);
+  assert.equal(b.onGround, true);
+  assert.equal(b.airJumps, AIR_JUMPS, 'refilled on landing');
+  stepBody(b, 1 / 60, IDLE, kindAt);
+  stepBody(b, 1 / 60, J, kindAt);
+  assert.ok(b.vy < -JUMP_V + 3, 'the next press on the ground is a ground jump');
+  assert.equal(b.airJumps, AIR_JUMPS, 'and leaves the air jump');
+});
+
+test('the air jump is about 4.3 rows more height, taken at the top of a full jump', () => {
+  const peak = (double) => {
+    const b = newBody(7.5, 18.5);
+    sim(b, 0.2);
+    let top = b.y;
+    sim(b, 1.6, (t) => ({ ...IDLE, jump: t < 0.32 || (double && t >= 0.34 && t < 0.8) }), 1 / 60, (s) => { top = Math.min(top, s.y); });
+    return 18.5 - top;
+  };
+  const one = peak(false), two = peak(true);
+  assert.ok(Math.abs(two - one - 4.35) < 0.4, `${one.toFixed(2)} then ${two.toFixed(2)}`);
+});
+
+test('running off a ledge gives one air jump', () => {
+  const b = newBody(17.5, 13.5); // on the platform at row 15, cols 10–19
+  sim(b, 0.1);
+  while (b.onGround) stepBody(b, 1 / 60, { ...IDLE, x: 1 }, kindAt);
+  sim(b, 0.2, { ...IDLE, x: 1 }); // past coyote time
+  assert.ok(b.vy > 0, 'falling');
+  stepBody(b, 1 / 60, { ...IDLE, x: 1, jump: true }, kindAt);
+  assert.ok(Math.abs(b.vy - (-DOUBLE_V + GRAVITY / 60)) < 1e-9, `vy ${b.vy}`);
+  assert.equal(b.airJumps, 0);
+  sim(b, 0.05, { ...IDLE, x: 1 });
+  const vy = b.vy;
+  stepBody(b, 1 / 60, { ...IDLE, x: 1, jump: true }, kindAt);
+  assert.ok(Math.abs(b.vy - vy - GRAVITY / 60) < 1e-9, 'only one');
+});
+
+test('the air jump replaces any vy, even a fall, and resets the cut: letting go early still shortens it', () => {
+  const b = airborne(20, {}, 3); // a short jump (already cut), now falling
+  assert.equal(b.cut, true);
+  stepBody(b, 1 / 60, J, kindAt);
+  assert.ok(Math.abs(b.vy - (-DOUBLE_V + GRAVITY / 60)) < 1e-9, `arrested the fall (${b.vy})`);
+  assert.equal(b.cut, false);
+  const rising = b.vy;
+  stepBody(b, 1 / 60, IDLE, kindAt);
+  assert.ok(Math.abs(b.vy - (rising * 0.5 + GRAVITY / 60)) < 1e-9, `let go: cut (${b.vy})`);
+  assert.equal(b.cut, true);
+});
+
+test('the air jump redirects: a held direction reverses or keeps the speed at once (sprint too); no direction keeps vx', () => {
+  // Running right, then the air jump holding left: vx is −RUN at once.
+  const run = { ...IDLE, x: 1 };
+  const r = airborne(-5, run);
+  assert.ok(r.vx > 20, `running right (${r.vx})`);
+  stepBody(r, 1 / 60, { ...IDLE, x: -1, jump: true }, kindAt);
+  assert.ok(Math.abs(r.vx + RUN) < 1e-9, `reversed (${r.vx})`);
+  const s = airborne(-5, run);
+  stepBody(s, 1 / 60, { ...IDLE, x: -1, run: true, jump: true }, kindAt);
+  assert.ok(s.vx < -RUN * SPRINT + 1 && s.vx >= -RUN * SPRINT - 1e-9, `sprinting the other way (${s.vx})`);
+  // Faster than a run (a sprint) the same way: kept, then steered as usual.
+  const f = airborne(-5, { ...run, run: true });
+  const twinF = airborne(-5, { ...run, run: true });
+  stepBody(f, 1 / 60, { ...IDLE, x: 1, jump: true }, kindAt);
+  stepBody(twinF, 1 / 60, { ...IDLE, x: 1 }, kindAt);
+  assert.ok(Math.abs(f.vx - twinF.vx) < 1e-9, `kept (${f.vx} vs ${twinF.vx})`);
+  // No direction: vx is whatever it would have been without the jump.
+  const n = airborne(-5, run), twin = airborne(-5, run);
+  stepBody(n, 1 / 60, J, kindAt);
+  stepBody(twin, 1 / 60, IDLE, kindAt);
+  assert.equal(n.vx, twin.vx);
+  assert.ok(n.vy < -20 && twin.vy > -20, 'only one of them jumped');
+});
+
+test('a roll\'s long jump is airborne: its air jump is still there, and keeps the roll\'s speed', () => {
+  const b = newBody(5.5, 18.5), twin = newBody(5.5, 18.5);
+  for (const x of [b, twin]) {
+    sim(x, 0.2);
+    stepBody(x, 1 / 60, { ...IDLE, roll: 1 }, kindAt);
+    sim(x, 0.1);
+    stepBody(x, 1 / 60, J, kindAt); // the long jump out of the roll
+    assert.equal(x.airJumps, AIR_JUMPS);
+    sim(x, 0.1);
+  }
+  stepBody(b, 1 / 60, J, kindAt);
+  stepBody(twin, 1 / 60, IDLE, kindAt);
+  assert.equal(b.airJumps, 0);
+  assert.ok(b.vy < -30);
+  assert.equal(b.vx, twin.vx);
+});
+
+test('no air jump while stunned; once the stun is over a fresh press takes it', () => {
+  const b = airborne(-10, {}, 12);
+  knock(b, 5, 0, 0.1, true);
+  const vy = b.vy;
+  stepBody(b, 1 / 60, J, kindAt);
+  assert.ok(Math.abs(b.vy - vy - GRAVITY / 60) < 1e-9, 'stunned: no jump');
+  assert.equal(b.airJumps, AIR_JUMPS);
+  sim(b, 0.1, J); // held through the stun's end: not a fresh press
+  assert.equal(b.airJumps, AIR_JUMPS);
+  stepBody(b, 1 / 60, IDLE, kindAt);
+  stepBody(b, 1 / 60, J, kindAt);
+  assert.equal(b.airJumps, 0, 'a fresh press after it');
+});
+
+test('touching the ground refills the air jump: the floor, a platform top and a ▓ top', () => {
+  const land = (x, y) => {
+    const b = newBody(x, y);
+    b.airJumps = 0;
+    sim(b, 2);
+    assert.equal(b.onGround, true);
+    return b.airJumps;
+  };
+  assert.equal(land(7.5, 3.5), AIR_JUMPS, 'the floor');
+  assert.equal(land(14.5, 3.5), AIR_JUMPS, 'a platform');
+  assert.equal(land(31.5, 3.5), AIR_JUMPS, 'a ▓ top');
+  // A rolling body is on the ground: its press is a ground jump.
+  const r = newBody(5.5, 18.5);
+  sim(r, 0.2);
+  stepBody(r, 1 / 60, { ...IDLE, roll: 1 }, kindAt);
+  stepBody(r, 1 / 60, J, kindAt);
+  assert.ok(r.vy < -JUMP_V + 3);
+  assert.equal(r.airJumps, AIR_JUMPS);
 });
 
 test('the side camera leads, clamps to the room, and keeps the floor in view', () => {

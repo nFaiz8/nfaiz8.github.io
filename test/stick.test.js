@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { stickPose, SHOULDER, MUZZLE_R, GUN_ART, HAND_R, RIG, createMotionMemory } from '../src/stick.js';
 import { muzzleOf } from '../src/fight.js';
+import { GRAVITY, DOUBLE_V } from '../src/arena.js';
 
 // The rig (docs/specs/2026-10-14-arena-stickman-rig.md). Work in screen units u: 1 u = a cell width, a row = 2 u.
 const base = { x: 10, y: 20, vx: 0, vy: 0, facing: 1, ground: true, aim: 0, act: 'idle', actT: 0, gun: 'deagle', landT: Infinity, spawnT: Infinity };
@@ -57,6 +58,12 @@ for (let actT = 0; actT < 0.3; actT += 0.01) SAMPLES.push([{ act: 'punch', actT 
 for (let actT = 0; actT < 0.45; actT += 0.01) SAMPLES.push([{ act: 'kick', actT }], [{ act: 'kick', actT, ground: false, vy: 5 }]);
 for (let actT = 0; actT < 0.4; actT += 0.01) SAMPLES.push([{ act: 'hurt', actT }], [{ act: 'hurt', actT, ground: false, vy: -20 }]);
 for (let actT = 0; actT < 0.35; actT += 0.01) SAMPLES.push([{ act: 'roll', actT }]);
+// The double jump's flip, carried and aimed, shooting, rising and falling, and yielding to a kick or a hurt.
+for (let flipT = 0; flipT < 0.4; flipT += 0.01) {
+  SAMPLES.push([{ ground: false, vy: -30 + 100 * flipT, flipT }], [{ ground: false, vy: -20, flipT, gun: 'sniper', vx: 30 }]);
+  SAMPLES.push([{ ground: false, vy: -20, flipT, act: 'shoot', actT: flipT / 2, aim: -0.6, gun: 'rifle' }], [{ ground: false, vy: 5, flipT, aimed: true, aim: 1.2 }]);
+  SAMPLES.push([{ ground: false, vy: -20, flipT, act: 'kick', actT: flipT }], [{ ground: false, vy: -20, flipT, act: 'hurt', actT: flipT / 3 }]);
+}
 const label = ([s, t]) => `${JSON.stringify(s)} t=${t || 0}`;
 
 test('purity: same input, same output; state untouched; no Math.random; out is appended to and returned', () => {
@@ -199,7 +206,8 @@ test('shoot: the flash only for actT < 0.06, at MUZZLE_R less the recoil; the re
 test('mirroring: facing left is facing right with x negated, rot negated and the gun flipped', () => {
   const states = [{}, { vx: 30, x: 14 }, { act: 'shoot', actT: 0.03, aim: -0.5, gun: 'rifle' }, { ground: false, vy: -20 }, { aimed: true, aim: 0.7, gun: 'sniper' },
     { act: 'punch', actT: 0.08 }, { act: 'kick', actT: 0.1, ground: false, vy: 20 }, { act: 'hurt', actT: 0.05 }, { act: 'roll', actT: 0.12 },
-    { act: 'dead', actT: 0.04 }, { act: 'dead', actT: 0.5 }, { act: 'dead', actT: 1.6 }, { spawnT: 0.2 }, { spawnT: 0.4 }, { safe: true, vx: 30, x: 14 }];
+    { act: 'dead', actT: 0.04 }, { act: 'dead', actT: 0.5 }, { act: 'dead', actT: 1.6 }, { spawnT: 0.2 }, { spawnT: 0.4 }, { safe: true, vx: 30, x: 14 },
+    { ground: false, vy: -20, flipT: 0.05, vx: 30, x: 14 }, { ground: false, vy: -10, flipT: 0.2, act: 'shoot', actT: 0.03, aim: -0.4, gun: 'rifle' }];
   const n = (v) => +v.toFixed(9) + 0;
   for (const s of states) {
     const r = pose({ ...s, facing: 1 }, 0.7), l = pose({ ...s, facing: -1, vx: -(s.vx || 0), x: s.x ? -s.x : 10 }, 0.7);
@@ -235,10 +243,13 @@ test('continuity: run, landing and every act sampled every 1 ms never jump a spr
     runs.push([`${act[0]} in the air`, act[1], (ms) => ({ act: act[0], actT: ms / 1000, ground: false, vy: -20 + 0.1 * ms })]);
   }
   runs.push(['respawn', 500, (ms) => ({ spawnT: ms / 1000 })]);
-  for (const [name, n, at] of runs) {
-    let prev = pose(at(0), 0);
+  runs.push(['flip', 450, (ms) => ({ ground: false, vy: -DOUBLE_V + GRAVITY * ms / 1000, flipT: ms / 1000 })]);
+  runs.push(['flip shooting', 450, (ms) => ({ ground: false, vy: -20, flipT: ms / 1000, act: 'shoot', actT: 0.2, aim: 0.5, gun: 'sniper' })]);
+  runs.push(['flip, Reduce Motion', 450, (ms) => ({ ground: false, vy: -20, flipT: ms / 1000 }), { reducedMotion: true }]);
+  for (const [name, n, at, o = {}] of runs) {
+    let prev = pose(at(0), 0, o);
     for (let ms = 1; ms <= n; ms++) {
-      const cur = pose(at(ms), ms / 1000);
+      const cur = pose(at(ms), ms / 1000, o);
       if (ms > 1) assert.ok(jump(prev, cur) <= 0.35, `${name}: a jump of ${jump(prev, cur).toFixed(3)} u at ${ms} ms`);
       prev = cur;
     }
@@ -434,4 +445,124 @@ test('the shared constants keep their values', () => {
   assert.deepEqual(MUZZLE_R, { deagle: 2.8, rifle: 4.8, sniper: 6.8 });
   assert.deepEqual(GUN_ART, { deagle: { glyphs: '╦═', hand: 0 }, rifle: { glyphs: '═╦╤══', hand: 1 }, sniper: { glyphs: '═╦═°═══', hand: 1 } });
   assert.deepEqual([RIG.torso, RIG.upperArm, RIG.foreArm, RIG.thigh, RIG.shin], [2, 0.95, 0.95, 1, 1]);
+});
+
+// The double jump's flip (headshots and double jump addendum §2 "Animation").
+const FLIP = 0.36;
+const air = { ground: false, vy: -20 };
+// The torso's direction, hip to neck, clockwise from upright (in u).
+function torsoDir(g) {
+  const k = skeleton(g, 'flip'), h = k.legF.root, [a, b] = k.torso, n = dist(a, h) < dist(b, h) ? b : a;
+  return Math.atan2(n.x - h.x, -(n.y - h.y));
+}
+
+test('flip: the whole rig turns once forward, monotonically, eased 1 − (1 − k)², about the body centre', () => {
+  let turned = 0, prev = torsoDir(pose({ ...air, flipT: 0 }));
+  const at = new Map();
+  for (let ms = 1; ms <= FLIP * 1000; ms++) {
+    const d = torsoDir(pose({ ...air, flipT: ms / 1000 }));
+    const step = ((d - prev + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+    assert.ok(step >= -1e-9, `turning back at ${ms} ms (${step})`);
+    turned += step;
+    at.set(ms, turned);
+    prev = d;
+  }
+  assert.ok(Math.abs(turned - 2 * Math.PI) < 1e-6, `turned ${turned}`);
+  for (const ms of [90, 180, 270]) {
+    const k = ms / 1000 / FLIP;
+    assert.ok(Math.abs(at.get(ms) - 2 * Math.PI * (1 - (1 - k) ** 2)) < 1e-6, `eased at ${ms} ms: ${at.get(ms)}`);
+  }
+  // Facing left it turns the other way (forward is left).
+  const l1 = torsoDir(pose({ ...air, facing: -1, flipT: 0.05 })), l0 = torsoDir(pose({ ...air, facing: -1, flipT: 0 }));
+  assert.ok(l1 < l0, 'counter-clockwise facing left');
+  // About the body centre: tucked mid-flip, the figure stays around it.
+  for (const flipT of [0.1, 0.15, 0.2, 0.25]) {
+    const g = pose({ ...air, flipT }).filter((x) => x.part !== 'fx' && x.part !== 'gun');
+    const cx = g.reduce((s, x) => s + x.dx, 0) / g.length, cy = g.reduce((s, x) => s + 2 * x.dy, 0) / g.length;
+    assert.ok(Math.hypot(cx, cy) < 0.8, `centred at ${flipT}: ${cx.toFixed(2)}, ${cy.toFixed(2)}`);
+    assert.ok(g.every((x) => Math.hypot(x.dx, 2 * x.dy) < 2), `tucked at ${flipT}`);
+  }
+});
+
+test('flip: tucked (knees to the chest, hands to the shins), untucked into the air pose by 0.36 s', () => {
+  const k = skeleton(pose({ ...air, flipT: 0.03 + 0.1 }), 'tuck');
+  // Measured in the rig's own frame: the turn moves everything alike, so compare distances.
+  const hip = k.legF.root;
+  for (const leg of ['legB', 'legF']) assert.ok(dist(k[leg].joint, k.armF.root) < 1, `${leg}: the knee at the chest (${dist(k[leg].joint, k.armF.root).toFixed(2)})`);
+  for (const arm of ['armB', 'armF']) {
+    const shin = { x: (k.legF.joint.x + k.legF.tip.x) / 2, y: (k.legF.joint.y + k.legF.tip.y) / 2 };
+    assert.ok(dist(k[arm].tip, shin) < 0.5, `${arm}: the hand at the shin (${dist(k[arm].tip, shin).toFixed(2)})`);
+  }
+  assert.ok(dist(k.legF.tip, hip) < 1, 'the feet pulled up');
+  // From 0.36 s on (and with no flip) it is the air pose; at 0.30 s it is untucking and still turning.
+  for (const flipT of [FLIP, 0.5, Infinity, undefined, NaN, -1]) assert.deepEqual(pose({ ...air, flipT }), pose(air), `flipT ${flipT}`);
+  const late = pose({ ...air, flipT: 0.3 });
+  assert.notDeepEqual(late.filter((x) => x.part !== 'fx'), pose(air));
+});
+
+test('flip: a shot or an aim draws the gun arm aimed as usual over the spinning body; the gun spins with it otherwise', () => {
+  for (const gun of ['deagle', 'rifle', 'sniper']) for (const aim of [-1.2, -0.5, 0, 0.6, 1.4]) for (const facing of [1, -1]) {
+    const shot = { ...air, facing, act: 'shoot', actT: 0.1, aim, gun };
+    const usual = part(pose(shot), 'gun');
+    for (const flipT of [0.02, 0.1, 0.2, 0.3]) {
+      const g = pose({ ...shot, flipT }), drawn = part(g, 'gun');
+      assert.equal(drawn.map((x) => x.ch).join(''), GUN_ART[gun].glyphs);
+      // The gun lies along the aim, as usual (the arm reaches it from the turning shoulder; at most a little short).
+      for (let i = 0; i < drawn.length; i++) assert.ok(Math.abs(drawn[i].rot - usual[i].rot) < 1e-9 && drawn[i].flip === usual[i].flip);
+      const off = dist(at(drawn[0]), at(usual[0]));
+      assert.ok(off < 0.1, `${gun} aim ${aim} facing ${facing} at ${flipT}: ${off.toFixed(3)} u off`);
+      // The body itself is turned.
+      assert.ok(Math.abs(torsoDir(g) - torsoDir(pose(shot))) > 0.1 || flipT === 0.3 || flipT === 0.02, `turned at ${flipT}`);
+    }
+  }
+  // Mostly exactly as usual: level, at the top of the flip.
+  const level = { ...air, act: 'shoot', actT: 0.1, aim: 0, gun: 'rifle' };
+  assert.ok(dist(at(part(pose({ ...level, flipT: 0.18 }), 'gun')[0]), at(part(pose(level), 'gun')[0])) < 1e-9);
+  // Carried, the gun turns with the hand.
+  const carried = part(pose({ ...air, flipT: 0.18 }), 'gun');
+  assert.ok(carried.length === 2 && carried.every((x) => Math.abs(x.rot - CARRY) > 0.5), 'turned with the body');
+});
+
+test('flip: it yields to a kick, a hurt, the roll and death; it goes on through a punch', () => {
+  const body = (g) => g.filter((x) => x.part !== 'fx');
+  for (const [act, actT] of [['kick', 0.1], ['hurt', 0.1], ['roll', 0.1]]) assert.deepEqual(body(pose({ ...air, flipT: 0.1, act, actT })), body(pose({ ...air, act, actT })), act);
+  assert.deepEqual(pose({ ...air, flipT: 0.1, act: 'dead', actT: 0.5 }), pose({ ...air, act: 'dead', actT: 0.5 }));
+  // A kick or a hurt that has ended gives the flip back.
+  assert.notDeepEqual(body(pose({ ...air, flipT: 0.1, act: 'hurt', actT: 0.36 })), body(pose(air)));
+  assert.notDeepEqual(body(pose({ ...air, flipT: 0.1, act: 'punch', actT: 0.1 })), body(pose({ ...air, act: 'punch', actT: 0.1 })));
+});
+
+test('flip, Reduce Motion: a tuck for 0.2 s, no turn, no puff', () => {
+  const rm = { reducedMotion: true };
+  for (const flipT of [0, 0.05, 0.1, 0.15, 0.19]) {
+    const g = pose({ ...air, flipT }, 0, rm);
+    assert.ok(Math.abs(torsoDir(g) - torsoDir(pose(air, 0, rm))) < 1e-9, `no turn at ${flipT}`);
+    assert.equal(part(g, 'fx').length, 0);
+  }
+  const k = skeleton(pose({ ...air, flipT: 0.1 }, 0, rm), 'rm tuck'), still = skeleton(pose(air, 0, rm), 'rm air');
+  for (const leg of ['legB', 'legF']) assert.ok(dist(k[leg].tip, k[leg].root) < 0.7, `${leg} tucked (${dist(k[leg].tip, k[leg].root).toFixed(2)})`);
+  assert.ok(dist(still.legB.tip, still.legB.root) > 1.5, 'and not without the flip');
+  for (const flipT of [0.2, 0.3]) assert.deepEqual(pose({ ...air, flipT }, 0, rm), pose(air, 0, rm));
+});
+
+test('flip: the puff, two ~ in fx spreading sideways from the feet at the jump point, fading over 0.15 s', () => {
+  const vx = 20, x0 = 50, y0 = 20;
+  // A body after its air jump: it moves on, the puff stays where it began (in the world).
+  const st = (t) => ({ ground: false, x: x0 + vx * t, y: y0 - DOUBLE_V * t + (GRAVITY * t * t) / 2, vx, vy: -DOUBLE_V + GRAVITY * t, flipT: t });
+  let gap = 0;
+  for (const t of [0, 0.03, 0.07, 0.12, 0.149]) {
+    const s = st(t), puff = part(stickPose({ ...base, ...s }, t), 'fx');
+    assert.equal(puff.length, 2, `two at ${t}`);
+    assert.ok(puff.every((p) => p.ch === '~' && p.tone === 'fx' && p.rot === 0), 'tilde in fx');
+    const mx = s.x + (puff[0].dx + puff[1].dx) / 2, my = s.y + puff[0].dy;
+    assert.ok(Math.abs(mx - x0) < 1e-9 && Math.abs(my - (y0 + 1.45)) < 1e-9, `at the feet of the jump point at ${t}: ${mx}, ${my}`);
+    assert.equal(puff[0].dy, puff[1].dy);
+    const g = Math.abs(puff[1].dx - puff[0].dx);
+    assert.ok(g > gap, 'spreading');
+    gap = g;
+    assert.ok(Math.abs(puff[0].a - (1 - t / 0.15)) < 1e-9 && puff[1].a === puff[0].a, `fading at ${t}`);
+  }
+  assert.equal(part(stickPose({ ...base, ...st(0.15) }, 0.15), 'fx').length, 0);
+  // It stays with the jump through a kick.
+  assert.equal(part(pose({ ...air, flipT: 0.05, act: 'kick', actT: 0.2 }), 'fx').filter((g) => g.ch === '~').length, 2);
 });

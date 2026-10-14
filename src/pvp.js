@@ -336,7 +336,7 @@ export function createPvp({
     const t = sec(now), p = world.player, out = [];
     const a = actNow(act, now, me.alive, deadAt, p);
     out.push({ id: me.id, me: true, dummy: false, kills, color: colorOf(me.id), state: {
-      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, aim, act: a.act, actT: a.actT,
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, flipT: p.t - p.airJumpT, aim, act: a.act, actT: a.actT,
       hp: me.alive ? regenHp(me.hp, me.hurtAt, t) : 0, safe: me.alive && t < me.safeUntil, combo: me.combo, gun: me.gun, aimed,
     } });
     for (const f of fighters.list(now)) out.push({ id: f.id, me: false, dummy: false, kills: f.kills, color: colorOf(f.id), state: f.state });

@@ -237,6 +237,45 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(800);
     assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - spot.y) < 0.01, 'back on the floor');
   });
+  await check('arena: a double jump (Space, then Space again in the air) reaches higher than a single jump', async () => {
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    // A spot on the long ═ with 15 clear rows above it, so neither jump meets anything.
+    const spot = await page.evaluate(() => {
+      const a = window.__ascii.map.arena, L = a.level, r = L.rows - 5;
+      for (let c = 2; c < L.cols - 2; c++) {
+        const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] === 1);
+        const clear = [...Array(15)].every((_, k) => [-1, 0, 1].every((d) => !L.cells[(r - 1 - k) * L.cols + c + d]));
+        if (run && clear) return { x: a.x + 1 + c + 0.5, y: a.y + 1 + r - 1.5 };
+      }
+      return null;
+    });
+    assert.ok(spot, 'a spot with room to jump');
+    const rise = async (double) => {
+      await page.evaluate((s) => window.__ascii.teleport(s.x, s.y), spot);
+      await sleep(400);
+      const y0 = await page.evaluate(() => window.__ascii.world.player.y);
+      // Every frame for 1.6 s: the highest the body gets, and whether it took an air jump (flipT, as drawn, near 0).
+      const seen = page.evaluate(() => new Promise((resolve) => {
+        const p = window.__ascii.world.player, t0 = performance.now(), was = p.airJumpT;
+        let top = Infinity, flip = false;
+        const tick = () => {
+          top = Math.min(top, p.y);
+          if (p.airJumpT !== was && p.t - p.airJumpT < 0.05) flip = true;
+          if (performance.now() - t0 < 1600) requestAnimationFrame(tick); else resolve({ top, flip });
+        };
+        requestAnimationFrame(tick);
+      }));
+      await page.keyboard.down('Space'); await sleep(300); await page.keyboard.up('Space');
+      if (double) { await sleep(40); await page.keyboard.down('Space'); await sleep(300); await page.keyboard.up('Space'); }
+      const r = await seen;
+      return { up: y0 - r.top, flip: r.flip };
+    };
+    const one = await rise(false), two = await rise(true);
+    console.log(`  single jump ${one.up.toFixed(2)} rows, double jump ${two.up.toFixed(2)} rows`);
+    assert.ok(one.up > 5 && one.up < 7 && !one.flip, `a single jump: ${one.up} rows, no air jump`);
+    assert.ok(two.up > one.up + 3, `the double jump went ${two.up} rows`);
+    assert.ok(two.flip, 'the air jump was taken');
+  });
   for (const r of ['canvas', 'gl']) {
     await check(`${r}: the arena photo fills the back wall in the side view, with bright platforms`, async () => {
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
@@ -550,6 +589,8 @@ await withBrowser(async ({ page, url, errors }) => {
     ['dead 0.3', { act: 'dead', actT: 0.3 }], ['dead 1.5', { act: 'dead', actT: 1.5 }], ['respawn 0.2', { act: 'idle', spawnT: 0.2 }],
     // The rig (rig addendum): a carried rifle at the chest, a landing squat, a kick's wind-up, the roll's tumble.
     ['rifle', { gun: 'rifle' }], ['land', { landT: 0.03 }], ['kick 0.03', { act: 'kick', actT: 0.03 }], ['roll 0.12', { act: 'roll', actT: 0.12 }],
+    // The double jump's flip (headshots and double jump addendum §2): tucked mid-turn with its puff, and shooting over it.
+    ['flip 0.1', { ground: false, vy: -20, flipT: 0.1 }], ['flip 0.2 shoot', { ground: false, vy: -5, flipT: 0.2, act: 'shoot', actT: 0.1, aim: -0.4 }],
   ];
   const isAmber = (R, G, B) => R >= 120 && G >= 0.68 * R && G <= 0.92 * R && B >= 0.25 * R && B <= 0.6 * R;
   const isWhite = (R, G, B) => Math.min(R, G, B) >= 225;
