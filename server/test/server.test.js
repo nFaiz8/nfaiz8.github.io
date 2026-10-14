@@ -136,3 +136,16 @@ test('oversized messages close the connection; floods are cut off', async () => 
   for (let i = 0; i < 80; i++) b.send2({ t: 'e', e: 'heart' });
   assert.equal(await b.closed, 1008);
 });
+
+test('where someone said hi from is where others first see them', async () => {
+  const r = room();
+  const a = client({ room: r }); await a.opened;
+  a.send2({ t: 'hi', name: 'Ann', x: 40.5, y: 12.5 }); await a.next('welcome');
+  const b = client({ room: r }); await b.opened;
+  b.send2({ t: 'hi', name: 'Bo', x: 7, y: 8 });
+  const wb = await b.next('welcome');
+  assert.deepEqual(wb.peers.map((p) => [p.x, p.y]), [[40.5, 12.5]]);
+  const j = await a.next('join');
+  assert.deepEqual([j.x, j.y], [7, 8]);
+  a.close(); b.close();
+});

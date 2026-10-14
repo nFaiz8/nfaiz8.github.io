@@ -3,7 +3,7 @@
 export const EMOTE_GLYPH = { heart: '♥', bang: '!', ask: '?', star: '★', wave: '~o/' };
 export const EMOTES_ORDER = ['heart', 'bang', 'ask', 'star', 'wave'];
 
-export function createPeers({ delay = 150, fade = 3000, emoteFor = 2500, heartFor = 2000 } = {}) {
+export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFor = 2000 } = {}) {
   const peers = new Map(); // id → { id, name, track: [{t,x,y}], left: number|null, emote, emoteAt, dx, dy }
   let hearts = []; // { f, at }
   const api = {
@@ -47,6 +47,8 @@ export function createPeers({ delay = 150, fade = 3000, emoteFor = 2500, heartFo
     get: (id) => peers.get(id) || null,
     count: () => [...peers.values()].filter((p) => p.left == null).length,
     clear() { peers.clear(); hearts = []; },
+    // The connection is gone: everyone fades out; the next welcome rebuilds the list.
+    dropAll(now) { for (const p of peers.values()) if (p.left == null) p.left = now; },
   };
   function add(p, now) {
     peers.set(p.id, { id: p.id, name: p.name || '', track: [{ t: now, x: p.x, y: p.y }], left: null, emote: null, emoteAt: 0, dx: 0, dy: 1 });

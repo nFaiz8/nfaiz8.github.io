@@ -16,14 +16,14 @@ test('welcome and join add people; leave fades them out over 3 s', () => {
   assert.equal(ann(4100), undefined, 'gone after the fade');
 });
 
-test('movement is drawn 150 ms behind, interpolating between updates', () => {
+test('movement is drawn 250 ms behind, interpolating between updates', () => {
   const ps = createPeers();
   ps.apply({ t: 'join', id: 'a', name: '', x: 0, y: 0 }, 0);
   ps.apply({ t: 'p', id: 'a', x: 10, y: 0 }, 200);
   ps.apply({ t: 'p', id: 'a', x: 20, y: 0 }, 400);
   const at = (t) => ps.list(t)[0].x;
-  assert.equal(at(350), 10, '350 - 150 = 200: exactly the second update');
-  assert.equal(at(450), 15, 'halfway between 200 and 400');
+  assert.equal(at(450), 10, '450 - 250 = 200: exactly the second update');
+  assert.equal(at(550), 15, 'halfway between 200 and 400');
   assert.equal(at(5000), 20, 'holds the last position');
 });
 
@@ -58,4 +58,26 @@ test('follow aims about 2 cells behind, on a walkable cell', () => {
   const c = followCell(null, { x: 10.5, y: 5.5, dx: 1, dy: 0 }, wallBehind);
   assert.ok(c && wallBehind(c.x, c.y) && Math.hypot(c.x - 10, c.y - 5) <= 2.5);
   assert.equal(followCell(null, { x: 10.5, y: 5.5, dx: 1, dy: 0 }, () => false), null);
+});
+
+test('losing the connection fades everyone out', () => {
+  const ps = createPeers();
+  ps.apply({ t: 'welcome', id: 'me', peers: [{ id: 'a', name: '', x: 0, y: 0 }, { id: 'b', name: '', x: 1, y: 1 }] }, 0);
+  ps.dropAll(1000);
+  assert.equal(ps.count(), 0);
+  assert.ok(ps.list(2500).every((p) => Math.abs(p.alpha - 0.5) < 0.01));
+  assert.deepEqual(ps.list(4100), []);
+});
+
+test('with positions arriving every 200 ms, a walking peer never stands still between updates', () => {
+  const ps = createPeers();
+  ps.apply({ t: 'join', id: 'a', name: '', x: 0, y: 0 }, 0);
+  let next = 200, prev = -1;
+  for (let now = 0; now <= 2000; now += 16) {
+    while (next <= now) { ps.apply({ t: 'p', id: 'a', x: next / 100, y: 0 }, next); next += 200; }
+    if (now < 600) continue;
+    const x = ps.list(now)[0].x;
+    assert.ok(x > prev, `held at ${x} at ${now} ms`);
+    prev = x;
+  }
 });

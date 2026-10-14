@@ -70,3 +70,9 @@ test('more than 50 dropped messages in 10 s closes the connection', () => {
   for (let i = 0; i < 50; i++) dropped(g, 0);
   assert.equal(dropped(g, 10001), false, 'a new window starts after 10 s');
 });
+
+test('hi may carry where I am standing, so I appear in the right place before I move', () => {
+  assert.deepEqual(parseMessage('{"t":"hi","name":"Sam","x":12.34,"y":5}'), { t: 'hi', name: 'Sam', x: 12.3, y: 5 });
+  assert.equal(parseMessage('{"t":"hi","name":"Sam","x":-1,"y":5}'), null);
+  assert.equal(parseMessage('{"t":"hi","name":"Sam","x":3}'), null, 'both or neither');
+});

@@ -35,9 +35,22 @@ try {
       assert.equal((await peersOf(a))[0].name, 'Bo');
       assert.equal(await a.$eval('#hud-here', (e) => e.textContent), '1 here');
     });
+    await check('someone standing still is seen where they really are', async () => {
+      const bAt = await b.evaluate(() => ({ x: window.__ascii.world.player.x, y: window.__ascii.world.player.y }));
+      const seen = (await peersOf(a))[0];
+      assert.ok(Math.hypot(seen.x - bAt.x, seen.y - bAt.y) < 0.5, `seen at ${seen.x},${seen.y}, really ${bAt.x},${bAt.y}`);
+    });
+    await check('stepping to a photo without walking (a teleport) is seen on the other page', async () => {
+      const to = await b.evaluate(() => { const f = window.__ascii.map.frames.at(-1); window.__ascii.teleport(f.stand.x + 0.5, f.stand.y + 0.5); return { x: f.stand.x + 0.5, y: f.stand.y + 0.5 }; });
+      await sleep(1000);
+      const seen = (await peersOf(a))[0];
+      assert.ok(Math.hypot(seen.x - to.x, seen.y - to.y) < 0.5, `seen at ${seen.x},${seen.y}, really ${to.x},${to.y}`);
+    });
     await check('walking on one page moves the @ on the other', async () => {
       await b.evaluate(() => { const r = window.__ascii.map.rooms[1]; window.__ascii.walkTo(r.entry.x, r.entry.y); });
-      await sleep(2500);
+      await sleep(300);
+      await b.waitForFunction(() => !window.__ascii.world.player.moving, { timeout: 20000 });
+      await sleep(800);
       const bAt = await b.evaluate(() => ({ x: window.__ascii.world.player.x, y: window.__ascii.world.player.y }));
       const seen = (await peersOf(a))[0];
       assert.ok(Math.hypot(seen.x - bAt.x, seen.y - bAt.y) < 1.5, `seen at ${seen.x},${seen.y}, really ${bAt.x},${bAt.y}`);
@@ -65,6 +78,31 @@ try {
       await a.keyboard.press('Enter');
       await b.waitForFunction(() => window.__ascii.live().peers.list(performance.now())[0]?.name === '5gmh', { timeout: 3000 });
     });
+    await check('on a phone: one-row HUD, popovers below it and one at a time, no zoom on the name field, caption lets taps through', async () => {
+      await a.setViewport({ width: 375, height: 700, deviceScaleFactor: 1 });
+      await sleep(300);
+      const hud = await a.$eval('.hud', (e) => e.getBoundingClientRect().bottom);
+      for (const id of ['emote-btn', 'name-btn', 'map-btn', 'renderer-btn']) {
+        const h = await a.$eval(`#${id}`, (e) => e.getBoundingClientRect().height);
+        assert.ok(h < 34, `#${id} is ${h}px tall (wrapped)`);
+      }
+      await a.click('#emote-btn');
+      const barTop = await a.$eval('#emote-bar', (e) => e.getBoundingClientRect().top);
+      assert.ok(barTop >= hud, `emote bar at ${barTop} under HUD bottom ${hud}`);
+      await a.click('#name-btn');
+      assert.equal(await a.$eval('#emote-bar', (e) => e.hidden), true, 'emote bar still open under the name form');
+      const form = await a.$eval('#name-form', (e) => e.getBoundingClientRect().top);
+      assert.ok(form >= hud, `name form at ${form} under HUD bottom ${hud}`);
+      assert.ok(await a.$eval('#name-input', (e) => parseFloat(getComputedStyle(e).fontSize)) >= 16, 'iOS zooms inputs under 16px');
+      await a.click('#name-btn');
+      assert.equal(await a.$eval('#name-form', (e) => e.hidden), true, '[N] closes the form again');
+      const fid = await a.evaluate(() => { const f = window.__ascii.map.frames[0]; window.__ascii.teleport(f.stand.x + 0.5, f.stand.y + 0.5); return f.id; });
+      await a.waitForFunction((id) => window.__ascii.world.focus?.id === id, {}, fid);
+      assert.equal(await a.$eval('#caption', (e) => getComputedStyle(e).pointerEvents), 'none');
+      assert.equal(await a.$eval('#caption .heart', (e) => getComputedStyle(e).pointerEvents), 'auto');
+      await a.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+      await a.focus('#stage');
+    });
     await check('tapping the other @ follows them', async () => {
       const target = await b.evaluate(() => ({ x: Math.floor(window.__ascii.world.player.x), y: Math.floor(window.__ascii.world.player.y) }));
       await a.evaluate((t) => window.__ascii.teleport(t.x - 6 + 0.5, t.y + 0.5), target);
@@ -81,6 +119,12 @@ try {
       const before = await a.evaluate(() => window.__ascii.world.player.x);
       await a.keyboard.down('ArrowRight'); await sleep(500); await a.keyboard.up('ArrowRight');
       assert.notEqual(await a.evaluate(() => window.__ascii.world.player.x), before);
+    });
+    await check('when the connection is lost the other person fades out and the count goes', async () => {
+      await a.waitForFunction(() => window.__ascii.live().peers.count() === 0, { timeout: 5000 });
+      assert.equal(await a.$eval('#hud-here', (e) => e.hidden), true);
+      await sleep(3200);
+      assert.equal((await peersOf(a)).length, 0, 'still drawn after the fade');
     });
     await other.close();
     await check('no page errors', async () => assert.deepEqual(errors.filter((e) => !/WebSocket/.test(e)), []));

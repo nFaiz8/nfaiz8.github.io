@@ -1,7 +1,7 @@
 // The multiplayer connection: one WebSocket to the current gallery instance. Never throws into the game.
 const MAX_INSTANCE = 10, MAX_DELAY = 60000, POS_EVERY = 200;
 
-export function createNet({ url, version, name, onMessage, onState, WebSocketImpl = globalThis.WebSocket,
+export function createNet({ url, version, name, getPos = () => null, onMessage, onState, WebSocketImpl = globalThis.WebSocket,
   timers = { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (h) => clearTimeout(h) }, now = () => performance.now() }) {
   let ws = null, state = 'idle', instance = 1, delay = 2000, retry = null, paused = false, welcomed = false;
   let myName = name || '';
@@ -18,7 +18,12 @@ export function createNet({ url, version, name, onMessage, onState, WebSocketImp
     try { sock = new WebSocketImpl(`${url}/room/${encodeURIComponent(version)}/${instance}`); } catch { return later(); }
     ws = sock;
     let full = false;
-    sock.onopen = () => { pingAt = now(); raw({ t: 'hi', name: myName }); };
+    sock.onopen = () => {
+      pingAt = now();
+      let p = null;
+      try { p = getPos(); } catch {}
+      raw(p ? { t: 'hi', name: myName, x: p.x, y: p.y } : { t: 'hi', name: myName });
+    };
     sock.onmessage = (e) => {
       let m;
       try { m = JSON.parse(e.data); } catch { return; }
@@ -44,7 +49,10 @@ export function createNet({ url, version, name, onMessage, onState, WebSocketImp
     retry = timers.setTimeout(connect, delay);
     delay = Math.min(MAX_DELAY, delay * 2);
   }
-  function raw(m) { try { ws && ws.readyState === 1 && ws.send(JSON.stringify(m)); } catch {} }
+  function raw(m) {
+    try { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(m)); return true; } } catch {}
+    return false;
+  }
 
   function flushPos() {
     posTimer = null;
@@ -57,13 +65,15 @@ export function createNet({ url, version, name, onMessage, onState, WebSocketImp
   connect();
 
   return {
+    // True when the message went out (or, for a position, is queued behind the throttle).
     send(m) {
-      if (!welcomed) return;
+      if (!welcomed) return false;
       if (m.t !== 'p') return raw(m);
       pendingPos = m;
       const wait = POS_EVERY - (now() - lastPos);
       if (wait <= 0 && !posTimer) flushPos();
       else if (!posTimer) posTimer = timers.setTimeout(flushPos, Math.max(0, wait));
+      return true;
     },
     setName(n) { myName = n; if (welcomed) raw({ t: 'n', name: n }); },
     pause() {

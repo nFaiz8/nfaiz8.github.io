@@ -42,3 +42,19 @@ test('my own emote and heart show at once, at most one emote a second and one he
   assert.ok(echo.entities({ x: 3.5, y: 3.5 }, [{ id: 'p1', x: 1, y: 10, w: 4, h: 3 }], 700, { reducedMotion: true }).some((e) => e.glyph === '♥'));
   assert.equal(echo.emote('wave', 1100), true);
 });
+
+import { positionTicker } from '../src/live.js';
+
+test('my position goes out when it changes, including a teleport while standing still, and is retried if not sent', () => {
+  const out = [];
+  let accept = false;
+  const tick = positionTicker((m) => { if (accept) out.push(m); return accept; });
+  tick({ x: 10.5, y: 4.5 }, false);
+  accept = true;
+  tick({ x: 10.5, y: 4.5 }, false);
+  assert.deepEqual(out, [{ t: 'p', x: 10.5, y: 4.5 }], 'a send that did not go out is retried');
+  tick({ x: 10.5, y: 4.5 }, false);
+  assert.equal(out.length, 1, 'standing still sends nothing');
+  tick({ x: 80.5, y: 30.5 }, false);
+  assert.deepEqual(out.at(-1), { t: 'p', x: 80.5, y: 30.5 }, 'a teleport after stopping is sent');
+});

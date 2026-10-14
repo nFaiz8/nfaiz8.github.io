@@ -52,6 +52,7 @@ export class Gallery extends DurableObject {
       const name = cleanName(m.name);
       if (name === null) ws.send(JSON.stringify({ t: 'name-rejected' }));
       me.name = name || '';
+      if (m.x !== undefined) { me.x = m.x; me.y = m.y; }
       me.here = true;
       ws.serializeAttachment(me);
       const peers = this.others(ws).map((o) => { const a = o.deserializeAttachment(); return { id: a.id, name: a.name, x: a.x, y: a.y }; });

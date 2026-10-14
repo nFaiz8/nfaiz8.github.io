@@ -43,14 +43,30 @@ export function heartEntities(hearts, frames, { reducedMotion } = {}) {
   return out;
 }
 
-export function createLive({ version, url = MULTIPLAYER.url, getName, onAnnounce, onCount, onRejected, onState = () => {} }) {
+// Sends my position whenever it changes (walking, or a jump such as stepping through photos), and keeps
+// trying until a send goes out. The net throttles it to 5 a second and always sends the last one.
+export function positionTicker(send) {
+  let sent = null;
+  return (player) => {
+    const x = Math.round(player.x * 10) / 10, y = Math.round(player.y * 10) / 10;
+    if (sent && sent.x === x && sent.y === y) return;
+    if (send({ t: 'p', x, y })) sent = { x, y };
+  };
+}
+
+export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onState = () => {} }) {
   const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('live');
   const target = local || url;
   if (!MULTIPLAYER.enabled || !target) return null;
   const peers = createPeers();
   let count = 0;
   const net = createNet({
-    url: target, version, name: getName(), onState,
+    url: target, version, name: getName(), getPos,
+    onState: (s) => {
+      // Without a connection nobody is really here any more: fade them out and hide the count.
+      if (s !== 'live' && s !== 'connecting' && peers.count()) { peers.dropAll(performance.now()); onCount(0); }
+      onState(s);
+    },
     onMessage: (m) => {
       const now = performance.now();
       if (m.t === 'name-rejected') return onRejected();
@@ -65,17 +81,11 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, onAnnounce
     if (document.hidden) createLive.hideTimer = setTimeout(() => { net.pause(); peers.clear(); onCount(0); }, 30000);
     else net.resume();
   });
-  let sent = null;
+  const tick = positionTicker((m) => net.send(m));
   return {
     net, peers,
-    // Called every frame: sends my position while moving, plus once more when I stop.
-    tick(player, moving) {
-      const x = Math.round(player.x * 10) / 10, y = Math.round(player.y * 10) / 10;
-      if (sent && sent.x === x && sent.y === y) return;
-      if (!moving && sent && sent.stopped) return;
-      net.send({ t: 'p', x, y });
-      sent = { x, y, stopped: !moving };
-    },
+    // Called every frame.
+    tick: (player) => tick(player),
     emote: (e) => net.send({ t: 'e', e }),
     heart: (f) => net.send({ t: 'r', f }),
     setName: (n) => net.setName(n),

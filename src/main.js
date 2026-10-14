@@ -67,7 +67,10 @@ function setRenderer(name) {
     return setRenderer('canvas');
   }
   resize();
-  rendererBtn.textContent = `[R] ${renderer.name}`;
+  const long = document.createElement('span');
+  long.className = 'long';
+  long.textContent = ` ${renderer.name}`;
+  rendererBtn.replaceChildren('[R]', long);
   try { localStorage.setItem('ascii-renderer', name); } catch {}
 }
 
@@ -103,7 +106,7 @@ function updateCaption() {
     k.className = 'key';
     k.textContent = '[E] open';
     captionEl.append(k);
-    if (f !== 'kiosk') {
+    if (f !== 'kiosk' && live) {
       const h = document.createElement('button');
       h.type = 'button';
       h.className = 'heart';
@@ -170,9 +173,9 @@ function onKey(e) {
     return true;
   }
   const digit = /^Digit([1-5])$/.exec(e.code);
-  if (digit) { sendEmote(EMOTES_ORDER[digit[1] - 1]); return true; }
-  if (e.code === 'KeyH') { sendHeart(world.focus); return true; }
-  if (e.code === 'KeyN') { document.getElementById('name-btn').click(); return true; }
+  if (live && digit) { sendEmote(EMOTES_ORDER[digit[1] - 1]); return true; }
+  if (live && e.code === 'KeyH') { sendHeart(world.focus); return true; }
+  if (live && e.code === 'KeyN') { document.getElementById('name-btn').click(); return true; }
   return false;
 }
 
@@ -228,7 +231,7 @@ function loop(now) {
   world.others = [];
   if (live) {
     const now = performance.now();
-    live.tick(world.player, world.player.moving);
+    live.tick(world.player);
     const list = live.peers.list(now);
     world.others = list.filter((p) => p.alpha === 1);
     if (following) {
@@ -333,27 +336,39 @@ async function boot() {
   });
   document.getElementById('map-btn').addEventListener('click', () => mapView.toggle());
   const emoteBtn = document.getElementById('emote-btn'), emoteBar = document.getElementById('emote-bar');
-  emoteBtn.hidden = false;
+  const nameBtn = document.getElementById('name-btn');
+  // The emote bar and name form open just under the HUD (which is taller on some screens), one at a time.
+  const hudEl = document.querySelector('.hud');
+  const popover = (el, open) => {
+    el.hidden = !open;
+    if (open) el.style.top = `${Math.round(hudEl.getBoundingClientRect().bottom) + 6}px`;
+    (el === emoteBar ? emoteBtn : nameBtn).setAttribute('aria-expanded', String(open));
+  };
   EMOTES_ORDER.forEach((kind, i) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = EMOTE_GLYPH[kind];
     b.title = `${kind} (${i + 1})`;
     b.setAttribute('aria-label', kind);
-    b.addEventListener('click', () => { sendEmote(kind); emoteBar.hidden = true; emoteBtn.setAttribute('aria-expanded', 'false'); });
+    b.addEventListener('click', () => { sendEmote(kind); popover(emoteBar, false); });
     emoteBar.append(b);
   });
-  emoteBtn.addEventListener('click', () => { emoteBar.hidden = !emoteBar.hidden; emoteBtn.setAttribute('aria-expanded', String(!emoteBar.hidden)); });
+  emoteBtn.addEventListener('click', () => { const open = emoteBar.hidden; if (open) closeName(false); popover(emoteBar, open); });
   const nameForm = document.getElementById('name-form'), nameInput = document.getElementById('name-input'), nameMsg = document.getElementById('name-msg');
   const openName = () => {
     try { nameInput.value = localStorage.getItem('faiz-live-name') || ''; } catch {}
     nameMsg.textContent = '';
-    nameForm.hidden = false;
+    popover(emoteBar, false);
+    popover(nameForm, true);
     nameInput.focus();
     nameInput.select(); // typing replaces the old name
   };
-  const closeName = () => { nameForm.hidden = true; stage.focus({ preventScroll: true }); };
-  document.getElementById('name-btn').addEventListener('click', openName);
+  const closeName = (refocus = true) => {
+    if (nameForm.hidden) return;
+    popover(nameForm, false);
+    if (refocus) stage.focus({ preventScroll: true });
+  };
+  nameBtn.addEventListener('click', () => (nameForm.hidden ? openName() : closeName()));
   nameForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const n = cleanName(nameInput.value);
@@ -366,6 +381,7 @@ async function boot() {
   const hereEl = document.getElementById('hud-here');
   live = createLive({
     version: data.generated,
+    getPos: () => world.player,
     getName: () => { try { return localStorage.getItem('faiz-live-name') || ''; } catch { return ''; } },
     onCount: (n) => { hereEl.hidden = !n; hereEl.textContent = `${n} here`; },
     onAnnounce: (kind, m) => {
@@ -376,6 +392,7 @@ async function boot() {
     },
     onRejected: () => note('try another name'),
   });
+  if (live) { emoteBtn.hidden = false; nameBtn.hidden = false; }
   if (debug) debugEl.hidden = false;
 
   // A hidden list of every photo, so screen readers have a way in.

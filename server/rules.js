@@ -30,7 +30,11 @@ export function parseMessage(text) {
   try { m = JSON.parse(text); } catch { return null; }
   if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
   switch (m.t) {
-    case 'hi': return m.name === undefined || typeof m.name === 'string' ? { t: 'hi', name: m.name || '' } : null;
+    case 'hi': {
+      if (m.name !== undefined && typeof m.name !== 'string') return null;
+      if (m.x === undefined && m.y === undefined) return { t: 'hi', name: m.name || '' };
+      return pos(m.x) && pos(m.y) ? { t: 'hi', name: m.name || '', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
+    }
     case 'n': return typeof m.name === 'string' ? { t: 'n', name: m.name } : null;
     case 'p': return pos(m.x) && pos(m.y) ? { t: 'p', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
     case 'e': return EMOTES.includes(m.e) ? { t: 'e', e: m.e } : null;

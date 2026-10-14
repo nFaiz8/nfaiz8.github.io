@@ -115,3 +115,13 @@ test('a constructor that throws (blocked by the browser) counts as a drop, not a
   h.advance(2000);
   assert.equal(calls, 2);
 });
+
+test('hi carries my position, and send reports whether it went out', () => {
+  const h = harness();
+  const { net } = make(h, { getPos: () => ({ x: 40.5, y: 12.5 }) });
+  h.sockets[0].open();
+  assert.deepEqual(h.sockets[0].sent, [{ t: 'hi', name: 'Sam', x: 40.5, y: 12.5 }]);
+  assert.equal(net.send({ t: 'e', e: 'heart' }), false, 'not welcomed yet');
+  h.sockets[0].recv({ t: 'welcome', id: 'a', peers: [] });
+  assert.equal(net.send({ t: 'e', e: 'heart' }), true);
+});

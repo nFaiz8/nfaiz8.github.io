@@ -115,9 +115,13 @@ body { font: 13px/1.4 var(--mono); }
 .emote-bar[hidden] { display: none; }
 .emote-bar button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); padding: 6px 10px; cursor: pointer; }
 .caption .heart { pointer-events: auto; cursor: pointer; color: rgb(235 96 120); margin-left: 1ch; background: none; border: 0; font: inherit; padding: 0; }
-.caption.on { pointer-events: auto; }
 .name-form { position: fixed; top: 48px; right: 16px; z-index: 3; display: flex; gap: 8px; align-items: center; padding: 8px 10px;
   background: var(--bg); border: 1px solid var(--line); color: var(--mute); }
 .name-form[hidden] { display: none; }
 .name-form input { font: inherit; color: var(--ink); background: #0d0f14; border: 1px solid var(--line); padding: 4px 6px; width: 14ch; }
 .name-msg { color: rgb(235 120 110); }
+@media (max-width: 600px) {
+  .hud-btn .long { display: none; }
+  .hud-btn { white-space: nowrap; }
+  .name-form input { font-size: 16px; } /* iOS zooms into smaller inputs */
+}

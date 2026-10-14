@@ -158,6 +158,17 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => { const k = window.__ascii.map.kiosk; window.__ascii.tapCell(k.x + 4, k.y + 1); });
     await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 15000 });
   });
+  await check('with no multiplayer server configured there is no multiplayer UI and 1–5 do nothing', async () => {
+    await page.goto(url); await ready(page);
+    assert.equal(await page.evaluate(() => window.__ascii.live()), null);
+    for (const id of ['emote-btn', 'name-btn']) assert.equal(await page.$eval(`#${id}`, (e) => e.offsetParent === null), true, `#${id} shows`);
+    await page.focus('#stage');
+    await page.keyboard.press('Digit1');
+    await page.keyboard.press('KeyN');
+    await sleep(200);
+    assert.equal(await page.evaluate(() => window.__ascii.world.entities.some((e) => e.glyph === '♥')), false, 'emote shown');
+    assert.equal(await page.$eval('#name-form', (e) => e.hidden), true, 'name form opened');
+  });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 
