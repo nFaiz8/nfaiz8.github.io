@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRoute, photoHash, roomHash } from '../src/router.js';
+import { parseRoute, photoHash, roomHash, ALL_HASH } from '../src/router.js';
 
 test('parses photo and room routes', () => {
   assert.deepEqual(parseRoute('#/photo/DSCF7438'), { kind: 'photo', id: 'DSCF7438' });
@@ -19,4 +19,9 @@ test('empty hashes are no route; anything else is unknown', () => {
 test('hash builders round-trip', () => {
   assert.deepEqual(parseRoute(photoHash('IMG 1/2')), { kind: 'photo', id: 'IMG 1/2' });
   assert.deepEqual(parseRoute(roomHash('x-series-3')), { kind: 'room', id: 'x-series-3' });
+});
+
+test('#/all is the all-photos grid', () => {
+  assert.deepEqual(parseRoute('#/all'), { kind: 'all' });
+  assert.equal(ALL_HASH, '#/all');
 });

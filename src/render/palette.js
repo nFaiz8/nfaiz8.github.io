@@ -24,7 +24,7 @@ export const C = {
 };
 
 export const LABEL_COLOR = {
-  title: C.title, subtitle: C.subtitle, name: C.name, tagline: C.tagline, about: C.about, sign: C.sign,
+  title: C.title, subtitle: C.subtitle, name: C.name, tagline: C.tagline, about: C.about, sign: C.sign, kiosk: C.name,
 };
 
 export function hsl(h, s, l) {

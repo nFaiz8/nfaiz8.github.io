@@ -189,6 +189,16 @@ export function step(world, dt, input) {
   else { const ct = t ? 0.12 : CAM_TIME; spring(world.cam, 'x', ax, ct, dt); spring(world.cam, 'y', ay, ct, dt); }
 
   world.focus = nearestFrame(world);
+  world.atKiosk = !world.focus && atKiosk(world);
+}
+
+// In front of the lobby kiosk (the one that opens every photo as a grid).
+function atKiosk({ map, player }) {
+  const k = map.kiosk;
+  if (!k) return false;
+  const along = Math.max(0, Math.abs(player.x - (k.x + k.w / 2)) - k.w / 2);
+  const dy = (player.y - (k.stand.y + 0.5)) * CELL_ASPECT;
+  return Math.hypot(along, dy) < FOCUS_DIST;
 }
 
 export function roomAt(map, x, y) {

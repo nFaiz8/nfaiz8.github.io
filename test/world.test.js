@@ -132,3 +132,13 @@ test('running on a slow frame rate never skips over a wall anywhere on the map',
   }
   assert.deepEqual(crossed, []);
 });
+
+test('standing at the lobby kiosk is noticed; walking away is too', () => {
+  const w = createWorld(map);
+  teleport(w, map.kiosk.stand.x + 0.5, map.kiosk.stand.y + 0.5);
+  step(w, 1 / 60, { x: 0, y: 0 });
+  assert.equal(w.atKiosk, true);
+  teleport(w, map.spawn.x, map.spawn.y);
+  step(w, 1 / 60, { x: 0, y: 0 });
+  assert.equal(w.atKiosk, false);
+});

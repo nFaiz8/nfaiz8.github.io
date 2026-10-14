@@ -110,6 +110,54 @@ await withBrowser(async ({ page, url, errors }) => {
     const b = await page.evaluate(() => window.__ascii.world.visitors.map((v) => [v.x, v.y]));
     assert.ok(a.some((p, i) => p[0] !== b[i][0] || p[1] !== b[i][1]), 'at least one visitor moved');
   });
+  await check('the lobby kiosk opens every photo as a grid by colour, panoramas kept wide', async () => {
+    await page.goto(url);
+    await ready(page);
+    await page.evaluate(() => { const k = window.__ascii.map.kiosk; window.__ascii.teleport(k.stand.x + 0.5, k.stand.y + 0.5); });
+    await page.waitForFunction(() => window.__ascii.world.atKiosk, { timeout: 5000 });
+    await page.keyboard.press('KeyE');
+    await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 5000 });
+    const info = await page.evaluate(() => {
+      const ids = [...document.querySelectorAll('.grid-tile')].map((b) => b.dataset.id);
+      const shapes = [...document.querySelectorAll('.grid-tile')].map((b) => {
+        const f = window.__ascii.map.frames.find((x) => x.id === b.dataset.id);
+        const r = b.getBoundingClientRect();
+        return { shown: r.width / r.height, own: f.photo.width / f.photo.height, w: r.width };
+      });
+      return { ids, order: window.__ascii.map.frames.map((f) => f.id), shapes, width: document.querySelector('.grid-body').clientWidth, hash: location.hash };
+    });
+    assert.deepEqual(info.ids, info.order, 'every photo, in room (colour) order');
+    for (const s of info.shapes) assert.ok(Math.abs(s.shown - s.own) / s.own < 0.05 || s.w < 40, `shape ${s.shown} vs ${s.own}`);
+    // The widest photo is shown at least about a row tall (not shrunk into a strip), or as wide as the page.
+    const widest = info.shapes.reduce((a, b) => (b.own > a.own ? b : a));
+    assert.ok(widest.w / widest.own > 120 || widest.w > info.width * 0.98, `widest photo (${widest.own.toFixed(2)}:1) is ${widest.w}px wide`);
+    assert.equal(info.hash, '#/all');
+  });
+  await check('a grid photo opens the viewer, → follows colour order, Esc returns to the grid then the lobby', async () => {
+    const [first, second] = await page.evaluate(() => window.__ascii.map.frames.slice(0, 2).map((f) => f.id));
+    await page.click(`.grid-tile[data-id="${first}"]`);
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 5000 });
+    await page.keyboard.press('ArrowRight');
+    assert.equal(await page.evaluate(() => window.__ascii.viewer.current.id), second);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'closed', { timeout: 5000 });
+    assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), true, 'grid still open');
+    assert.equal(await page.evaluate(() => location.hash), '#/all');
+    assert.equal(await page.evaluate(() => Math.floor(window.__ascii.world.player.y)), await page.evaluate(() => window.__ascii.map.kiosk.stand.y), 'player stayed in the lobby');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), false);
+  });
+  await check('G and #/all open the grid; tapping the kiosk walks you there and opens it', async () => {
+    await page.goto(`${url}#/all`);
+    await ready(page);
+    await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 5000 });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('KeyG');
+    assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), true);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { const k = window.__ascii.map.kiosk; window.__ascii.tapCell(k.x + 4, k.y + 1); });
+    await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 15000 });
+  });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

@@ -8,8 +8,9 @@ import { createGlRenderer } from './render/gl.js';
 import { C } from './render/palette.js';
 import { createLighting } from './light.js';
 import { createViewer } from './viewer.js';
-import { parseRoute, photoHash, roomHash, replaceHash } from './router.js';
+import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router.js';
 import { createMap } from './map.js';
+import { createGrid } from './grid.js';
 
 const stage = document.getElementById('stage');
 const captionEl = document.getElementById('caption');
@@ -22,7 +23,7 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const debug = new URLSearchParams(location.search).has('debug');
 const RENDERERS = { canvas: createCanvasRenderer, gl: createGlRenderer };
 
-let map, world, renderer, input, viewer, mapView;
+let map, world, renderer, input, viewer, mapView, grid;
 
 function note(text, ms = 3000) {
   noteEl.textContent = text;
@@ -71,8 +72,9 @@ function resize() {
   renderer.resize(innerWidth, innerHeight, Math.min(2, devicePixelRatio || 1));
 }
 
-// Where a frame's picture is on screen right now, in CSS pixels.
+// Where a frame's picture is on screen right now, in CSS pixels (its grid tile while the grid is open).
 function frameRect(f) {
+  if (grid.isOpen) return grid.rectOf(f);
   const m = renderer.metrics;
   const left = world.cam.x - innerWidth / m.cw / 2, top = world.cam.y - innerHeight / m.ch / 2;
   return { x: (f.x + 1 - left) * m.cw, y: (f.y + 1 - top) * m.ch, w: f.cols * m.cw, h: f.rows * m.ch };
@@ -80,11 +82,11 @@ function frameRect(f) {
 
 let lastFocus;
 function updateCaption() {
-  const f = viewer.isOpen ? null : world.focus;
+  const f = viewer.isOpen || grid.isOpen ? null : world.focus || (world.atKiosk && 'kiosk');
   if (f === lastFocus) return;
   lastFocus = f;
   if (f) {
-    captionEl.replaceChildren(captionText(f.photo));
+    captionEl.replaceChildren(f === 'kiosk' ? 'every photo, by colour' : captionText(f.photo));
     const k = document.createElement('span');
     k.className = 'key';
     k.textContent = '[E] open';
@@ -100,9 +102,23 @@ function openFrame(f, opts) {
   viewer.open(f, opts);
 }
 
+function openGrid() {
+  if (viewer.isOpen || grid.isOpen) return;
+  if (mapView.isOpen) mapView.toggle();
+  world.path = null;
+  input.clear();
+  grid.open();
+}
+
+const inKiosk = (x, y) => { const k = map.kiosk; return x >= k.x && x < k.x + k.w && y >= k.y && y < k.y + k.h; };
+
 function onTap(px, py) {
-  if (viewer.isOpen || mapView.isOpen) return;
+  if (viewer.isOpen || mapView.isOpen || grid.isOpen) return;
   const cell = renderer.cellAt(world, px, py);
+  if (inKiosk(cell.x, cell.y)) {
+    walkTo(world, map.kiosk.stand.x, map.kiosk.stand.y, openGrid);
+    return;
+  }
   const f = frameAtCell(map, cell.x, cell.y);
   if (f) {
     walkTo(world, f.stand.x, f.stand.y, () => openFrame(f));
@@ -112,10 +128,12 @@ function onTap(px, py) {
 }
 
 function onKey(e) {
-  if (viewer.isOpen) return false;
+  if (viewer.isOpen || grid.isOpen) return false;
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
+  if (e.code === 'KeyG') { openGrid(); return true; }
   if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') {
     if (world.focus) openFrame(world.focus);
+    else if (world.atKiosk) openGrid();
     return true;
   }
   if (e.code === 'KeyR') {
@@ -138,7 +156,9 @@ function currentRoomId() {
 
 function applyRoute(route) {
   if (!route) return;
-  if (route.kind === 'photo') {
+  if (route.kind === 'all') {
+    openGrid();
+  } else if (route.kind === 'photo') {
     const f = map.frames.find((fr) => fr.id === route.id);
     if (!f) { note('photo not found'); replaceHash(''); return; }
     if (viewer.isOpen) return;
@@ -162,7 +182,7 @@ function loop(now) {
   // Real per-frame dt, capped so a background tab doesn't teleport you on return.
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
-  step(world, dt, viewer.isOpen || mapView.isOpen ? NO_INPUT : input.state());
+  step(world, dt, viewer.isOpen || mapView.isOpen || grid.isOpen ? NO_INPUT : input.state());
   world.people = [];
   for (const v of world.visitors) {
     world.people.push({ x: v.x, y: v.y, glyph: v.glyph, color: v.color });
@@ -201,6 +221,11 @@ async function boot() {
   world = createWorld(map, { reducedMotion });
   world.lighting = createLighting(map);
   input = createInput(stage, { onTap, onKey });
+  grid = createGrid(map, {
+    onPick: (f) => viewer.open(f, { instant: true, plain: true }),
+    onOpen: () => replaceHash(ALL_HASH),
+    onClose: () => { replaceHash(roomHash(currentRoomId())); stage.focus({ preventScroll: true }); },
+  });
   viewer = createViewer({
     getRect: frameRect,
     order: map.frames,
@@ -208,8 +233,16 @@ async function boot() {
     reducedMotion,
     setCamTarget: (t, snap) => { world.camTarget = t && { ...t, snap: !!snap }; },
     onShow: (f) => replaceHash(photoHash(f.id)),
-    onNavigate: (f) => { standAt(f); replaceHash(photoHash(f.id)); },
-    onClose: () => { replaceHash(roomHash(currentRoomId())); stage.focus({ preventScroll: true }); },
+    onNavigate: (f) => {
+      if (grid.isOpen) grid.reveal(f); // the grid keeps you where you were; closing shrinks back onto the tile
+      else standAt(f);
+      replaceHash(photoHash(f.id));
+    },
+    onClose: (f) => {
+      if (grid.isOpen) { replaceHash(ALL_HASH); grid.focus(f); return; }
+      replaceHash(roomHash(currentRoomId()));
+      stage.focus({ preventScroll: true });
+    },
   });
   let pick = new URLSearchParams(location.search).get('r');
   if (!RENDERERS[pick]) { try { pick = localStorage.getItem('ascii-renderer'); } catch {} }
@@ -229,6 +262,10 @@ async function boot() {
 
   // A hidden list of every photo, so screen readers have a way in.
   const nav = document.getElementById('photo-links');
+  const all = document.createElement('a');
+  all.href = ALL_HASH;
+  all.textContent = `All ${map.frames.length} photos, by colour`;
+  nav.append(all);
   map.frames.forEach((f, i) => {
     const a = document.createElement('a');
     a.href = photoHash(f.id);
@@ -241,7 +278,7 @@ async function boot() {
 
   // Test hook for the e2e scripts.
   window.__ascii = { map, world, stats, viewer, teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
-    open: (id) => openFrame(map.frames.find((f) => f.id === id)), setRenderer, get renderer() { return renderer.name; } };
+    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, get renderer() { return renderer.name; } };
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 

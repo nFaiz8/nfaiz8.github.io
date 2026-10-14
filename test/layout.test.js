@@ -59,3 +59,19 @@ test('doors connect corridors to rooms', () => {
   const doors = [...map.tiles].filter((t) => t === T.DOOR).length;
   assert.ok(doors >= (map.rooms.length - 1) * 3);
 });
+
+test('the lobby has an "all photos" kiosk you can walk up to', () => {
+  const map = buildLayout(real, SITE);
+  const k = map.kiosk;
+  assert.ok(k, 'kiosk exists');
+  const lobby = map.rooms[0];
+  assert.ok(k.x > lobby.x && k.x + k.w < lobby.x + lobby.w && k.y > lobby.y && k.y + k.h < lobby.y + lobby.h, 'inside the lobby');
+  for (let y = k.y; y < k.y + k.h; y++) for (let x = k.x; x < k.x + k.w; x++) assert.equal(map.tiles[y * map.W + x], T.PROP);
+  assert.ok(map.labels.some((l) => /view all photos/.test(l.text) && l.y >= k.y && l.y < k.y + k.h), 'labelled');
+  // Nothing else in the lobby is covered, and you can walk to where you stand to use it.
+  const sx = Math.floor(map.spawn.x), sy = Math.floor(map.spawn.y);
+  assert.ok(isWalkable(map, sx, sy), 'spawn still free');
+  assert.ok(findPath(map.W, map.H, (x, y) => isWalkable(map, x, y), sx, sy, k.stand.x, k.stand.y), 'reachable');
+  for (const l of map.labels.filter((l) => l.role === 'about' || l.role === 'name' || l.role === 'tagline'))
+    assert.ok(l.y < k.y || l.y >= k.y + k.h || l.x + l.text.length <= k.x || l.x >= k.x + k.w, `doesn't cover "${l.text}"`);
+});

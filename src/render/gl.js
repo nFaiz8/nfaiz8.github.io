@@ -107,7 +107,7 @@ export function createGlRenderer() {
           const r = map.roomOf[i];
           col = inDark(x, y) ? [20, 4, 4] : r > 0 ? tints[r].dot.map((v) => v * 0.45) : [12, 13, 17];
           // A faint scatter of dots on the floor, like renderer A
-          a = (x * 7 + y * 13) % 17 === 0 ? 0.12 : 0;
+          a = t !== T.PROP && (x * 7 + y * 13) % 17 === 0 ? 0.12 : 0; // not under props (the lobby kiosk)
           if (a) col = inDark(x, y) ? C.dFloorDot : r > 0 ? tints[r].dot : C.floorDot;
         }
         data.set([col[0], col[1], col[2], Math.round(a * 0.49 * 255)], i * 4); // tiles use alpha < 0.5, photos ≥ 0.5

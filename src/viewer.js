@@ -154,7 +154,10 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
 
   let hiPromise = null;
   function loadHi(p, onProgress = () => {}) {
-    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    // Keep the picture on screen alive until the next one replaces it (closing right after ← or → still
+    // animates it); showImage frees it then.
+    if (objectUrl && img.src !== objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = null;
     const src = p.src.hi || p.src.xl || p.src.low;
     hiPromise = fetchBlob(src, onProgress).then((b) => (objectUrl = URL.createObjectURL(b)));
     return hiPromise;
@@ -210,7 +213,9 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
     try {
       const url = await loadHi(p);
       if (photo !== p) return;
+      const shown = img.src;
       img.src = url;
+      if (shown.startsWith('blob:') && shown !== url) URL.revokeObjectURL(shown);
     } catch (e) {
       if (photo !== p) return;
       errText.textContent = `couldn't load this photo (${e.message}). `;
@@ -249,9 +254,13 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
     stop();
   }
 
-  async function open(f, { instant = false } = {}) {
+  // plain: opened from a real picture (the all-photos grid), so closing shrinks back onto it without
+  // turning into characters.
+  let plain = false;
+  async function open(f, { instant = false, plain: fromPicture = false } = {}) {
     if (state !== 'closed') return;
     state = 'opening';
+    plain = fromPicture;
     cur = f;
     photo = f.photo;
     onShow(f);
@@ -328,7 +337,7 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
       await wait(310);
       // Back into characters: fade the picture out while the cells coarsen.
       let bitmap = null;
-      try { bitmap = await loadImage(f.photo); } catch {}
+      if (!plain) try { bitmap = await loadImage(f.photo); } catch {}
       if (bitmap) {
         const ctx = setOverlay(r);
         overlay.hidden = false;
@@ -346,6 +355,7 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
     overlay.hidden = true;
     flip.hidden = true;
     flip.removeAttribute('src');
+    if (img.src.startsWith('blob:') && img.src !== objectUrl) URL.revokeObjectURL(img.src);
     img.removeAttribute('src');
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
     setCamTarget(null);
