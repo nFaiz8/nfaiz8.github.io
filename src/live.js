@@ -55,8 +55,9 @@ export function positionTicker(send) {
 }
 
 export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onState = () => {} }) {
-  const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('live');
-  const target = local || url;
+  // Local dev and tests never join the real gallery: on localhost only ?live=<ws url> connects.
+  const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  const target = onLocalhost ? new URLSearchParams(location.search).get('live') : url;
   if (!MULTIPLAYER.enabled || !target) return null;
   const peers = createPeers();
   let count = 0;

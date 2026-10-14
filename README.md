@@ -41,6 +41,19 @@ until **save**, which makes one commit; the site rebuilds a few minutes later an
 Edits are stored in `photos/edits.json`, keyed by photo id (the file name in lower case). You can
 also edit that file by hand; the build applies it every time.
 
+## Multiplayer
+
+Other people walking through the gallery at the same time show up as `@` with their name under
+them. Keys: **1–5** emotes (♥ ! ? ★ ~o/, or the `[☺]` button), **H** sends a heart to the photo
+you're standing at (or tap the ♥ in its caption), **N** sets a short name, and tapping someone's `@`
+follows them (Esc or moving stops). There are no accounts, no chat, and nothing is stored.
+
+`server/` is a Cloudflare Worker (`faiz-live`, a Durable Object per gallery instance of up to 30
+people). Setting `MULTIPLAYER.enabled = false` in `src/config.js` turns it off completely. Pushes that
+touch `server/**` redeploy it via `.github/workflows/server.yml`, which needs a `CLOUDFLARE_API_TOKEN`
+repo secret (a Cloudflare API token with **Workers Scripts: Edit**); until that exists, deploy by hand
+with `cd server && npx wrangler deploy`. `npm run e2e:live` runs two browsers against `wrangler dev`.
+
 ## Working on it locally
 
 ```

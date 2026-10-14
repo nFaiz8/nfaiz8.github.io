@@ -158,7 +158,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => { const k = window.__ascii.map.kiosk; window.__ascii.tapCell(k.x + 4, k.y + 1); });
     await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 15000 });
   });
-  await check('with no multiplayer server configured there is no multiplayer UI and 1–5 do nothing', async () => {
+  await check('on localhost without ?live= there is no connection, no multiplayer UI, and 1–5 do nothing', async () => {
     await page.goto(url); await ready(page);
     assert.equal(await page.evaluate(() => window.__ascii.live()), null);
     for (const id of ['emote-btn', 'name-btn']) assert.equal(await page.$eval(`#${id}`, (e) => e.offsetParent === null), true, `#${id} shows`);
