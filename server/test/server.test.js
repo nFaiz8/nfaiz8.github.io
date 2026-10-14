@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import fs from 'node:fs';
+import { parseLevel, levelHash } from '../../src/level.js';
+import { muzzleOf } from '../../src/fight.js';
 
 const PORT = 8797;
 const BASE = `ws://127.0.0.1:${PORT}/room/2026-10-13T00:00:00.000Z`;
@@ -167,5 +170,190 @@ test('chat reaches everyone else; blocked words are refused; one message every 2
   await b.next('chat-rejected');
   await new Promise((s) => setTimeout(s, 300));
   assert.equal(a.inbox.filter((m) => m.t === 'c').length, 0, 'neither the early nor the blocked message arrived');
+  a.close(); b.close();
+});
+
+// Arena PvP: fighters enter, fire, strike, pick up guns and respawn.
+const LEVEL_TEXT = fs.readFileSync(new URL('../../src/arena.txt', import.meta.url), 'utf8');
+const LV = parseLevel(LEVEL_TEXT);
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+async function fighter(r, name, ip) {
+  const ws = client({ room: r, ip });
+  await ws.opened;
+  ws.send2({ t: 'hi', name });
+  const w = await ws.next('welcome');
+  ws.id = w.id;
+  ws.send2({ t: 'ae' });
+  ws.aw = await ws.next('aw');
+  ws.t0 = Date.now();
+  return ws;
+}
+const at = (ws, x, y, o = {}) => ws.send2({ t: 'a', x, y, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: Date.now() - ws.t0, ...o });
+const fire = (ws, x, y = 27.5, a = 0) => { const m = muzzleOf(x, y, 1, 0, 'deagle'); ws.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a, ts: Date.now() - ws.t0 }); };
+
+test('welcome carries the level hash', async () => {
+  const ws = client({ room: room() });
+  await ws.opened;
+  ws.send2({ t: 'hi', name: '' });
+  assert.equal((await ws.next('welcome')).fight, levelHash(LEVEL_TEXT));
+  ws.close();
+});
+
+test('two fighters entering get aw and aj; someone outside gets none of it', async () => {
+  const r = room();
+  const out = client({ room: r });
+  await out.opened; out.send2({ t: 'hi', name: '' }); await out.next('welcome');
+  const a = await fighter(r, 'Ann');
+  assert.deepEqual(a.aw.fighters, []);
+  assert.equal(a.aw.lv, levelHash(LEVEL_TEXT));
+  const b = await fighter(r, 'Bo');
+  assert.equal(b.aw.fighters.length, 1);
+  assert.equal((await a.next('aj')).id, b.id);
+  await sleepMs(300);
+  assert.ok(!out.inbox.some((m) => ['aw', 'aj', 'a', 's', 'h'].includes(m.t)), JSON.stringify(out.inbox));
+  [a, b, out].forEach((w) => w.close());
+});
+
+test('a deagle shot hits a standing, unprotected target for 25; a ▓ in the way stops it; a protected target is not hit', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  await sleepMs(250);
+  fire(a, 20.5);
+  await assert.rejects(b.next('h', 600), 'B is protected for 1.5 s after entering');
+  await sleepMs(1300);
+  fire(a, 20.5);
+  const h = await b.next('h', 2000);
+  assert.deepEqual([h.id, h.by, h.d, h.hp], [b.id, a.id, 25, 75]);
+  at(a, 30.5, 27.5); at(b, 45.5, 27.5);
+  await sleepMs(500);
+  fire(a, 30.5);
+  await assert.rejects(b.next('h', 600), 'the pillar is in the way');
+  a.close(); b.close();
+});
+
+test('five shots within 100 ms give at most two bullets', async () => {
+  const r = room();
+  const a = await fighter(r, 'A');
+  at(a, 60.5, 27.5);
+  await sleepMs(100);
+  for (let k = 0; k < 5; k++) fire(a, 60.5);
+  await sleepMs(400);
+  assert.ok(a.inbox.filter((m) => m.t === 's').length <= 2);
+  a.close();
+});
+
+test('four deagle hits pop: k with kills 1; rs at 1 s is ignored, at 2 s gives sp at a marked spawn', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await sleepMs(1600);
+  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  await sleepMs(150);
+  for (let k = 0; k < 4; k++) { fire(a, 20.5); await sleepMs(450); }
+  const k = await a.next('k', 2000);
+  assert.deepEqual([k.id, k.by, k.kills], [b.id, a.id, 1]);
+  await sleepMs(1000);
+  b.send2({ t: 'rs' });
+  await assert.rejects(b.next('sp', 400));
+  await sleepMs(800);
+  b.send2({ t: 'rs' });
+  const sp = await b.next('sp', 2000);
+  assert.ok(LV.spawns.some((s) => s.x === sp.x && s.y === sp.y));
+  a.close(); b.close();
+});
+
+test('a teleporting state is clamped', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  at(a, 20.5, 27.5);
+  await sleepMs(100);
+  at(a, 150.5, 27.5);
+  const seen = await (async () => { for (;;) { const m = await b.next('a', 2000); if (m.x > 20.5) return m; } })();
+  assert.ok(seen.x < 40, `seen at ${seen.x}`);
+  a.close(); b.close();
+});
+
+test('leaving within 3 s of a hit gives the hitter the kill, fled', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await sleepMs(1600);
+  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  await sleepMs(150);
+  fire(a, 20.5);
+  await b.next('h', 2000);
+  b.send2({ t: 'al' });
+  const k = await a.next('k', 2000);
+  assert.deepEqual([k.id, k.by, k.kills, k.fled], [b.id, a.id, 1, 1]);
+  assert.equal((await a.next('ax')).id, b.id);
+  a.close(); b.close();
+});
+
+test('a, f and m from someone not in the arena are dropped', async () => {
+  const r = room();
+  const a = await fighter(r, 'A');
+  const o = client({ room: r });
+  await o.opened; o.send2({ t: 'hi', name: '' }); await o.next('welcome');
+  o.send2({ t: 'a', x: 30.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 });
+  o.send2({ t: 'f', x: 33, y: 27.2, a: 0, ts: 0 });
+  o.send2({ t: 'm', k: 'p', ts: 0 });
+  await sleepMs(300);
+  assert.ok(!a.inbox.some((m) => m.t === 'a' || m.t === 's' || m.t === 'mm'));
+  a.close(); o.close();
+});
+
+test('a ground kick outside a combo comes back as a punch', async () => {
+  const r = room();
+  const a = await fighter(r, 'A');
+  at(a, 60.5, 27.5);
+  await sleepMs(100);
+  a.send2({ t: 'm', k: 'k', ts: Date.now() - a.t0 });
+  assert.equal((await a.next('mm')).k, 'p');
+  a.close();
+});
+
+test('pickups: within reach gives pk and w (rifle, 40); a second claim is refused; back after 10 s', async () => {
+  const r = room();
+  const p = LV.pickups.find((q) => q.gun === 'rifle');
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  at(a, p.x, p.y); at(b, p.x + 0.5, p.y);
+  await sleepMs(150);
+  a.send2({ t: 'pk', n: p.n });
+  assert.deepEqual(await a.next('w'), { t: 'w', id: a.id, w: 'r', ammo: 40 });
+  assert.equal((await b.next('w')).id, a.id, 'everyone in the arena hears the pickup');
+  b.send2({ t: 'pk', n: p.n });
+  await assert.rejects(b.next('w', 500));
+  await sleepMs(9600);
+  b.send2({ t: 'pk', n: p.n });
+  assert.equal((await b.next('w', 2000)).id, b.id);
+  a.close(); b.close();
+});
+
+test('40 rifle shots, then the next s carries w d, after a w message', async () => {
+  const r = room();
+  const p = LV.pickups.find((q) => q.gun === 'rifle');
+  const a = await fighter(r, 'A');
+  at(a, p.x, p.y);
+  await sleepMs(150);
+  a.send2({ t: 'pk', n: p.n });
+  await a.next('w');
+  for (let k = 0; k < 41; k++) { const m = muzzleOf(p.x, p.y, 1, 0, 'rifle'); a.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a: 0, ts: Date.now() - a.t0 }); await sleepMs(120); }
+  await sleepMs(300);
+  const ss = a.inbox.filter((m) => m.t === 's');
+  assert.equal(ss.filter((m) => m.w === 'r').length, 40);
+  assert.equal(ss.at(-1).w, 'd');
+  assert.ok(a.inbox.some((m) => m.t === 'w' && m.w === 'd'));
+  a.close();
+});
+
+test('a shot reaching a target inside its roll\'s dodge window does not hit', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await sleepMs(1600);
+  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  await sleepMs(150);
+  at(b, 30.5, 27.5, { i: 32 });
+  await sleepMs(60);
+  fire(a, 20.5);
+  await assert.rejects(b.next('h', 500));
   a.close(); b.close();
 });

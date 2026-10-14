@@ -5,7 +5,7 @@ name: Deploy multiplayer server
 on:
   push:
     branches: [main]
-    paths: ['server/**']
+    paths: ['server/**', 'src/fight.js', 'src/referee.js', 'src/level.js', 'src/stick.js', 'src/arena.txt']
   workflow_dispatch:
 
 jobs:
