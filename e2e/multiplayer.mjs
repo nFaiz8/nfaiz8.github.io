@@ -41,7 +41,7 @@ try {
       assert.ok(Math.hypot(seen.x - bAt.x, seen.y - bAt.y) < 0.5, `seen at ${seen.x},${seen.y}, really ${bAt.x},${bAt.y}`);
     });
     await check('stepping to a photo without walking (a teleport) is seen on the other page', async () => {
-      const to = await b.evaluate(() => { const f = window.__ascii.map.frames.at(-1); window.__ascii.teleport(f.stand.x + 0.5, f.stand.y + 0.5); return { x: f.stand.x + 0.5, y: f.stand.y + 0.5 }; });
+      const to = await b.evaluate(() => { const f = window.__ascii.map.frames.filter((f) => !f.backdrop).at(-1); window.__ascii.teleport(f.stand.x + 0.5, f.stand.y + 0.5); return { x: f.stand.x + 0.5, y: f.stand.y + 0.5 }; });
       await sleep(1000);
       const seen = (await peersOf(a))[0];
       assert.ok(Math.hypot(seen.x - to.x, seen.y - to.y) < 0.5, `seen at ${seen.x},${seen.y}, really ${to.x},${to.y}`);
@@ -140,6 +140,25 @@ try {
       await sleep(1000);
       assert.equal(await b.evaluate(() => document.getElementById('chat-log').textContent.includes('second line')), false, 'muted line shown');
       assert.equal(await b.evaluate(() => window.__ascii.world.entities.map((e) => e.glyph).join('').includes('secondline')), false, 'muted speech drawn');
+    });
+    await check('arena: two people inside see each other run and jump; from outside nobody inside is drawn', async () => {
+      const ats = (p) => p.evaluate(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length);
+      const entry = await a.evaluate(() => window.__ascii.map.arena.entry);
+      await a.evaluate((e) => window.__ascii.teleport(e.x - 20 + 0.5, e.y + 0.5), entry);
+      await b.evaluate((e) => window.__ascii.teleport(e.x - 10 + 0.5, e.y + 0.5), entry);
+      assert.equal(await a.evaluate(() => window.__ascii.mode()), 'side');
+      await a.waitForFunction(() => { const a = window.__ascii.map.arena; return window.__ascii.live().peers.list(performance.now()).some((p) => p.x > a.x && p.x < a.x + a.w && p.y > a.y && p.y < a.y + a.h); }, { timeout: 5000 });
+      await a.waitForFunction(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length === 2, { timeout: 3000 });
+      const y0 = (await peersOf(a))[0].y;
+      await b.keyboard.down('Space'); await sleep(400); await b.keyboard.up('Space');
+      let top = y0;
+      for (let i = 0; i < 15; i++) { top = Math.min(top, (await peersOf(a))[0].y); await sleep(60); }
+      assert.ok(top < y0 - 2, `the jump is seen (${y0} → ${top})`);
+      await a.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+      await sleep(300);
+      assert.equal(await ats(a), 1, 'only my own @ outside');
+      await b.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x + 4, window.__ascii.map.spawn.y));
+      await a.waitForFunction(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length === 2, { timeout: 5000 });
     });
     await check('stopping the server leaves both galleries walkable', async () => {
       dev.kill();
