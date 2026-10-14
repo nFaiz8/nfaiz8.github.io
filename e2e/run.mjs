@@ -284,6 +284,80 @@ await withBrowser(async ({ page, url, errors }) => {
       assert.ok(warmShare > 0.01 && median < 90, 'platform glyphs: warm white strokes on a dark ground');
     });
   }
+  await check('arena on a landscape phone: ◀ ▶ JUMP ▼ show only inside, are big enough, and work', async () => {
+    await page.setViewport({ width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true });
+    await page.goto(url); await ready(page);
+    assert.equal(await page.$eval('#pad', (e) => e.hidden), true, 'hidden in the gallery');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.waitForFunction(() => !document.getElementById('pad').hidden, { timeout: 3000 });
+    const rects = await page.$$eval('#pad button', (bs) => bs.map((b) => { const r = b.getBoundingClientRect(); return { code: b.dataset.code, x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; }));
+    for (const r of rects) assert.ok(r.w >= 56 && r.h >= 56, `${r.code} is ${r.w}×${r.h}`);
+    const at = (code) => rects.find((r) => r.code === code);
+    const hold = async (code, ms, sample) => {
+      await page.touchscreen.touchStart(at(code).x, at(code).y);
+      const t0 = Date.now(), seen = [];
+      while (Date.now() - t0 < ms) { seen.push(await page.evaluate(sample)); await sleep(30); }
+      await page.touchscreen.touchEnd();
+      return seen;
+    };
+    const x0 = await page.evaluate(() => window.__ascii.world.player.x);
+    await hold('ArrowLeft', 400, () => 0);
+    assert.ok(await page.evaluate(() => window.__ascii.world.player.x) < x0 - 3, '◀ runs west');
+    await sleep(300);
+    const y0 = await page.evaluate(() => window.__ascii.world.player.y);
+    const ys = await hold('Jump', 500, () => window.__ascii.world.player.y);
+    assert.ok(Math.min(...ys) < y0 - 3, 'JUMP jumps');
+    await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+    await sleep(100);
+    assert.equal(await page.$eval('#pad', (e) => e.hidden), true, 'hidden again outside');
+  });
+  await check('arena on a phone held upright: a hint says to turn it sideways', async () => {
+    await page.setViewport({ width: 393, height: 852, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+    await page.goto(url); await ready(page); // the same #/room/arena URL again would not reload the page
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.waitForFunction(() => /sideways/.test(document.getElementById('note').textContent) && document.getElementById('note').classList.contains('on'), { timeout: 3000 });
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  });
+  await check('arena: resizing re-fits the side view without showing outside the room', async () => {
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    for (const [w, h] of [[1440, 900], [852, 393], [1100, 1300]]) {
+      await page.setViewport({ width: w, height: h, deviceScaleFactor: 1 });
+      await sleep(1500); // the camera spring settles
+      const ok = await page.evaluate(() => {
+        const { world: wd, map } = window.__ascii, a = map.arena, v = wd.view;
+        return wd.cam.x - v.cols / 2 >= a.x - 0.01 && wd.cam.x + v.cols / 2 <= a.x + a.w + 0.01 &&
+          (v.rows >= a.h || (wd.cam.y - v.rows / 2 >= a.y - 0.01 && wd.cam.y + v.rows / 2 <= a.y + a.h + 0.01));
+      });
+      assert.ok(ok, `${w}×${h}`);
+    }
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  });
+  await check('the arena photo in the viewer has an arena → button that takes you there; other photos do not', async () => {
+    await page.goto(url); await ready(page);
+    const id = await page.evaluate(() => window.__ascii.map.arena.backdrop.id);
+    await page.evaluate((fid) => window.__ascii.open(fid), id);
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });
+    await page.click('.vbtn[data-key="arena"]');
+    await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 60000 });
+    const other = await page.evaluate(() => window.__ascii.map.frames[0].id);
+    await page.evaluate((fid) => window.__ascii.open(fid), other);
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });
+    assert.equal(await page.$eval('.vbtn[data-key="arena"]', (b) => b.hidden), true);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'closed', { timeout: 20000 });
+  });
+  await check('in the arena, E opens its photo and → steps out to the next photo in the gallery', async () => {
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.keyboard.press('KeyE');
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });
+    assert.equal(await page.$eval('.vbtn[data-key="arena"]', (b) => b.hidden), true, 'no arena → while in it');
+    await page.keyboard.press('ArrowLeft');
+    await sleep(300);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__ascii.viewer.state === 'closed', { timeout: 20000 });
+    assert.equal(await page.evaluate(() => window.__ascii.mode()), 'top');
+    assert.ok(await page.evaluate(() => !!window.__ascii.world.focus && !window.__ascii.world.focus.backdrop), 'standing at a gallery photo');
+  });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

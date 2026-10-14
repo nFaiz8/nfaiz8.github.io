@@ -25,6 +25,9 @@ const debugEl = document.getElementById('debug');
 document.getElementById('hud-name').textContent = SITE.name;
 
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
+const padEl = document.getElementById('pad');
+let hintOn = false;
 const debug = new URLSearchParams(location.search).has('debug');
 const RENDERERS = { canvas: createCanvasRenderer, gl: createGlRenderer };
 
@@ -227,7 +230,16 @@ function loop(now) {
   step(world, dt, viewer.isOpen || mapView.isOpen || grid.isOpen ? NO_INPUT : input.state());
   if (world.want) tilt();
   world.lighting = world.mode === 'side' ? lightingSide : lightingTop;
-  if (world.mode !== lastMode) lastMode = world.mode;
+  if (world.mode !== lastMode) {
+    lastMode = world.mode;
+    if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
+  }
+  const showPad = touch && world.mode === 'side' && !viewer.isOpen && !grid.isOpen && !mapView.isOpen;
+  if (padEl.hidden === showPad) {
+    padEl.hidden = !showPad;
+    document.body.classList.toggle('pad-on', showPad);
+    if (!showPad) input.clear();
+  }
   world.people = [];
   const att = map.kiosk.attendant;
   world.people.push({ x: att.x + 0.5, y: att.y + 0.5, glyph: '☺', color: [240, 204, 140] });
@@ -341,6 +353,13 @@ async function boot() {
   lightingSide = map.arena ? createArenaLighting(map) : null;
   world.lighting = lightingTop;
   input = createInput(stage, { onTap, onKey });
+  for (const b of padEl.querySelectorAll('button')) {
+    const set = (on) => { input.press(b.dataset.code, on); b.classList.toggle('on', on); };
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); set(true); });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(t, () => set(false));
+    b.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+  addEventListener('pointerdown', () => { if (hintOn) { hintOn = false; noteEl.classList.remove('on'); } }, { capture: true });
   grid = createGrid(map, {
     onPick: (f) => viewer.open(f, { instant: true, plain: true }),
     onOpen: () => replaceHash(ALL_HASH),
@@ -362,6 +381,16 @@ async function boot() {
       if (grid.isOpen) { replaceHash(ALL_HASH); grid.focus(f); return; }
       replaceHash(roomHash(currentRoomId()));
       stage.focus({ preventScroll: true });
+    },
+    extra: {
+      label: 'arena →', key: 'arena', aria: 'Go to the arena',
+      show: (f) => !!f.backdrop && world.mode !== 'side',
+      onClick: async () => {
+        await viewer.close();
+        if (grid.isOpen) grid.close();
+        const e = map.arena.entry;
+        walkTo(world, e.x, e.y, null, { quick: true });
+      },
     },
   });
   let pick = new URLSearchParams(location.search).get('r');

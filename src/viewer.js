@@ -72,7 +72,7 @@ const EXIF_FIELDS = [
   ['Film simulation', (p) => p.filmSimulation], ['Date', (p) => p.date], ['Place', (p) => p.location],
 ];
 
-export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNavigate, onClose, setCamTarget }) {
+export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNavigate, onClose, setCamTarget, extra = null }) {
   // ----- DOM -----
   const overlay = el('canvas', 'resolve');
   const progress = el('div', 'resolve-progress');
@@ -104,8 +104,11 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
   const altBtn = btn('alt edit', null, 'Show the alternate edit');
   const copyBtn = btn('copy link', null, 'Copy a link to this photo');
   const closeBtn = btn('[esc] ×', null, 'Close');
+  // An optional extra action for some photos (the arena's photo: go there).
+  const extraBtn = extra ? btn(extra.label, extra.key, extra.aria) : null;
+  if (extraBtn) extraBtn.addEventListener('click', () => extra.onClick(cur));
   const tools = el('div', 'viewer-tools');
-  tools.append(prevBtn, nextBtn, infoBtn, altBtn, copyBtn, closeBtn);
+  tools.append(prevBtn, nextBtn, infoBtn, altBtn, copyBtn, ...(extraBtn ? [extraBtn] : []), closeBtn);
   bar1.append(title, tools);
   root.append(stageEl, err, info, bar1);
   document.body.append(overlay, progress, flip, root);
@@ -189,6 +192,7 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
     altBtn.setAttribute('aria-pressed', String(photo !== cur.photo));
     altBtn.textContent = photo !== cur.photo ? 'original' : 'alt edit';
     img.alt = describe(photo);
+    if (extraBtn) extraBtn.hidden = !extra.show(cur);
     renderInfo();
   }
 
@@ -260,11 +264,13 @@ export function createViewer({ getRect, order, byId, reducedMotion, onShow, onNa
   async function open(f, { instant = false, plain: fromPicture = false } = {}) {
     if (state !== 'closed') return;
     state = 'opening';
-    plain = fromPicture;
+    // The arena's photo is 240 × 50 cells: resolving it into characters and back would redraw hundreds of
+    // thousands of cells per step, so it always opens quick and closes plain.
+    plain = fromPicture || !!f.backdrop;
     cur = f;
     photo = f.photo;
     onShow(f);
-    const quick = instant || reducedMotion;
+    const quick = instant || reducedMotion || !!f.backdrop;
     setCamTarget({ x: f.x + f.w / 2, y: f.y + f.h / 2 });
     updateChrome();
 
