@@ -1,9 +1,9 @@
 import { SITE } from './config.js';
 import { createLive, peerEntities, heartEntities, localEcho } from './live.js';
-import { EMOTES_ORDER, EMOTE_GLYPH } from './peers.js';
+import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
 import { cleanName } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
-import { buildLayout } from './layout.js';
+import { buildLayout, isWalkable } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
 import { createInput } from './input.js';
 import { createCanvasRenderer } from './render/canvas.js';
@@ -85,6 +85,15 @@ function frameRect(f) {
 
 let lastFocus;
 function updateCaption() {
+  const fol = following && live && live.peers.get(following.id);
+  if (fol) {
+    const key = `follow:${fol.name}`;
+    if (lastFocus === key) return;
+    lastFocus = key;
+    captionEl.replaceChildren(`following ${fol.name || 'someone'} · esc to stop`);
+    captionEl.classList.add('on');
+    return;
+  }
   const f = viewer.isOpen || grid.isOpen ? null : world.focus || (world.atKiosk && 'kiosk');
   if (f === lastFocus) return;
   lastFocus = f;
@@ -109,6 +118,7 @@ function updateCaption() {
 }
 
 function openFrame(f, opts) {
+  stopFollowing();
   if (viewer.isOpen) return;
   world.path = null;
   input.clear();
@@ -116,6 +126,7 @@ function openFrame(f, opts) {
 }
 
 function openGrid() {
+  stopFollowing();
   if (viewer.isOpen || grid.isOpen) return;
   if (mapView.isOpen) mapView.toggle();
   world.path = null;
@@ -128,6 +139,9 @@ const inKiosk = (x, y) => { const k = map.kiosk; return x >= k.x && x < k.x + k.
 function onTap(px, py) {
   if (viewer.isOpen || mapView.isOpen || grid.isOpen) return;
   const cell = renderer.cellAt(world, px, py);
+  const peer = peerAtCell(cell.x, cell.y);
+  if (peer) { following = { id: peer.id }; followAt = 0; return; }
+  stopFollowing();
   if (inKiosk(cell.x, cell.y)) {
     walkTo(world, map.kiosk.stand.x, map.kiosk.stand.y, openGrid);
     return;
@@ -142,6 +156,7 @@ function onTap(px, py) {
 
 function onKey(e) {
   if (viewer.isOpen || grid.isOpen) return false;
+  if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
   if (e.code === 'KeyG') { openGrid(); return true; }
   if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') {
@@ -216,6 +231,16 @@ function loop(now) {
     live.tick(world.player, world.player.moving);
     const list = live.peers.list(now);
     world.others = list.filter((p) => p.alpha === 1);
+    if (following) {
+      const input0 = input.state();
+      const target = list.find((p) => p.id === following.id && p.alpha === 1);
+      if (!target || input0.x || input0.y) stopFollowing();
+      else if (now - followAt > 500) {
+        followAt = now;
+        const c = followCell(map, target, (x, y) => isWalkable(map, x, y));
+        if (c) walkTo(world, c.x, c.y);
+      }
+    }
     world.entities.push(...peerEntities(list, { reducedMotion }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion }));
   }
   world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
@@ -242,6 +267,12 @@ function loop(now) {
 }
 
 let live = null;
+let following = null, followAt = 0;
+function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }
+function peerAtCell(cx, cy) {
+  if (!live) return null;
+  return live.peers.list(performance.now()).find((p) => p.alpha === 1 && Math.abs(p.x - (cx + 0.5)) <= 1 && Math.abs(p.y - (cy + 0.5)) <= 1) || null;
+}
 const echo = localEcho();
 function sendEmote(kind) {
   if (!echo.emote(kind, performance.now())) return;
@@ -293,7 +324,7 @@ async function boot() {
   addEventListener('resize', resize);
   rendererBtn.addEventListener('click', () => onKey({ code: 'KeyR' }));
   mapView = createMap(map, {
-    onOpen: () => input.clear(),
+    onOpen: () => { input.clear(); stopFollowing(); },
     onClose: () => stage.focus({ preventScroll: true }),
     onGo: (room) => {
       const to = room.entry || { x: Math.floor(map.spawn.x), y: Math.floor(map.spawn.y) };
