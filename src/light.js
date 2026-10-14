@@ -5,6 +5,8 @@ import { T, CELL_ASPECT } from './layout.js';
 
 const AMBIENT = [0.2, 0.21, 0.27]; // moonlight through the skylights
 const LANTERN = { color: [1.0, 0.8, 0.56], radius: 28, intensity: 1.1 };
+const ARENA_AMBIENT = [0.75, 0.75, 0.75]; // the arena's side view: even and neutral, so its photo reads
+const HALO_GAIN = 150; // halo light → additive glow bytes (film halation)
 
 const blocks = (t) => t === T.WALL || t === T.VOID; // props (frames, benches) don't cast shadows
 
@@ -58,6 +60,7 @@ function hueColor(h) {
 export function staticLights(map) {
   const lights = [];
   map.rooms.forEach((r, i) => {
+    if (r.arena) return; // lit only in its own side view
     const dark = r.plan && r.plan.darkroom;
     const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
     if (dark) {
@@ -80,7 +83,7 @@ export function staticLights(map) {
     }
   }
   for (const f of map.frames) {
-    if (f.darkroom) continue;
+    if (f.darkroom || f.backdrop) continue;
     // Picture light: just in front of the print, on the side you view it from.
     const front = f.stand.y + 0.5 > f.y + f.h / 2 ? f.y + f.h + 1 : f.y - 1;
     lights.push({ x: f.x + f.w / 2, y: front + 0.5, radius: Math.max(16, f.w * 0.8), color: [1.0, 0.92, 0.78], intensity: 0.75 });
@@ -89,14 +92,16 @@ export function staticLights(map) {
 }
 
 // Bake the static lights into a map-sized buffer. Prints are lit from within so they stay the
-// brightest thing on screen.
-export function createLighting(map) {
+// brightest thing on screen. halos go into their own buffer, added to the glow layer (the arena's halation).
+export function createLighting(map, { ambient = AMBIENT, lights = staticLights(map), halos = [], prints = true, lantern = true } = {}) {
   const buf = new Float32Array(map.W * map.H * 3);
-  for (let i = 0; i < map.W * map.H; i++) buf.set(AMBIENT, i * 3);
-  const lights = staticLights(map);
+  for (let i = 0; i < map.W * map.H; i++) buf.set(ambient, i * 3);
   for (const l of lights) castLight(map, buf, 0, 0, map.W, map.H, l);
+  const halo = halos.length ? new Float32Array(map.W * map.H * 3) : null;
+  for (const l of halos) castLight(map, halo, 0, 0, map.W, map.H, l);
   const print = new Uint8Array(map.W * map.H);
-  for (const f of map.frames) {
+  for (const f of prints ? map.frames : []) {
+    if (f.backdrop) continue;
     for (let y = f.y + 1; y < f.y + f.h - 1; y++) {
       for (let x = f.x + 1; x < f.x + f.w - 1; x++) {
         print[y * map.W + x] = 1;
@@ -107,13 +112,27 @@ export function createLighting(map) {
     }
   }
   const dark = map.rooms.find((r) => r.plan && r.plan.darkroom) || null;
-  return { map, buf, print, lights, dark, scratch: new Float32Array(0) };
+  return { map, buf, halo, print, lights, dark, ambient, lantern, scratch: new Float32Array(0) };
+}
+
+// The arena's side view: a brighter, neutral light so the photo reads, and every platform glows, with
+// a red-orange halo bleeding onto the photo around it like film halation.
+export function createArenaLighting(map) {
+  const a = map.arena, cores = [], halos = [];
+  for (let r = 0; r < a.rows; r++) for (let c = 0; c < a.cols; c++) {
+    if (!a.level.cells[r * a.cols + c]) continue;
+    const x = a.x + 1 + c + 0.5, y = a.y + 1 + r + 0.5;
+    cores.push({ x, y, radius: 1.5, color: [1.0, 0.94, 0.84], intensity: 0.5 });
+    halos.push({ x, y, radius: 7, color: [1.0, 0.36, 0.16], intensity: 0.08 });
+  }
+  return createLighting(map, { ambient: ARENA_AMBIENT, lights: cores, halos, prints: false, lantern: false });
 }
 
 // The light for a window of the map: static light plus the lantern at (px, py), flickering with t.
-// Returns RGBA bytes, one pixel per cell, and the glow (lantern only) for an additive pass.
+// Returns RGBA bytes, one pixel per cell, and the glow (lantern, light pools, arena halos) for an additive pass.
 export function lightWindow(lighting, wx, wy, ww, wh, lantern, t = 0, flicker = true) {
-  const { map, buf, print, dark } = lighting;
+  const { map, buf, print, dark, halo } = lighting;
+  const amb = lighting.ambient || AMBIENT;
   // The safelight breathes very slowly: ±8% over about six seconds.
   const pulse = flicker ? 1 + 0.08 * Math.sin((t * 2 * Math.PI) / 6) : 1;
   const n = ww * wh;
@@ -121,7 +140,7 @@ export function lightWindow(lighting, wx, wy, ww, wh, lantern, t = 0, flicker = 
   const dyn = lighting.scratch;
   dyn.fill(0, 0, n * 3);
   const k = flicker ? 1 + 0.05 * Math.sin(t * 7.3) * Math.sin(t * 2.9 + 1.3) + 0.02 * Math.sin(t * 23) : 1;
-  castLight(map, dyn, wx, wy, ww, wh, { ...LANTERN, x: lantern.x, y: lantern.y, intensity: LANTERN.intensity * k });
+  if (lantern && lighting.lantern !== false) castLight(map, dyn, wx, wy, ww, wh, { ...LANTERN, x: lantern.x, y: lantern.y, intensity: LANTERN.intensity * k });
   const out = new Uint8ClampedArray(n * 4);
   const glow = new Uint8ClampedArray(n * 4);
   for (let y = 0; y < wh; y++) {
@@ -134,12 +153,12 @@ export function lightWindow(lighting, wx, wy, ww, wh, lantern, t = 0, flicker = 
       const isPrint = inside && print[my * map.W + mx];
       const inDark = dark && !isPrint && mx >= dark.x && mx < dark.x + dark.w && my >= dark.y && my < dark.y + dark.h;
       for (let c = 0; c < 3; c++) {
-        const st = (s >= 0 ? buf[s + c] : AMBIENT[c] * 0.5) * (inDark ? pulse : 1);
+        const st = (s >= 0 ? buf[s + c] : amb[c] * 0.5) * (inDark ? pulse : 1);
         const v = st + dyn[d + c];
         out[o + c] = Math.min(1, v) * 255;
         // A faint haze where light falls, so pools of light show on the dark floor too.
-        const ex = isPrint ? 0 : Math.max(0, Math.min(1, st) - AMBIENT[c]);
-        glow[o + c] = ex * 22 + dyn[d + c] * dyn[d + c] * 34;
+        const ex = isPrint ? 0 : Math.max(0, Math.min(1, st) - amb[c]);
+        glow[o + c] = ex * 22 + dyn[d + c] * dyn[d + c] * 34 + (halo && s >= 0 ? halo[s + c] * HALO_GAIN : 0);
       }
       out[o + 3] = 255;
       glow[o + 3] = 255;

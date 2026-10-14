@@ -53,3 +53,40 @@ test('the lantern brightens the window around the player', () => {
   const centre = (10 * 41 + 20) * 4;
   assert.ok(withLantern[centre] > without[centre] + 60);
 });
+
+import { createArenaLighting } from '../src/light.js';
+import { parseLevel } from '../src/arena.js';
+
+const fx = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
+const ad = indexData(fx, ['IMG_1003']);
+const amap = buildLayout(ad, SITE, { arena: { photo: ad.byId.get('IMG_1003'), level: parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8')) } });
+const AR = amap.arena;
+// An open-air cell far from every platform, and the cell just above a platform.
+const cellOf = (i) => ({ x: AR.x + 1 + (i % AR.cols), y: AR.y + 1 + Math.floor(i / AR.cols) });
+const firstPlat = cellOf(AR.level.cells.indexOf(1));
+
+test('from outside, the arena is a dark room: no lamps in it and its photo is not lit as a print', () => {
+  const L = createLighting(amap);
+  const deep = (AR.y + 10) * amap.W + AR.x + 20;
+  assert.ok(L.buf[deep * 3] < 0.25, `inside is at moonlight (${L.buf[deep * 3]})`);
+  assert.equal(L.print[deep], 0);
+});
+
+test('in the side view the arena is evenly lit at 0.75 with no lantern, and platforms glow', () => {
+  const L = createArenaLighting(amap);
+  const W = 30, H = 20, wx = AR.x + 1, wy = AR.y + 1;
+  const { rgba, glow } = lightWindow(L, wx, wy, W, H, { x: wx + 15, y: wy + 10 }, 0, false);
+  let open = null;
+  for (let y = 0; y < H && !open; y++) for (let x = 0; x < W && !open; x++) {
+    const near = [-4, -3, -2, -1, 0, 1, 2, 3, 4].some((dy) => [-8, -4, 0, 4, 8].some((dx) => AR.level.cells[(y + dy) * AR.cols + x + dx]));
+    if (!near && y > 4 && y < H - 4 && x > 8 && x < W - 8) open = { x, y };
+  }
+  assert.ok(open, 'found an open cell');
+  const o = (open.y * W + open.x) * 4;
+  assert.ok(Math.abs(rgba[o] - 0.75 * 255) <= 2, `ambient ${rgba[o]} (no lantern brightening it)`);
+  const g = lightWindow(L, firstPlat.x - 5, firstPlat.y - 5, 11, 11, { x: 0, y: 0 }, 0, false).glow;
+  const above = ((5 - 1) * 11 + 5) * 4;
+  assert.ok(g[above] > 12, `red halo above a platform (${g[above]})`);
+  assert.ok(g[above] > g[above + 2] * 1.5, 'more red than blue');
+  assert.ok(glow[o] < 3, 'no glow in open air');
+});
