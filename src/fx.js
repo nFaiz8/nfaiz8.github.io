@@ -1,6 +1,6 @@
 // The fight's visual effects as glyph lists: bullets, sparks, damage numbers, hp bars, pickups, sniper aim lines.
 // Pure: no DOM, no randomness. Positions in and out are map cells; offset is map minus arena-local.
-import { GUNS, MAX_HP, rayLength, bulletRange, bulletAt, bulletGlyphs, along, muzzleOf, absAngle, sweep } from './fight.js';
+import { GUNS, MAX_HP, rayLength, bulletRange, bulletAt, bulletGlyphs, along, muzzleOf, absAngle, sweep, inDodge } from './fight.js';
 import { GUN_ART } from './stick.js';
 
 const SPARK_COLOR = [255, 214, 140];
@@ -49,6 +49,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
         const z = bulletAt(b, Math.min(now, b.t0 + b.end / reach));
         for (const o of bodies) {
           if (o.id === b.id || !o.state || o.state.act === 'dead' || o.state.safe) continue;
+          if (o.state.act === 'roll' && inDodge(0, o.state.actT)) continue; // inside its dodge window: it flies on
           const c = { x: o.state.x, y: o.state.y };
           if (sweep(a, z, c, c) >= 0) return false;
         }

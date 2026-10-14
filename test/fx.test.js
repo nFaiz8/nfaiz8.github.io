@@ -16,6 +16,19 @@ test('my bullet stops at a fighter drawn on my screen, with no spark until the s
   assert.equal(f.glyphs(200, { bodies: [] }).filter((g) => g.ch === '•').length, 0);
 });
 
+test('my bullet flies on through a fighter rolling inside the dodge window, as the rules let it', () => {
+  const heads = (actT) => {
+    const f = fx();
+    f.shot({ id: 'me', n: null, x: 23.45, y: 24.2, angle: 0, gun: 'deagle', color: [255, 206, 110], mine: true, at: 0 });
+    const bodies = [{ id: 'b', state: { x: 30.5, y: 24.5, act: 'roll', actT } }];
+    for (let ms = 16; ms <= 200; ms += 16) f.step(0.016, ms, bodies);
+    return f.glyphs(200, { bodies: [] }).filter((g) => g.ch === '•').length;
+  };
+  assert.equal(heads(0.15), 1, 'inside the window: it flies on');
+  assert.equal(heads(0.02), 0, 'before the window: it stops');
+  assert.equal(heads(0.28), 0, 'after the window: it stops');
+});
+
 test('my bullet is still flying when no body is in its way', () => {
   const f = fx();
   f.shot({ id: 'me', n: null, x: 23.45, y: 24.2, angle: 0, gun: 'deagle', color: [255, 206, 110], mine: true, at: 0 });
