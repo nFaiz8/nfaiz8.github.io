@@ -417,6 +417,28 @@ test('a shot reaching a target inside its roll\'s dodge window does not hit', as
   a.close(); b.close();
 });
 
+test('a roll started 0.4 s after the last one began opens no dodge window: the shot inside it hits', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
+  await sleepMs(1600);
+  at(a, 20.5, FLOOR); at(b, 30.5, FLOOR);
+  await sleepMs(150);
+  at(b, 30.5, FLOOR, { i: 32 });
+  await sleepMs(60);
+  fire(a, 20.5); // inside the first roll's dodge window: no hit
+  await sleepMs(240);
+  at(b, 30.5, FLOOR);
+  await sleepMs(100);
+  at(b, 30.5, FLOOR, { i: 32 }); // 0.4 s after the first: too soon
+  await sleepMs(60);
+  fire(a, 20.5);
+  await sleepMs(600);
+  const hs = b.inbox.filter((m) => m.t === 'h' && m.id === b.id);
+  assert.equal(hs.length, 1, JSON.stringify(b.inbox.filter((m) => m.t === 'h' || m.t === 's')));
+  a.close(); b.close();
+});
+
 // Fix round 1: entry, pauses, backdated stamps and the dead.
 test('a backdated state does not open the speed clamp', async () => {
   const r = room();

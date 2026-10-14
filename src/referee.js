@@ -6,13 +6,16 @@ import {
   MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, GUN_BY_CODE, STRIKES, stunOf,
   shoulderOf, muzzleOf, rayLength, bulletRange, bulletAt, sweep,
   regenHp, fleeKiller, nextStrike, strikeBox, boxHits, strikeKnock, bulletKnock, inDodge, pickSpawn, nearPickup,
-  HEADSHOT, isHeadshot,
+  HEADSHOT, isHeadshot, ROLL,
 } from './fight.js';
 
 const EST_MAX = 0.1; // how far ahead a fighter's last state is moved on by its velocity, then held
 const RESPAWN_MIN = 1.9; // the 2 s respawn delay, less jitter
 const AIR_GRACE = 0.15; // a claimed kick counts if the striker was in the air this recently
 const ROLL_BACK = 0.15; // a roll's start is never put more than this before its state arrived
+// The soonest a roll may dodge after the last roll that did: a roll's length plus its cooldown,
+// less 0.1 s for stamps that are a little late (one late by more than ROLL_BACK is put ROLL_BACK back).
+const ROLL_EVERY = ROLL.time + ROLL.cooldown - 0.1;
 const ORIGIN = { x: 3, y: 2 }; // how far a shot's claimed origin may be from the muzzle estimate
 const TOUCH = 1e-6; // cells: a body flush against the wall a bullet stops at is still touched (round-off)
 
@@ -26,7 +29,7 @@ export function newFighter(id, now) {
     id, arena: false, x: 0, y: 0, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, at: now,
     hp: MAX_HP, hurtAt: -1e9, alive: true, deadAt: -1e9, safeUntil: 0,
     kills: 0, combo: 0, strikeAt: -1e9, lastStrike: null, airAt: -1e9, hitBy: null,
-    gun: 'deagle', ammo: -1, rollAt: null,
+    gun: 'deagle', ammo: -1, rollAt: null, rolledAt: -1e9,
   };
 }
 
@@ -79,7 +82,13 @@ export function createReferee({ level, rand }) {
     F.x = s.x; F.y = s.y; F.vx = s.vx; F.vy = s.vy; F.f = s.f; F.g = s.g; F.i = s.i; F.a = s.a;
     F.at = now;
     if (s.g === 0) F.airAt = now;
-    if (s.i & 32) { if (!was || F.rollAt == null) F.rollAt = Math.max(sentAt, now - ROLL_BACK); } else F.rollAt = null;
+    if (!(s.i & 32)) F.rollAt = null;
+    else if (!was || F.rollAt == null) {
+      // A roll too soon after the last one opens no dodge (and is tried again while it's held,
+      // never sooner than ROLL_EVERY after the last one opened).
+      const at = Math.max(sentAt, now - ROLL_BACK);
+      if (at - (F.rolledAt ?? -1e9) >= ROLL_EVERY - 1e-9) F.rollAt = F.rolledAt = at;
+    }
   }
 
   function fire(F, m, now, all) {

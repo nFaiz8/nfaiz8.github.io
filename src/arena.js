@@ -4,6 +4,8 @@
 import { isWalkable } from './layout.js';
 
 import { AIR, PLATFORM, SOLID } from './level.js';
+import { ROLL } from './fight.js';
+export { ROLL }; // the referee needs it too, and imports only fight.js and level.js
 export { AIR, PLATFORM, SOLID, LEVEL_COLS, LEVEL_ROWS, parseLevel } from './level.js';
 
 export const RUN = 30; // cells/s, the gallery's walking speed
@@ -19,7 +21,6 @@ export const COYOTE = 0.1; // seconds after leaving the ground that a jump is st
 const BUFFER = 0.1, DROP = 0.25;
 export const BODY = { w: 0.8, h: 3 }; // cells across, rows down
 const HW = 0.4, HH = 1.5; // half width (cells), half height (rows); the feet are at y + 1.5
-export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
 export const STUN_DECAY = 0.35; // seconds: a knocked-back body's speed falls by 1/e in this long
 export const PUSH = 12; // cells/s: how fast two overlapping fighters are pushed apart, each
 const NONE = {};

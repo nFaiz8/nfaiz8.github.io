@@ -15,6 +15,7 @@ export const PICKUP_BACK = 10;
 export const PICKUP_REACH = { x: 1, y: 2 };
 export const COMBO_GAP = 0.5;
 export const DODGE = [0.04, 0.26];
+export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
 export const ACT_TIME = { shoot: 0.2, punch: 0.25, kick: 0.4, roll: 0.3 };
 
 // Ammo -1 means endless, everywhere: records and wire.

@@ -402,3 +402,62 @@ test('a roll still dodges a bullet at the head row', () => {
   assert.equal(at(0.1), false);
   assert.equal(at(0.3), true);
 });
+
+// Final review, Important 2: the roll rate. A roll opens a dodge window only once a roll's length plus its
+// cooldown (less a little jitter) has passed since the last roll that opened one.
+const rollState = (i) => ({ x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i, a: 0 });
+const dodgeShare = (pattern, seconds = 10, dt = 1 / 60) => {
+  const R = ref(), A = F('a', 60.5);
+  let inside = 0, n = 0;
+  for (let t = 1; t < 1 + seconds; t += dt, n++) {
+    R.state(A, rollState(pattern(t - 1) ? 32 : 0), t, t);
+    if (A.rollAt != null && t - A.rollAt >= 0.04 && t - A.rollAt <= 0.26) inside++;
+  }
+  return inside / n;
+};
+
+test('a roll started too soon after the last one opens no dodge window', () => {
+  const R = ref(), A = F('a', 60.5);
+  R.state(A, rollState(32), 1, 1);
+  assert.equal(A.rollAt, 1);
+  R.state(A, rollState(0), 1.3, 1.3);
+  R.state(A, rollState(32), 1.4, 1.4); // 0.4 s after the last roll began
+  assert.equal(A.rollAt, null, 'too soon: no roll opened');
+  R.state(A, rollState(32), 1.5, 1.5);
+  assert.equal(A.rollAt, null, 'the same early roll, still held: still none');
+  // A shot reaching A inside where that roll's dodge window would be hits.
+  const S = F('s', 50.5);
+  shoot(R, S, 1.45, [S, A]);
+  assert.ok(run(R, 1.45, 1.7, [S, A]).some((m) => m.t === 'h' && m.id === 'a'));
+  R.state(A, rollState(0), 1.7, 1.7);
+  R.state(A, rollState(32), 1.75, 1.75); // 0.75 s on: a roll's length plus its cooldown, less jitter
+  assert.equal(A.rollAt, 1.75);
+});
+
+test('toggling the roll bit (0.25 s on, a frame off) dodges no more of the time than honest rolling', () => {
+  const cheat = dodgeShare((t) => t % (0.25 + 1 / 60) < 0.25);
+  const honest = dodgeShare((t) => t % 0.8 < 0.3); // rolls back to back at the real cooldown
+  assert.ok(honest > 0.25, `honest ${honest}`);
+  assert.ok(cheat <= 0.33, `cheat ${cheat}`);
+});
+
+test('rolling back to back at the real cooldown opens every roll\'s dodge window, at 60 and 30 fps and with jittery arrival', () => {
+  const kinds = levelKind(L);
+  for (const [dt, jitter] of [[1 / 60, 0], [1 / 30, 0], [1 / 60, 0.14]]) {
+    const R = ref(), A = F('a', 60.5), b = newBody(60.5, 24.5);
+    for (let i = 0; i < 30; i++) stepBody(b, dt, {}, kinds); // settle onto the floor
+    let dir = 1, rolls = 0, opened = 0, k = 0;
+    for (let t = 1; t < 9; t += dt, k++) {
+      const was = b.rollT >= 0;
+      stepBody(b, dt, { roll: dir }, kinds);
+      const on = b.rollT >= 0;
+      if (on && !was) { rolls++; dir = -dir; }
+      const before = A.rollAt;
+      // Arrives 0 to jitter s after it was sent, stamped with its sent time.
+      R.state(A, { ...rollState(on ? 32 : 0), x: b.x, y: b.y }, t + jitter * ((k * 7) % 10) / 10, t);
+      if (A.rollAt != null && A.rollAt !== before) opened++;
+    }
+    assert.ok(rolls >= 9, `rolls ${rolls}`);
+    assert.equal(opened, rolls, `dt ${dt}, jitter ${jitter}`);
+  }
+});
