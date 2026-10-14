@@ -216,6 +216,57 @@ try {
       await b.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x + 4, window.__ascii.map.spawn.y));
       await atsAre(2);
     });
+    await check('arena: fighters collide: A runs at B and stops beside B, then jumps onto B\'s head and stands there, on both screens', async () => {
+      const entry = await a.evaluate(() => window.__ascii.map.arena.entry);
+      await a.evaluate((e) => window.__ascii.teleport(e.x - 20 + 0.5, e.y + 0.5), entry);
+      await b.evaluate((e) => window.__ascii.teleport(e.x - 12 + 0.5, e.y + 0.5), entry);
+      const aId = await a.evaluate(() => window.__ascii.live().peers.myId), bId = await b.evaluate(() => window.__ascii.live().peers.myId);
+      await a.waitForFunction((id) => (window.__ascii.world.bodies || []).some((x) => x.id === id), { timeout: 5000 }, bId);
+      await b.waitForFunction((id) => (window.__ascii.world.bodies || []).some((x) => x.id === id), { timeout: 5000 }, aId);
+      await sleep(2000); // past both fly-ins and the 1.5 s of protection
+      // The server clamps a first state from the door, so a teleported B is seen there until B moves: a step.
+      await b.evaluate(() => window.__ascii.input().press('ArrowLeft', true));
+      await sleep(50);
+      await b.evaluate(() => window.__ascii.input().press('ArrowLeft', false));
+      await sleep(700);
+      const seenOn = async (p, id) => {
+        const s = await p.evaluate((id) => (window.__ascii.world.bodies || []).find((x) => x.id === id)?.state || null, id);
+        assert.ok(s, `${id} is not drawn (ran out of the arena through them?)`);
+        return s;
+      };
+      const meOn = (p) => p.evaluate(() => { const q = window.__ascii.world.player; return { x: q.x, y: q.y, ground: q.onGround }; });
+      const bAt = await meOn(b);
+      await a.evaluate(() => window.__ascii.input().press('ArrowRight', true));
+      await sleep(900);
+      await a.evaluate(() => window.__ascii.input().press('ArrowRight', false));
+      await sleep(300);
+      let me = await meOn(a), seen = await seenOn(a, bId);
+      assert.ok(Math.abs(me.x - (seen.x - 0.8)) < 0.05, `A stopped beside B (A ${me.x.toFixed(2)}, B drawn at ${seen.x.toFixed(2)})`);
+      assert.ok(Math.abs((await meOn(b)).x - bAt.x) < 0.01, 'B was not pushed');
+      // Jump; once A's feet are over B's head, a nudge right lands A on it (driven frame by frame in the page).
+      await a.evaluate((id) => new Promise((resolve) => {
+        const w = window.__ascii.world, inp = window.__ascii.input(), t0 = performance.now();
+        let right = false;
+        const nudge = (on) => { if (on !== right) { inp.press('ArrowRight', on); right = on; } };
+        inp.press('Jump', true);
+        const tick = () => {
+          const p = w.player, s = w.bodies.find((x) => x.id === id).state, t = performance.now() - t0;
+          if (t > 350) inp.press('Jump', false);
+          nudge(p.y + 1.5 <= s.y - 1.5 && p.x < s.x - 0.4 && p.vx < 3);
+          if (t < 1500 && !(t > 300 && p.onGround)) requestAnimationFrame(tick); else { nudge(false); inp.press('Jump', false); resolve(); }
+        };
+        requestAnimationFrame(tick);
+      }), bId);
+      await sleep(600);
+      me = await meOn(a); seen = await seenOn(a, bId);
+      assert.ok(me.ground && Math.abs(me.y - (seen.y - 3)) < 0.01 && Math.abs(me.x - seen.x) < 0.8, `A stands on B's head on A's screen (A ${me.x.toFixed(2)},${me.y.toFixed(2)}; B ${seen.x.toFixed(2)},${seen.y.toFixed(2)})`);
+      const bNow = await meOn(b), aSeen = await seenOn(b, aId);
+      assert.ok(Math.abs(aSeen.y - (bNow.y - 3)) < 0.3 && Math.abs(aSeen.x - bNow.x) < 0.8, `and on B's (A drawn at ${aSeen.x.toFixed(2)},${aSeen.y.toFixed(2)}; B ${bNow.x.toFixed(2)},${bNow.y.toFixed(2)})`);
+      await a.screenshot({ path: `${SHOTS}/collide-on-head.png` });
+      await a.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+      await b.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x + 4, window.__ascii.map.spawn.y));
+      await sleep(300);
+    });
     await check('stopping the server leaves both galleries walkable', async () => {
       dev.kill();
       await sleep(1500);

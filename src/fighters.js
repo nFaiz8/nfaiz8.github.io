@@ -2,7 +2,7 @@
 // own physics with that person's last input, so they run, jump in arcs and land exactly as they do on
 // their own screen. A new state is run forward to the present; the difference from where they were
 // drawn glides out over ~80 ms, or snaps when it is large. Pure: no DOM, no clocks; times in ms.
-import { newBody, stepBody, knock, rolling, ROLL, AIR_JUMPS, COYOTE } from './arena.js';
+import { newBody, stepBody, knock, rolling, keepDrawnOut, ROLL, AIR_JUMPS, COYOTE } from './arena.js';
 import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME, REGEN_AFTER } from './fight.js';
 import { flipCut } from './stick.js';
 
@@ -23,14 +23,46 @@ function facingAim(a, facing) {
   return { facing: f, aim: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, aim)) };
 }
 
-export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 }, rtt = () => 100 }) {
+// me(now): my box, { x, y, vx, vy, solid, id } in map cells, or null; door: doorZone's rectangle. Each body
+// collides with me and the others (body collision addendum), so nobody is drawn inside anyone.
+export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 }, rtt = () => 100, me = () => null, door = null }) {
   const all = new Map();
-  const opts = { inside };
+  const opts = { inside, door, others: null };
+
+  // Everyone a remote body collides with, where they're drawn: me, then each remote fighter (of: whose).
+  // The dead, the protected and the rolling pass through.
+  const solidOf = (G, now) => G.alive && now >= G.safeUntil && !rolling(G.body);
+  function boxOf(G, now, box = { of: G, id: G.id }) {
+    const b = G.body;
+    box.x = b.x + G.corr.x; box.y = b.y + G.corr.y; box.vx = b.vx; box.vy = b.vy;
+    box.solid = solidOf(G, now);
+    return box;
+  }
+  function boxesAt(now) {
+    const out = [], m = me(now);
+    if (m) out.push({ ...m, of: null });
+    for (const G of all.values()) if (G.body) out.push(boxOf(G, now));
+    return out;
+  }
+  // Ready the boxes for F's body: F's own passes through, and each gives the way F goes if their centres
+  // coincide (by id, so both screens agree). Returns F's own box.
+  function boxesFor(boxes, F) {
+    let own = null;
+    for (const o of boxes) {
+      o.tie = String(F.id) < String(o.id) ? -1 : 1;
+      if (o.of === F) { own = o; o.solid = false; }
+    }
+    return own;
+  }
 
   // Run a body forward by ms, in steps of at most 1/60 s.
-  function advance(b, ms, input) {
+  function advance(F, b, ms, input, now) {
     const n = Math.ceil(ms / 1000 / STEP - 1e-9);
+    if (!n) return;
+    opts.others = boxesAt(now);
+    boxesFor(opts.others, F);
     for (let k = 0; k < n; k++) stepBody(b, ms / 1000 / n, input, kindAt, opts);
+    opts.others = null;
   }
 
   function add(p, now) {
@@ -94,7 +126,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       if (t < ROLL.time) { b.rollT = Math.max(0, t); b.rollDir = Math.sign(b.vx) || facing; }
     } else F.rollTs = null;
     const input = inputOf(i);
-    advance(b, age, input);
+    advance(F, b, age, input, now);
     if (F.body && !fresh) {
       const cx = F.body.x + F.corr.x - b.x, cy = F.body.y + F.corr.y - b.y;
       F.corr = Math.hypot(cx, cy) > SNAP ? { x: 0, y: 0 } : { x: cx, y: cy };
@@ -171,15 +203,20 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     if (!(dt > 0)) return;
     const n = Math.ceil(dt / STEP - 1e-9), h = dt / n;
     const kc = Math.exp(-dt / CORR_TAU), ka = 1 - Math.exp(-dt / AIM_TAU);
+    const boxes = (opts.others = boxesAt(now));
     for (const F of all.values()) {
       if (!F.body) continue;
       const input = !F.alive || now - F.lastAt > SILENT ? NONE : F.input;
+      const own = boxesFor(boxes, F);
       for (let k = 0; k < n; k++) stepBody(F.body, h, input, kindAt, opts);
       flipOf(F, now);
       F.corr.x *= kc;
       F.corr.y *= kc;
+      if (solidOf(F, now)) keepDrawnOut(F.body, F.corr, boxes, door); // its own box is not solid just now
       F.aim += (F.aimTo - F.aim) * ka;
+      if (own) boxOf(F, now, own); // where it is now, for the ones after it
     }
+    opts.others = null;
   }
 
   function actOf(F, now) {
@@ -216,6 +253,8 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     step,
     list,
     get: (id) => all.get(id) || null,
+    // Their boxes for my body to collide with (stepBody's others), where they're drawn.
+    boxes: (now) => { const out = []; for (const G of all.values()) if (G.body) out.push(boxOf(G, now)); return out; },
     ids: () => [...all.keys()],
     clear() { all.clear(); },
   };

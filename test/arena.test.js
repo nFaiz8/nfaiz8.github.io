@@ -732,3 +732,192 @@ test('a view as tall as the room shows the whole room: row 0 at the top or below
     }
   }
 });
+
+// Fighters collide (body collision addendum), on the train's floor: every spot comes from the level.
+import { doorZone, PUSH } from '../src/arena.js';
+const TL = parseLevel(text), TK = levelKind(TL);
+const STAND = TL.door.y; // a body standing on the floor
+const X0 = TL.spawns.find((s) => s.r === TL.door.r).x; // a floor spawn in car A, open floor either side
+const HEAD = BODY.h; // a body standing on another's head is this much higher
+const box = (b, solid = true) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, solid });
+// Steps b for `seconds` at 60 fps against others (a list, or a function of t giving one).
+const go = (b, seconds, input = IDLE, others = [], opts = {}, each = () => {}) => {
+  for (let t = 0; t < seconds - 1e-9; t += 1 / 60) {
+    stepBody(b, 1 / 60, typeof input === 'function' ? input(t) : input, TK, { others: typeof others === 'function' ? others(t) : others, ...opts });
+    each(b, t);
+  }
+};
+const standing = (x) => { const b = newBody(x, STAND); go(b, 0.2); assert.equal(b.y, STAND); return b; };
+
+test('collision: PUSH is 12 cells/s; the door zone is the door\'s 3 rows in the last 2 columns, from the level', () => {
+  assert.equal(PUSH, 12);
+  assert.deepEqual(doorZone(TL), { x0: TL.cols - 2, x1: TL.cols, y0: TL.door.r - 2, y1: TL.door.r + 1 });
+  assert.deepEqual(doorZone(TL, { x: 10, y: 5 }), { x0: TL.cols + 8, x1: TL.cols + 10, y0: TL.door.r + 3, y1: TL.door.r + 6 });
+});
+
+test('collision: walking into a standing body stops at contact, both ways; a knockback stops there too', () => {
+  const o = standing(X0 + 5);
+  const b = standing(X0);
+  go(b, 1, { ...IDLE, x: 1, run: true }, [box(o)]);
+  assert.ok(Math.abs(b.x - (o.x - BODY.w)) < 1e-9, `stopped west of it (${b.x})`);
+  const w = standing(X0 + 10);
+  go(w, 1, { ...IDLE, x: -1 }, [box(o)]);
+  assert.ok(Math.abs(w.x - (o.x + BODY.w)) < 1e-9, `stopped east of it (${w.x})`);
+  const k = standing(X0);
+  knock(k, 45, 0, 0.4);
+  go(k, 0.4, IDLE, [box(o)]);
+  assert.ok(Math.abs(k.x - (o.x - BODY.w)) < 1e-9, `knocked into it, stopped at contact (${k.x})`);
+  const free = standing(X0);
+  go(free, 1, { ...IDLE, x: 1 });
+  assert.ok(free.x > o.x + BODY.w, 'and without it, the same walk goes past');
+});
+
+test('collision: a falling body lands on a head and stands there, on the ground, with its air jump back, and jumps from it', () => {
+  const o = standing(X0);
+  const b = newBody(X0 + 0.5, STAND - 8);
+  b.airJumps = 0;
+  go(b, 1, IDLE, [box(o)]);
+  assert.equal(b.y, o.y - HEAD, 'standing on the head');
+  assert.equal(b.onGround, true);
+  assert.equal(b.airJumps, AIR_JUMPS);
+  let top = b.y;
+  go(b, 0.3, { ...IDLE, jump: true }, [box(o)], {}, (s) => { top = Math.min(top, s.y); });
+  assert.ok(top < o.y - HEAD - 4, `jumped from the head (${o.y - HEAD - top} rows)`);
+  go(b, 1.5, IDLE, [box(o)]);
+  assert.equal(b.y, o.y - HEAD, 'and lands back on it');
+});
+
+test('collision: ↓ drops off a head to the floor', () => {
+  const o = standing(X0);
+  const b = newBody(X0 + 0.3, STAND - 8);
+  go(b, 1, IDLE, [box(o)]);
+  assert.equal(b.y, o.y - HEAD);
+  go(b, 0.05, { ...IDLE, down: true }, [box(o)]);
+  go(b, 1.5, IDLE, [box(o)]);
+  assert.equal(b.y, STAND, 'on the floor');
+});
+
+test('collision: jumping up from below passes through a body above, one-way, then lands on its head', () => {
+  const o = newBody(X0, STAND - HEAD - 0.5); // hanging just over my head: its box is fixed
+  const b = standing(X0 + 0.2);
+  let top = b.y;
+  const J1 = (t) => ({ ...IDLE, jump: t < 0.3 || (t > 0.45 && t < 0.7) }); // a jump, and the air jump at the top
+  go(b, 0.75, J1, [box(o)], {}, (s) => { top = Math.min(top, s.y); });
+  assert.ok(top < o.y - HEAD, `rose through it to above its head (${top})`);
+  go(b, 1, IDLE, [box(o)]);
+  assert.equal(b.y, o.y - HEAD, 'and stands on it');
+  assert.equal(b.onGround, true);
+});
+
+test('collision: a rolling body passes through; so does anyone through a protected (not solid) one, and a body that is not solid itself', () => {
+  const o = standing(X0 + 3);
+  const r = standing(X0);
+  go(r, 0.05, { ...IDLE, roll: 1 }, [box(o)]);
+  go(r, 0.4, IDLE, [box(o)]);
+  assert.ok(r.x > o.x + BODY.w, `rolled through (${r.x})`);
+  const w = standing(X0);
+  go(w, 1, { ...IDLE, x: 1 }, [box(o, false)]);
+  assert.ok(w.x > o.x + BODY.w, `walked through a protected one (${w.x})`);
+  const me = standing(X0);
+  go(me, 1, { ...IDLE, x: 1 }, [box(o)], { solid: false });
+  assert.ok(me.x > o.x + BODY.w, `walked through it, protected myself (${me.x})`);
+  const fall = newBody(X0 + 3.2, STAND - 8);
+  go(fall, 1, IDLE, [box(o)], { solid: false });
+  assert.equal(fall.y, STAND, 'and fell through its head');
+});
+
+test('collision: in the door rows nothing collides, whichever box is in them', () => {
+  const door = doorZone(TL);
+  const d = standing(TL.door.x);
+  const b = standing(TL.door.x - 6);
+  go(b, 1, { ...IDLE, x: 1 }, [box(d)], { door });
+  assert.ok(b.x > d.x - BODY.w + 0.1, `walked into the one in the doorway (${b.x})`);
+  const o = standing(door.x0 - 1); // just west of the door's columns
+  const e = standing(TL.door.x);
+  go(e, 1, { ...IDLE, x: -1 }, [box(o)], { door });
+  assert.ok(e.x < o.x - BODY.w, `walked out of the doorway through it (${e.x})`);
+  const c = standing(TL.door.x);
+  go(c, 1, { ...IDLE, x: -1 }, [box(o)]);
+  assert.ok(Math.abs(c.x - (o.x + BODY.w)) < 1e-9, `without the zone it blocks (${c.x})`);
+});
+
+test('collision: an overlap separates at ≤ 12 cells/s each way, then they block; walls win', () => {
+  const a = standing(X0), b = standing(X0 + 0.3);
+  let worst = 0;
+  for (let k = 0; k < 30; k++) {
+    const ax = a.x, bx = b.x;
+    stepBody(a, 1 / 60, IDLE, TK, { others: [box(b)] });
+    stepBody(b, 1 / 60, IDLE, TK, { others: [box(a)] });
+    worst = Math.max(worst, Math.abs(a.x - ax), Math.abs(b.x - bx));
+  }
+  assert.ok(worst <= PUSH / 60 + 1e-9, `never faster than 12 cells/s (${worst * 60})`);
+  assert.ok(b.x - a.x >= BODY.w - 1e-9, `apart (${b.x - a.x})`);
+  assert.ok(a.x < X0 && b.x > X0 + 0.3, 'each away from the other\'s centre');
+  go(a, 1, { ...IDLE, x: 1 }, [box(b)]);
+  assert.ok(Math.abs(a.x - (b.x - BODY.w)) < 1e-9, `and then it blocks (${a.x})`);
+  // Against the west wall: the wall wins, the other one moves.
+  let west = Math.floor(X0);
+  while (TK(west - 1, TL.door.r) !== SOLID) west--;
+  const w = standing(west + BODY.w / 2), v = standing(west + BODY.w / 2 + 0.2);
+  for (let k = 0; k < 30; k++) {
+    stepBody(w, 1 / 60, IDLE, TK, { others: [box(v)] });
+    stepBody(v, 1 / 60, IDLE, TK, { others: [box(w)] });
+    assert.ok(w.x >= west + BODY.w / 2 - 1e-9, `never into the wall (${w.x})`);
+  }
+  assert.ok(v.x - w.x >= BODY.w - 1e-9, `apart, the other moved (${v.x - w.x})`);
+});
+
+test('collision: centres that coincide separate by the tie each other box gives', () => {
+  const a = standing(X0), b = standing(X0);
+  for (let k = 0; k < 30; k++) {
+    stepBody(a, 1 / 60, IDLE, TK, { others: [{ ...box(b), tie: -1 }] });
+    stepBody(b, 1 / 60, IDLE, TK, { others: [{ ...box(a), tie: 1 }] });
+  }
+  assert.ok(a.x < b.x && b.x - a.x >= BODY.w - 1e-9, `a west, b east (${a.x}, ${b.x})`);
+});
+
+test('collision: standing on a moving body carries you with it', () => {
+  const o = standing(X0);
+  const b = newBody(X0 + 0.2, STAND - 8);
+  go(b, 1, IDLE, [box(o)]);
+  assert.equal(b.y, o.y - HEAD);
+  const dx = b.x - o.x;
+  for (let k = 0; k < 60; k++) {
+    stepBody(b, 1 / 60, IDLE, TK, { others: [box(o)] });
+    stepBody(o, 1 / 60, { ...IDLE, x: 1 }, TK);
+  }
+  assert.ok(o.x > X0 + 15, `it ran (${o.x})`);
+  assert.ok(Math.abs(b.x - o.x - dx) < 0.5, `carried along (${b.x - o.x} vs ${dx})`);
+  assert.equal(b.y, o.y - HEAD, 'still on its head');
+});
+
+test('collision: jumping up through someone standing on a ═ never shoves them sideways', () => {
+  // The lowest ═ over the floor with room for two bodies side by side, from the level.
+  let row = -1, col = -1;
+  for (let r = TL.door.r; r > 0 && row < 0; r--) {
+    for (let c = 0; c + 2 < TL.cols; c++) if ([0, 1, 2].every((k) => TL.cells[r * TL.cols + c + k] === PLATFORM)) { row = r; col = c + 1; break; }
+  }
+  const s = newBody(col + 0.5, row - 1.5);
+  go(s, 0.2);
+  assert.equal(s.onPlatform, true, 'standing on the ═');
+  const j = standing(col + 0.7);
+  const x0 = s.x;
+  for (let k = 0; k < 90; k++) { // a jump and the air jump: up through them, past their head
+    stepBody(j, 1 / 60, { ...IDLE, jump: k < 15 || (k > 15 && k < 35) }, TK, { others: [box(s)] });
+    stepBody(s, 1 / 60, IDLE, TK, { others: [box(j)] });
+    assert.equal(s.x, x0, `not shoved (frame ${k})`);
+  }
+  assert.ok(j.y <= s.y - HEAD && j.onGround, `and up past them (${j.y})`);
+});
+
+test('collision: bodies touching within a rounding of each other (0.05) are not pushed apart, and still block', () => {
+  const a = standing(X0), b = standing(X0 + BODY.w - 0.01); // 0.01 cells in, as two rounded wire positions can be
+  for (let k = 0; k < 30; k++) {
+    stepBody(a, 1 / 60, IDLE, TK, { others: [box(b)] });
+    stepBody(b, 1 / 60, IDLE, TK, { others: [box(a)] });
+  }
+  assert.equal(a.x, X0, 'a not pushed');
+  assert.equal(b.x, X0 + BODY.w - 0.01, 'b not pushed');
+  go(a, 0.5, { ...IDLE, x: 1 }, [box(b)]);
+  assert.ok(Math.abs(a.x - (b.x - BODY.w)) < 1e-9, `walking on, a stops at contact (${a.x})`);
+});

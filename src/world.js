@@ -35,6 +35,7 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     kindAt: map.arena ? kindsFor(map) : null,
     inside: map.arena ? insideFor(map) : null,
     aimFacing: 0, // -1 or 1: in the side view you face this way (the mouse's side), not the way you run
+    collide: null, // in the fight, the other fighters I bump into: stepBody's { others, solid, door } (pvp.js)
     shake: null, // { until, amp } in world seconds (pvp.js: kicked or popped)
     shakeOff: { x: 0, y: 0 }, // the offset the shake added to the camera last frame
   };
@@ -263,7 +264,7 @@ function shakeCamera(world) {
 function stepSide(world, dt, input) {
   const p = world.player;
   if (!world.frozen) {
-    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside });
+    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside, ...world.collide });
     p.moving = Math.abs(p.vx) > 0.5 || !p.onGround;
     if (world.aimFacing) p.facing = world.aimFacing < 0 ? -1 : 1;
     else if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);

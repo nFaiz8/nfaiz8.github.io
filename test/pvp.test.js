@@ -594,3 +594,24 @@ test('flashes: a shot lights the train for a moment at its muzzle (arena-local),
   s.frames(12);
   assert.deepEqual(s.pvp.flashes(s.now), []);
 });
+
+test('collision: I can\'t walk through the dummy once my protection is over, and I can stand on its head', () => {
+  const s = setup();
+  s.frames(100); // past the 1.5 s of protection
+  const dummy = () => s.pvp.bodies(s.now).find((b) => b.dummy).state;
+  s.frames(90, { x: 1 });
+  const d = dummy(), p = s.world.player;
+  assert.ok(Math.abs(p.x - (d.x - 0.8)) < 1e-6, `stopped beside it (${p.x}, the dummy at ${d.x})`);
+  assert.equal(d.x, off.x + 50.5, 'and it stayed put');
+  p.x = d.x + 0.2; p.y = d.y - 6; p.vy = 0;
+  s.frames(60);
+  assert.equal(p.y, d.y - 3, 'standing on its head');
+  assert.equal(p.onGround, true);
+});
+
+test('collision: protected, I walk through the dummy', () => {
+  const s = setup();
+  s.frames(1);
+  s.frames(40, { x: 1 });
+  assert.ok(s.world.player.x > s.pvp.bodies(s.now).find((b) => b.dummy).state.x + 0.8);
+});

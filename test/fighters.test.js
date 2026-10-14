@@ -488,3 +488,49 @@ test('a remote air kick, then their air jump within its 0.4 s: no flip, during t
     assert.equal(F.list(ms)[0].state.flipT, Infinity, `at ${ms.toFixed(0)}: ${F.list(ms)[0].state.act}`);
   }
 });
+
+// Fighters collide (body collision addendum): spots from the level.
+const STAND = L.door.y, X0 = L.spawns.find((s) => s.r === L.door.r).x;
+const fighter = (id, x, extra = {}) => ({ id, hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x, y: STAND, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0, ...extra });
+const runAt = (F, ms0, ms1) => { for (let ms = ms0; ms < ms1; ms += 1000 / 60) F.step(1 / 60, ms); };
+
+test('collision: a remote body predicted into me stops at contact; protected me, it walks through', () => {
+  for (const solid of [true, false]) {
+    const me = { x: X0, y: STAND, vx: 0, vy: 0, solid, id: 'me' };
+    const F = createFighters({ kindAt: kinds, me: () => me });
+    F.apply({ t: 'aw', fighters: [fighter('b', X0 + 6, { vx: -30, i: 1 })] }, 0);
+    runAt(F, 0, 250);
+    F.apply({ t: 'a', id: 'b', x: F.get('b').body.x, y: STAND, vx: -30, vy: 0, f: -1, g: 1, i: 1, a: 0, ts: 250 }, 250);
+    runAt(F, 250, 1000);
+    const x = F.list(1000)[0].state.x;
+    if (solid) assert.ok(Math.abs(x - (X0 + 0.8)) < 1e-6, `stopped beside me (${x})`);
+    else assert.ok(x < X0 - 0.8, `walked through (${x})`);
+  }
+});
+
+test('collision: remote bodies collide with each other too; a protected one is passed through', () => {
+  const F = createFighters({ kindAt: kinds });
+  F.apply({ t: 'aw', fighters: [fighter('c', X0), fighter('b', X0 + 6, { vx: -30, i: 1 })] }, 0);
+  runAt(F, 0, 250);
+  const b = F.list(250).find((r) => r.id === 'b').state, c = F.list(250).find((r) => r.id === 'c').state;
+  assert.ok(Math.abs(b.x - (c.x + 0.8)) < 1e-6, `b stopped beside c (${b.x}, ${c.x})`);
+  const G = createFighters({ kindAt: kinds });
+  G.apply({ t: 'aw', fighters: [fighter('c', X0, { safe: 1 }), fighter('b', X0 + 6, { vx: -30, i: 1 })] }, 0);
+  runAt(G, 0, 250);
+  assert.ok(G.list(250).find((r) => r.id === 'b').state.x < X0 - 0.8, 'through the protected one');
+});
+
+test('collision: a correction gliding out never draws a remote body inside me (nor shoves me)', () => {
+  const me = { x: X0, y: STAND, vx: 0, vy: 0, solid: true, id: 'me' };
+  const F = createFighters({ kindAt: kinds, me: () => me, rtt: () => 0 });
+  F.apply({ t: 'aw', fighters: [fighter('b', X0 + 3, { vx: -30, i: 1 })] }, 0);
+  runAt(F, 0, 200);
+  assert.ok(Math.abs(F.list(200)[0].state.x - (X0 + 0.8)) < 1e-6, 'at contact');
+  // A state sent 100 ms ago that predicts them short of me: the drawn body glides back toward its old spot.
+  F.apply({ t: 'a', id: 'b', x: X0 + 4.6, y: STAND, vx: -30, vy: 0, f: -1, g: 1, i: 1, a: 0, ts: 100 }, 200);
+  for (let ms = 200; ms < 600; ms += 1000 / 60) {
+    F.step(1 / 60, ms);
+    const x = F.list(ms)[0].state.x;
+    assert.ok(x >= X0 + 0.8 - 1e-9, `drawn inside me at ${ms.toFixed(0)} ms (${x})`);
+  }
+});

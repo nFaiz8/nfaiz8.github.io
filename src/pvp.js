@@ -2,7 +2,7 @@
 // messages, the practice dummy and offline play (a local referee), and what the HUD shows. DOM-free glue:
 // every rule comes from fight.js or the referee. Positions are map cells here and arena-local on the
 // wire; times are ms here and seconds in the rules.
-import { newBody, stepBody, knock, rolling } from './arena.js';
+import { newBody, stepBody, knock, rolling, doorZone } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
@@ -48,7 +48,8 @@ export function createPvp({
 }) {
   const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
   const DUMMY_SPOT = floorSpot(level, DUMMY_COL);
-  const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt });
+  const door = doorZone(level, off); // nobody collides in the doorway
+  const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt, door, me: (now) => myBox(now) });
   const fx = createFx({ kindAt: levelKind(level), offset: off, reducedMotion });
   // My own referee: my cap, ammo and combo always, and offline the whole fight (the dummy too). Online the
   // dummy lives in a second one, against a stand-in of me, so its hits never touch what the server owns.
@@ -80,6 +81,25 @@ export function createPvp({
   function snap(now, facing = world.player.facing) {
     const p = world.player, l = local(p.x, p.y);
     return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0), a: aim, ts: ts(now) };
+  }
+
+  // ---------- bodies colliding (body collision addendum) ----------
+  // Which way a goes when its centre is on b's: by id, so both screens agree.
+  const tie = (a, b) => (String(a) < String(b) ? -1 : 1);
+  // Solid unless dead, protected or rolling (nor when nobody is fighting).
+  const mySolid = (now) => entered && me.alive && sec(now) >= me.safeUntil && !rolling(world.player);
+  function myBox(now) {
+    const p = world.player;
+    return { id: me.id, x: p.x, y: p.y, vx: p.vx, vy: p.vy, solid: mySolid(now) };
+  }
+  const dummyBox = (b = dummy.body) => ({ id: DUMMY, x: b.x, y: b.y, vx: b.vx, vy: b.vy, solid: dummy.rec.alive, tie: tie(me.id, DUMMY) });
+  // What my body collides with this frame: the other fighters as drawn, and the dummy.
+  function collide(now) {
+    if (!entered || !me.alive) return null;
+    const others = fighters.boxes(now);
+    for (const o of others) o.tie = tie(me.id, o.id);
+    if (dummyShown(now)) others.push(dummyBox());
+    return { others, solid: mySolid(now), door };
   }
 
   // ---------- the dummy ----------
@@ -279,6 +299,7 @@ export function createPvp({
 
   function control(inp, now) {
     const p = world.player;
+    world.collide = collide(now);
     if (!entered || !me.alive) { world.aimFacing = 0; aimed = false; bits = 0; return { ...IDLE }; }
     let facing = p.facing < 0 ? -1 : 1;
     const mouse = inp.mouse && inp.mouse.on && num(inp.mouse.x) && num(inp.mouse.y) ? inp.mouse : null;
@@ -315,7 +336,7 @@ export function createPvp({
     fighters.step(dt, now);
     const on = dummyShown(now);
     if (on && dt > 0) {
-      stepBody(dummy.body, dt, IDLE, world.kindAt, { inside: world.inside });
+      stepBody(dummy.body, dt, IDLE, world.kindAt, { inside: world.inside, door, others: [{ ...myBox(now), tie: tie(DUMMY, me.id) }] });
       syncDummy(now);
     }
     runLocal(ref.tick(t, everyone(now)), now);
@@ -445,6 +466,7 @@ export function createPvp({
     fighters.clear(); fx.clear();
     act = null; bits = 0;
     world.aimFacing = 0;
+    world.collide = null;
   }
 
   function setOnline(v, now) {
