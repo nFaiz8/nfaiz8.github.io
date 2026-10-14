@@ -114,7 +114,7 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
       peers.apply(m, now);
       if (m.t === 'welcome') {
         fightOk = !!fightHash && m.fight === fightHash;
-        if (!fightOk) console.warn('arena: server level differs; no fighting');
+        if (fightHash && !fightOk) console.warn('arena: server level differs; no fighting'); // fighting off: nothing to differ
       }
       if (ARENA_T.has(m.t)) onArena(m);
       if (m.t === 'c') { const p = peers.get(m.id); if (p) onChat({ id: m.id, name: p.name, text: m.text }); }

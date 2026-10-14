@@ -211,6 +211,21 @@ test('an old server (no fight field) or a different hash means no fighting, with
   });
 });
 
+test('with fighting off (no fight hash) a welcome warns of nothing; a hash that differs still warns', () => {
+  for (const fightHash of ['', undefined]) {
+    withLive({ fightHash }, ({ live, say, warns }) => {
+      say({ t: 'welcome', id: 'me', peers: [], fight: 'abc' });
+      say({ t: 'welcome', id: 'me', peers: [] });
+      assert.equal(live.fightOk, false);
+      assert.deepEqual(warns, []);
+    });
+  }
+  withLive({ fightHash: 'abc' }, ({ say, warns }) => {
+    say({ t: 'welcome', id: 'me', peers: [], fight: 'zzz' });
+    assert.deepEqual(warns, ['arena: server level differs; no fighting']);
+  });
+});
+
 test('arena message types reach onArena; positions and chat do not', () => {
   const got = [];
   withLive({ fightHash: 'abc', onArena: (m) => got.push(m.t) }, ({ say }) => {
