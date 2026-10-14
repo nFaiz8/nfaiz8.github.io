@@ -350,6 +350,7 @@ async function boot() {
     nameMsg.textContent = '';
     nameForm.hidden = false;
     nameInput.focus();
+    nameInput.select(); // typing replaces the old name
   };
   const closeName = () => { nameForm.hidden = true; stage.focus({ preventScroll: true }); };
   document.getElementById('name-btn').addEventListener('click', openName);
