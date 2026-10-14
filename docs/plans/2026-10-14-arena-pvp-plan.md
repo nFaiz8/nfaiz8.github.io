@@ -3141,6 +3141,8 @@ Spec: docs/specs/2026-10-14-arena-bigger-zoom.md. Order from here: 14R and 17 (r
 
 ### Task 19: A bigger room (240 × 51) and a side view that zooms in by gun
 
+> **Superseded by Task 19T** (the train level, below). Its zoom-by-gun part carries over into 19T; its 240 × 51 traced room does not.
+
 **Spec:** `docs/specs/2026-10-14-arena-bigger-zoom.md` (binding).
 
 **Files:**
@@ -3195,3 +3197,59 @@ Spec: docs/specs/2026-10-14-arena-body-collision.md. Order: … → 19 → 18 �
    lock.
 5. Play two clients locally if you can, and describe how it feels.
 6. Commit with the message `Arena PvP: fighters collide: no walking through people, heads to stand on`.
+
+## Amendment (2026-10-14, user choice: the train level)
+
+The user dropped the photo backdrop and the traced platforms for a train scene, and picked the hand-drawn
+option B ("b is def the move"). Spec: `docs/specs/2026-10-14-arena-train-level.md`. It replaces §1 of
+`2026-10-14-arena-bigger-zoom.md` and keeps its §2 zoom, with new row values.
+
+### Task 19T: The train level: two cutaway subway cars in a tunnel, the hand-drawn look, and the zoom by gun
+
+**Spec:**
+- `docs/specs/2026-10-14-arena-train-level.md` (binding);
+- `docs/specs/2026-10-14-arena-bigger-zoom.md` §2 (the zoom mechanics);
+- the visual reference, option B's page: `.superpowers/arena-looks/train-ascii.html` (git-ignored, read it
+  in full).
+
+**Files:**
+- Create:
+  - `src/train.js`: `buildTrain`, `tunnel`, `lightAt`, `frameAt`, `lookChar`; pure and import-free;
+  - `test/train.test.js`.
+- Modify:
+  - `src/arena.txt` (the new 204 × 33 collision) and `src/level.js` (size, plus the `D` door marker);
+  - `src/arena.js`: `SIDE_ROWS`, the pure `sideZoom`, the camera lead and the touch inset; drop the
+    backdrop crop;
+  - `src/pvp.js`: `DUMMY_SPOT` comes from the level;
+  - `server/gallery.js`: `DOOR` comes from the level's `D`;
+  - `src/layout.js`: the arena box;
+  - `src/render/canvas.js`, `src/render/gl.js`, `src/render/shaders.js`:
+    - draw the train decor with per-cell colour and the line look's background tints;
+    - halation on emissive cells;
+    - the atlas gains every train glyph;
+    - the side-view cell size by zoom;
+    - a crisp rebuild once the zoom settles;
+    - `cellAt` and `pointAt`;
+  - `src/main.js`:
+    - no arena backdrop, while E still opens the photo;
+    - the L key and the look button, remembered in localStorage;
+    - drive the zoom from my gun;
+    - pass the frame time and Reduce Motion to the decor.
+- Test:
+  - `test/level.test.js`, `test/arena.test.js`, `test/pvp.test.js` (the dummy shot);
+  - `server/test/server.test.js`;
+  - `e2e/run.mjs` and `e2e/multiplayer.mjs`: update every check that hard-codes the old level, and add the
+    zoom, look and atlas checks.
+
+**Steps (TDD):**
+1. Write the failing tests from spec §3.
+2. Watch them fail.
+3. Write `src/arena.txt` from the collision table. Render it as text and check it against option B's
+   geometry.
+4. Build `train.js` by porting option B and keeping its constants.
+5. Add the renderers, then the zoom, then the look toggle.
+6. Run `npm test`, `cd server && npm test`, and all three e2e scripts, each one through the e2e lock.
+7. Look at screenshots in both renderers, on desktop and on an 852 × 393 phone with touch, in both looks, at
+   the deagle and sniper zooms. Tune the halation.
+8. Commit with the message `Arena: the train level: two subway cars in a tunnel, drawn by hand, and a side view that zooms in by gun`.
+
