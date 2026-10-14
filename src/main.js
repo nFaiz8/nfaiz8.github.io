@@ -1,6 +1,7 @@
 import { SITE } from './config.js';
 import { createLive, peerEntities, heartEntities, localEcho } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH } from './peers.js';
+import { cleanName } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt } from './world.js';
@@ -156,6 +157,7 @@ function onKey(e) {
   const digit = /^Digit([1-5])$/.exec(e.code);
   if (digit) { sendEmote(EMOTES_ORDER[digit[1] - 1]); return true; }
   if (e.code === 'KeyH') { sendHeart(world.focus); return true; }
+  if (e.code === 'KeyN') { document.getElementById('name-btn').click(); return true; }
   return false;
 }
 
@@ -311,6 +313,24 @@ async function boot() {
     emoteBar.append(b);
   });
   emoteBtn.addEventListener('click', () => { emoteBar.hidden = !emoteBar.hidden; emoteBtn.setAttribute('aria-expanded', String(!emoteBar.hidden)); });
+  const nameForm = document.getElementById('name-form'), nameInput = document.getElementById('name-input'), nameMsg = document.getElementById('name-msg');
+  const openName = () => {
+    try { nameInput.value = localStorage.getItem('faiz-live-name') || ''; } catch {}
+    nameMsg.textContent = '';
+    nameForm.hidden = false;
+    nameInput.focus();
+  };
+  const closeName = () => { nameForm.hidden = true; stage.focus({ preventScroll: true }); };
+  document.getElementById('name-btn').addEventListener('click', openName);
+  nameForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const n = cleanName(nameInput.value);
+    if (n === null) { nameMsg.textContent = 'try another name'; return; }
+    try { localStorage.setItem('faiz-live-name', n); } catch {}
+    if (live) live.setName(n);
+    closeName();
+  });
+  nameInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeName(); } });
   const hereEl = document.getElementById('hud-here');
   live = createLive({
     version: data.generated,

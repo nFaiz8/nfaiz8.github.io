@@ -15,11 +15,18 @@
       <span class="hud-tools">
         <span class="hud-here" id="hud-here" hidden></span>
         <button class="hud-btn" id="emote-btn" type="button" title="Emotes (1–5)" aria-expanded="false" hidden>[☺]</button>
+        <button class="hud-btn" id="name-btn" type="button" title="Your name (N)">[N] name</button>
         <button class="hud-btn" id="map-btn" type="button" title="Map (M)">[M] map</button>
         <button class="hud-btn" id="renderer-btn" type="button" title="Switch renderer (R)"></button>
       </span>
     </header>
     <div class="emote-bar" id="emote-bar" hidden></div>
+    <form class="name-form" id="name-form" hidden>
+      <label for="name-input">your name</label>
+      <input id="name-input" maxlength="12" autocomplete="nickname" spellcheck="false" />
+      <button class="vbtn" type="submit">save</button>
+      <span class="name-msg" id="name-msg" role="status"></span>
+    </form>
     <div class="caption" id="caption" aria-live="polite"></div>
     <div class="note" id="note" role="status"></div>
     <pre class="debug" id="debug" hidden></pre>
