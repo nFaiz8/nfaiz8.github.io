@@ -2,7 +2,7 @@
 import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
-import { newBody, stepBody, sideCamera, kindsFor, insideFor } from './arena.js';
+import { newBody, stepBody, sideCamera, kindsFor, insideFor, SOLID } from './arena.js';
 
 const SPEED = 30; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
 const SPRINT = 1.5; // holding Shift
@@ -273,6 +273,15 @@ export function enterSide(world, { place = true } = {}) {
   if (place) { p.x = a.entry.x + 0.5; p.y = a.floorY - 1.5; p.facing = -1; }
   // prevJump: a key still held from walking in through the door (W, ↑, Space) must not fire a jump on
   // arrival. A teleport (a link, the viewer) has no such key, so the first press there jumps.
+  // A teleport can arrive with the old one-row centre: lift out of the floor and let gravity settle.
+  if (!place && world.kindAt) {
+    const solid = () => {
+      for (let r = Math.floor(p.y - 1.5 + 1e-6); r <= Math.floor(p.y + 1.5 - 1e-6); r++)
+        for (let c = Math.floor(p.x - 0.4 + 1e-6); c <= Math.floor(p.x + 0.4 - 1e-6); c++) if (world.kindAt(c, r) === SOLID) return true;
+      return false;
+    };
+    for (let i = 0; i < 8 && solid(); i++) p.y -= 0.5;
+  }
   Object.assign(p, newBody(p.x, p.y), { prevJump: place });
   world.mode = 'side';
   world.want = null;

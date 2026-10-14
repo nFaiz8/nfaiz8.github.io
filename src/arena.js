@@ -22,7 +22,7 @@ const NONE = {};
 const EPS = 1e-6;
 
 export function newBody(x, y) {
-  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, carry: false };
+  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0 };
 }
 
 export const rolling = (b) => b.rollT >= 0;
@@ -33,7 +33,7 @@ export function knock(b, kx, ky, stun) {
   if (ky) { b.vy = ky; if (ky < 0) b.onGround = b.onPlatform = false; }
   b.stun = Math.max(b.stun, stun);
   b.rollT = -1;
-  b.carry = false;
+  b.cut = true; // a let-go of jump must not halve the knock's vy
 }
 
 // Start a roll: on the ground, not stunned, not already rolling, and cooled down.
@@ -51,54 +51,62 @@ export function insideFor(map) {
   return (cx, cy) => cx > a.x && cx < a.x + a.w - 1 && cy > a.y && cy < a.y + a.h - 1;
 }
 
-// A roll that ends in the air (a jump, a ledge) carries its speed: with no steering held, the air
-// doesn't slow you until you land.
-const endRoll = (b) => { b.rollT = -1; b.rollCool = ROLL.cooldown; b.carry = !b.onGround; };
+const endRoll = (b) => { b.rollT = -1; b.rollCool = ROLL.cooldown; };
 
 export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside = null } = {}) {
   b.t += dt;
   const stunned = b.stun > 0;
+  const heldJump = !!input.jump;
   if (stunned) { b.stun = Math.max(0, b.stun - dt); input = NONE; } // knocked back: no control until it ends
   b.rollCool = Math.max(0, b.rollCool - dt);
-  if (b.onGround) b.carry = false;
   if (input.roll) startRoll(b, Math.sign(input.roll));
-  const jump = !!input.jump;
-  if (jump && !b.prevJump) b.sinceJump = 0; else b.sinceJump += dt;
-  // Letting go while rising cuts the jump short.
-  if (!jump && b.prevJump && b.vy < 0 && !b.cut) { b.vy *= 0.5; b.cut = true; }
-  b.prevJump = jump;
-  b.sinceGround = b.onGround ? 0 : b.sinceGround + dt;
-  if (input.down && b.onGround && b.onPlatform) { b.dropUntil = b.t + DROP; b.onGround = false; }
-  // A jump pressed a moment before landing, or a moment after running off a ledge, still counts.
-  if (b.sinceJump <= BUFFER && b.sinceGround <= COYOTE) {
-    b.vy = -JUMP_V;
-    b.cut = false;
-    if (!jump) { b.vy *= 0.5; b.cut = true; } // a buffered tap that was already let go: a short hop
-    b.sinceJump = b.sinceGround = Infinity;
-    b.onGround = false;
-    if (b.rollT >= 0) endRoll(b); // a jump out of a roll keeps its speed
+  const rolled = b.rollT >= 0; // rolling this step, even if a jump ends the roll below
+  const left = Math.max(0, ROLL.time - b.rollT); // roll time left, so the last step doesn't overshoot
+  if (stunned) {
+    // Jump is ignored, but a held key isn't a new press when the stun ends.
+    b.sinceJump += dt;
+    b.prevJump = heldJump;
+    b.sinceGround = b.onGround ? 0 : b.sinceGround + dt;
+  } else {
+    const jump = !!input.jump;
+    if (jump && !b.prevJump) b.sinceJump = 0; else b.sinceJump += dt;
+    // Letting go while rising cuts the jump short.
+    if (!jump && b.prevJump && b.vy < 0 && !b.cut) { b.vy *= 0.5; b.cut = true; }
+    b.prevJump = jump;
+    b.sinceGround = b.onGround ? 0 : b.sinceGround + dt;
+    if (input.down && b.onGround && b.onPlatform) { b.dropUntil = b.t + DROP; b.onGround = false; }
+    // A jump pressed a moment before landing, or a moment after running off a ledge, still counts.
+    if (b.sinceJump <= BUFFER && b.sinceGround <= COYOTE) {
+      b.vy = -JUMP_V;
+      b.cut = false;
+      if (!jump) { b.vy *= 0.5; b.cut = true; } // a buffered tap that was already let go: a short hop
+      b.sinceJump = b.sinceGround = Infinity;
+      b.onGround = false;
+      if (b.rollT >= 0) endRoll(b); // a jump out of a roll keeps its speed
+    }
   }
 
   // While stunned the door is a wall: the cells outside the arena are solid.
   const kinds = stunned && inside ? (c, r) => (inside(c, r) ? kindAt(c, r) : SOLID) : kindAt;
-  if (b.rollT >= 0) {
-    b.vx = b.rollDir * ROLL.speed; // a roll ignores steering
-    b.rollT += dt;
-  } else if (stunned) {
-    b.vx *= Math.exp(-dt / STUN_DECAY);
+  let mx;
+  if (rolled) {
+    b.vx = b.rollDir * ROLL.speed; // a roll ignores steering, also on the step a jump ends it
+    mx = b.vx * Math.min(dt, left);
+    if (b.rollT >= 0) b.rollT += dt;
   } else {
-    steer(b, dt, input, reducedMotion);
+    if (stunned) b.vx *= Math.exp(-dt / STUN_DECAY);
+    else steer(b, dt, input, reducedMotion);
+    mx = b.vx * dt;
   }
   const vy0 = b.vy;
   b.vy = Math.min(MAX_FALL, b.vy + GRAVITY * dt);
-  const mx = b.vx * dt, my = ((vy0 + b.vy) / 2) * dt; // exact for constant gravity
+  const my = ((vy0 + b.vy) / 2) * dt; // exact for constant gravity
   move(b, mx, my, kinds);
   // The roll ends after its time, or when it runs off a ledge (keeping its speed).
   if (b.rollT >= 0 && (b.rollT >= ROLL.time - 1e-9 || !b.onGround)) endRoll(b);
 }
 
 function steer(b, dt, input, reducedMotion) {
-  if (b.carry && !input.x) return; // coasting on a roll's speed
   const target = (input.x || 0) * RUN * (input.run ? SPRINT : 1);
   const k = reducedMotion ? 1 : 1 - Math.exp((-dt * (b.onGround ? 1 : AIR_CONTROL)) / ACCEL);
   b.vx += (target - b.vx) * k;

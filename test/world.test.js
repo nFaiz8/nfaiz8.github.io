@@ -262,3 +262,14 @@ test('stunned in the side view, the arena door is a wall', async () => {
   assert.equal(w.want, null, 'not carried out of the door');
   assert.equal(w.mode, 'side');
 });
+
+test('teleporting into the arena at the old one-row centre settles onto the floor and can walk', () => {
+  const w = createWorld(amap);
+  teleport(w, A.entry.x + 0.5, A.entry.y + 0.5);
+  for (let i = 0; i < 30; i++) step(w, 1 / 60, SIDE_IDLE);
+  assert.equal(w.mode, 'side');
+  assert.equal(w.player.y, A.floorY - 1.5, 'feet on the floor');
+  const x0 = w.player.x;
+  for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: -1 });
+  assert.ok(x0 - w.player.x > 3, `walked ${x0 - w.player.x}`);
+});

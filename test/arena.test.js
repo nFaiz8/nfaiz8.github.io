@@ -289,17 +289,56 @@ test('a jump during a roll ends it and keeps its speed (a long jump)', () => {
   stepBody(b, 1 / 60, { ...IDLE, jump: true }, kindAt);
   assert.equal(b.rollT, -1);
   assert.equal(b.onGround, false);
-  assert.ok(b.vx > 40, `kept its speed (${b.vx})`);
+  assert.equal(b.vx, 48, 'kept its full speed at take-off');
+  const rm = newBody(5.5, 18.5);
+  sim(rm, 0.2);
+  stepBody(rm, 1 / 60, { ...IDLE, roll: 1 }, kindAt, { reducedMotion: true });
+  sim(rm, 0.1);
+  stepBody(rm, 1 / 60, { ...IDLE, jump: true }, kindAt, { reducedMotion: true });
+  assert.equal(rm.vx, 48, 'and with Reduce Motion');
 });
 
 test('a roll off a ledge ends and falls, keeping its speed', () => {
   const b = newBody(17.5, 13.5); // on the platform at row 15, cols 10–19
   sim(b, 0.2);
   stepBody(b, 1 / 60, { ...IDLE, roll: 1 }, kindAt);
-  sim(b, 0.1);
+  let n = 0;
+  while (b.onGround && n++ < 60) stepBody(b, 1 / 60, IDLE, kindAt);
   assert.equal(b.rollT, -1);
   assert.equal(b.onGround, false);
-  assert.ok(b.vx > 40);
+  assert.equal(b.vx, 48, 'keeps the roll speed at the moment it leaves');
+});
+
+test('a roll covers 14.4 cells whatever the step sizes, even a coarse one or a clamped hitch', () => {
+  const run = (dts) => {
+    const b = newBody(5.5, 18.5);
+    sim(b, 0.2);
+    const x0 = b.x;
+    stepBody(b, dts[0], { ...IDLE, roll: 1 }, kindAt);
+    for (const dt of dts.slice(1)) { if (b.rollT < 0) break; stepBody(b, dt, IDLE, kindAt); }
+    assert.equal(b.rollT, -1);
+    return b.x - x0;
+  };
+  const fill = (first, dt) => { const a = [first]; let t = first; while (t < 0.5) { a.push(dt); t += dt; } return a; };
+  assert.ok(Math.abs(run(fill(0.049, 0.049)) - 14.4) <= 0.2, 'dt 0.049');
+  const mix = fill(1 / 60, 1 / 60); mix.splice(5, 0, 0.05);
+  assert.ok(Math.abs(run(mix) - 14.4) <= 0.2, '1/60 with one 50 ms step');
+});
+
+test('stunned with jump held: the knock keeps its velocity, and no jump fires when the stun ends', () => {
+  const up = newBody(10.5, 18.5);
+  sim(up, 0.2);
+  knock(up, 20, -22, 0.4);
+  stepBody(up, 1 / 60, { ...IDLE, jump: true }, kindAt);
+  assert.ok(up.vy < -22 + 133 / 60 + 0.01 && up.vy > -22, `vy only gravity-changed (${up.vy})`);
+  stepBody(up, 1 / 60, { ...IDLE, jump: true }, kindAt);
+  assert.ok(up.vy < -17, `still not halved (${up.vy})`);
+  const g = newBody(10.5, 18.5);
+  sim(g, 0.2);
+  knock(g, 5, 0, 0.2);
+  let top = g.y;
+  sim(g, 1, { ...IDLE, jump: true }, 1 / 60, (s) => { top = Math.min(top, s.y); });
+  assert.equal(top, 18.5, 'holding jump through a stun does not jump after it');
 });
 
 test('a knock ends a roll', () => {
