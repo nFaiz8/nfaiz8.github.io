@@ -97,3 +97,16 @@ test('in the side view the photo under a platform keeps the room light: only the
   assert.ok(Math.abs(L.buf[i] - 0.75) < 0.01, `light at a platform cell ${L.buf[i]}`);
   assert.ok(L.halo[i] > 0, 'the halo is there');
 });
+
+test('in the side view everything outside the arena is dark (a tall view shows past its ceiling and floor)', () => {
+  const L = createArenaLighting(amap);
+  const W = 20, H = 8, wx = AR.x + 30, wy = AR.y - 4; // 4 rows above the ceiling wall to 3 rows into the room
+  const { rgba, glow } = lightWindow(L, wx, wy, W, H, { x: 0, y: 0 }, 0, false);
+  for (let x = 0; x < W; x++) {
+    const above = ((AR.y - 2 - wy) * W + x) * 4, inside = ((AR.y + 2 - wy) * W + x) * 4;
+    assert.ok(rgba[above] < 3 && glow[above] < 3, `above the ceiling: ${rgba[above]}`);
+    assert.ok(Math.abs(rgba[inside] - 0.75 * 255) <= 2, `inside: ${rgba[inside]}`);
+  }
+  const off = lightWindow(L, -10, AR.y + 5, 4, 1, { x: 0, y: 0 }, 0, false).rgba;
+  assert.ok(off[0] < 3, `off the map: ${off[0]}`);
+});

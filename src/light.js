@@ -93,12 +93,15 @@ export function staticLights(map) {
 
 // Bake the static lights into a map-sized buffer. Prints are lit from within so they stay the
 // brightest thing on screen. halos go into their own buffer, added to the glow layer (the arena's halation).
-export function createLighting(map, { ambient = AMBIENT, lights = staticLights(map), halos = [], prints = true, lantern = true } = {}) {
+// area (a rect) keeps every bit of light inside it: the rest of the map, and off the map, is black.
+export function createLighting(map, { ambient = AMBIENT, lights = staticLights(map), halos = [], prints = true, lantern = true, area = null } = {}) {
   const buf = new Float32Array(map.W * map.H * 3);
-  for (let i = 0; i < map.W * map.H; i++) buf.set(ambient, i * 3);
+  const within = (x, y) => !area || (x >= area.x && y >= area.y && x < area.x + area.w && y < area.y + area.h);
+  for (let i = 0; i < map.W * map.H; i++) if (within(i % map.W, Math.floor(i / map.W))) buf.set(ambient, i * 3);
   for (const l of lights) castLight(map, buf, 0, 0, map.W, map.H, l);
   const halo = halos.length ? new Float32Array(map.W * map.H * 3) : null;
   for (const l of halos) castLight(map, halo, 0, 0, map.W, map.H, l);
+  if (halo && area) for (let i = 0; i < map.W * map.H; i++) if (!within(i % map.W, Math.floor(i / map.W))) halo.fill(0, i * 3, i * 3 + 3);
   const print = new Uint8Array(map.W * map.H);
   for (const f of prints ? map.frames : []) {
     if (f.backdrop) continue;
@@ -112,19 +115,20 @@ export function createLighting(map, { ambient = AMBIENT, lights = staticLights(m
     }
   }
   const dark = map.rooms.find((r) => r.plan && r.plan.darkroom) || null;
-  return { map, buf, halo, print, lights, dark, ambient, lantern, scratch: new Float32Array(0) };
+  return { map, buf, halo, print, lights, dark, ambient, lantern, area, scratch: new Float32Array(0) };
 }
 
 // The arena's side view: a brighter, neutral light so the photo reads, and every platform glows with a
 // red-orange halo bleeding onto the photo around it like film halation. The platforms themselves are drawn
-// on top of the light at full brightness, so nothing here brightens the photo under them.
+// on top of the light at full brightness, so nothing here brightens the photo under them. Only the room
+// (walls included) is lit: a view taller than the room shows black past its ceiling, not the next room.
 export function createArenaLighting(map) {
   const a = map.arena, halos = [];
   for (let r = 0; r < a.rows; r++) for (let c = 0; c < a.cols; c++) {
     if (!a.level.cells[r * a.cols + c]) continue;
     halos.push({ x: a.x + 1 + c + 0.5, y: a.y + 1 + r + 0.5, radius: 7, color: [1.0, 0.36, 0.16], intensity: 0.08 });
   }
-  return createLighting(map, { ambient: ARENA_AMBIENT, lights: [], halos, prints: false, lantern: false });
+  return createLighting(map, { ambient: ARENA_AMBIENT, lights: [], halos, prints: false, lantern: false, area: { x: a.x, y: a.y, w: a.w, h: a.h } });
 }
 
 // The light for a window of the map: static light plus the lantern at (px, py), flickering with t.
@@ -152,7 +156,7 @@ export function lightWindow(lighting, wx, wy, ww, wh, lantern, t = 0, flicker = 
       const isPrint = inside && print[my * map.W + mx];
       const inDark = dark && !isPrint && mx >= dark.x && mx < dark.x + dark.w && my >= dark.y && my < dark.y + dark.h;
       for (let c = 0; c < 3; c++) {
-        const st = (s >= 0 ? buf[s + c] : amb[c] * 0.5) * (inDark ? pulse : 1);
+        const st = (s >= 0 ? buf[s + c] : lighting.area ? 0 : amb[c] * 0.5) * (inDark ? pulse : 1);
         const v = st + dyn[d + c];
         out[o + c] = Math.min(1, v) * 255;
         // A faint haze where light falls, so pools of light show on the dark floor too.

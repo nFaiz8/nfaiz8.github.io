@@ -6,7 +6,7 @@ import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, rangeOf } from '../photos.js';
 import { lightWindow } from '../light.js';
-import { coverCrop } from '../arena.js';
+import { coverCrop, nearArena } from '../arena.js';
 import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
@@ -255,7 +255,10 @@ export function createGlRenderer() {
     const vx = Math.round(left * m.cw * dpr) / (m.cw * dpr), vy = Math.round(top * m.ch * dpr) / (m.ch * dpr);
     const origin = [Math.floor(vx) - 1, Math.floor(vy) - 1];
 
+    // The arena's backdrop is a large image: only once you're near it.
+    const arenaNear = world.mode === 'side' || !!world.want || nearArena(map, world.player);
     for (const f of map.frames) {
+      if (f.backdrop && !arenaNear) continue;
       if (f.x < left + cols * 2 && f.x + f.w > left - cols && f.y < top + rows * 2 && f.y + f.h > top - rows) request(f);
     }
 

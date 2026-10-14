@@ -134,3 +134,11 @@ export function kindsFor(map) {
     return isWalkable(map, cx, cy) ? AIR : SOLID;
   };
 }
+
+// In the arena, its corridor, or the lobby's west end by its sign: close enough to start loading the
+// backdrop's large image. Spawn and the rest of the gallery are not, so most visitors never fetch it.
+export const NEAR = 25;
+export function nearArena(map, p) {
+  const a = map.arena;
+  return !!a && p.x < a.x + a.w + NEAR && p.y >= a.y && p.y <= a.floorY + 6;
+}

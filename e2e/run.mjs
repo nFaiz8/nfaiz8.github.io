@@ -364,9 +364,35 @@ await withBrowser(async ({ page, url, errors }) => {
           (v.rows >= a.h || (wd.cam.y - v.rows / 2 >= a.y - 0.01 && wd.cam.y + v.rows / 2 <= a.y + a.h + 0.01));
       });
       assert.ok(ok, `${w}×${h}`);
+      // A view taller than the room shows past its ceiling: that must be dark, not the next room
+      // (its wall and prints measured p99 72 here; dark is 0–3).
+      const a = await arenaInfo(page);
+      const top = await cellsClip(page, a.x, a.y - 8, 1, 8);
+      const y = Math.max(0, top.y), height = Math.floor(top.y + top.height - y);
+      if (height >= 4) {
+        const { data } = await sharp(await page.screenshot({ clip: { x: 0, y, width: w, height } })).greyscale().raw().toBuffer({ resolveWithObject: true });
+        const p99 = [...data].sort((m, n) => m - n)[Math.floor(data.length * 0.99)];
+        assert.ok(p99 < 20, `${w}×${h}: above the ceiling is dark (p99 ${p99})`);
+      }
     }
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   });
+  for (const r of ['canvas', 'gl']) {
+    await check(`${r}: the backdrop's large image loads only near the arena, not at spawn`, async () => {
+      const hits = [];
+      const onReq = (q) => { if (/\/hi\//.test(q.url())) hits.push(q.url()); };
+      page.on('request', onReq);
+      try {
+        await page.goto(`${url}?r=${r}`); await ready(page);
+        const a = await arenaInfo(page);
+        await sleep(2000);
+        assert.deepEqual(hits.filter((h) => h.includes(a.id)), [], 'fetched at spawn');
+        await page.evaluate((d) => window.__ascii.teleport(d.x + 6.5, d.y + 1.5), a.door); // in the corridor
+        await page.waitForFunction((id) => window.__ascii.loaded(id), { timeout: 15000 }, a.id);
+        assert.equal(hits.filter((h) => h.includes(a.id)).length, 1);
+      } finally { page.off('request', onReq); }
+    });
+  }
   await check('the arena photo in the viewer has an arena → button that takes you there; other photos do not', async () => {
     await page.goto(url); await ready(page);
     const id = await page.evaluate(() => window.__ascii.map.arena.backdrop.id);

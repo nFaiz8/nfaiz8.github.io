@@ -6,7 +6,7 @@ import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, cellsFor, hasFailed } from '../photos.js';
 import { lightWindow } from '../light.js';
-import { coverCrop } from '../arena.js';
+import { coverCrop, nearArena } from '../arena.js';
 
 const CW = 48, CH = 24; // chunk size in cells
 
@@ -198,7 +198,10 @@ export function createCanvasRenderer() {
     }
 
     // Load photos within about a screen of the view
+    // The arena's backdrop is a large image: only once you're near it.
+    const arenaNear = world.mode === 'side' || !!world.want || nearArena(map, world.player);
     for (const f of map.frames) {
+      if (f.backdrop && !arenaNear) continue;
       if (f.x < left + cols * 2 && f.x + f.w > left - cols && f.y < top + rows * 2 && f.y + f.h > top - rows) request(f);
     }
 

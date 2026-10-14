@@ -206,3 +206,18 @@ test('kindsFor: level cells inside, walls solid, the door open', () => {
   assert.equal(k(a.door.x, a.door.y + 1), AIR, 'door');
   assert.equal(k(a.door.x + 1, a.door.y + 1), AIR, 'corridor');
 });
+
+import { nearArena } from '../src/arena.js';
+
+test('nearArena: the corridor and the room are near; spawn and the rest of the gallery are not', () => {
+  const json = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
+  const d = indexData(json, ['IMG_1003']);
+  const map = buildLayout(d, { name: 'Faiz' }, { arena: { photo: d.byId.get('IMG_1003'), level: parseLevel(text) } });
+  const a = map.arena;
+  assert.ok(nearArena(map, { x: a.door.x + 5, y: a.door.y + 1.5 }), 'in the corridor');
+  assert.ok(nearArena(map, { x: a.x + 40, y: a.floorY - 1 }), 'inside');
+  assert.ok(!nearArena(map, map.spawn), `spawn (${map.spawn.x - a.door.x} cells east of the door)`);
+  assert.ok(!nearArena(map, { x: a.door.x + 5, y: a.y - 20 }), 'north of it');
+  assert.ok(!nearArena(map, { x: a.door.x + 5, y: a.floorY + 20 }), 'south of it');
+  assert.ok(!nearArena({ ...map, arena: null }, map.spawn), 'no arena');
+});
