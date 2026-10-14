@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { indexData, captionText, plaqueText } from '../src/data.js';
+import { indexData, captionText, plaqueText, loadData } from '../src/data.js';
 import { groupByColor, hueName, meanHue, photoColor } from '../src/colors.js';
 
 const photo = (id, palette, extra = {}) => ({ id, palette, aspect: 1.5, width: 3000, height: 2000, category: 'digital', camera: 'Fujifilm X-H2S', year: 2024, ...extra });
@@ -74,4 +74,12 @@ test('alternate edits are not hung on the walls', () => {
   const ids = d.rooms.flatMap((r) => r.photos.map((p) => p.id));
   assert.ok(ids.includes('a') && !ids.includes('a-2'));
   assert.ok(d.byId.has('a-2'), 'but the viewer can still find them');
+});
+
+test('loadData asks the server for a fresh photos.json instead of using a cached copy', async () => {
+  const real = globalThis.fetch;
+  let init;
+  globalThis.fetch = async (url, opts) => { init = opts; return new Response(JSON.stringify({ photos: [] })); };
+  try { await loadData(); } finally { globalThis.fetch = real; }
+  assert.equal(init?.cache, 'no-cache');
 });

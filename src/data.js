@@ -15,7 +15,8 @@ export function indexData(json, exclude = []) {
 }
 
 export async function loadData(url = 'photos/photos.json', exclude = []) {
-  const res = await fetch(url);
+  // GitHub Pages lets browsers reuse a copy for 10 minutes; revalidate so new photos and edits show at once.
+  const res = await fetch(url, { cache: 'no-cache' });
   if (!res.ok) throw new Error(`photos.json: HTTP ${res.status}`);
   return indexData(await res.json(), exclude);
 }
