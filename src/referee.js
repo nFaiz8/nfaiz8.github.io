@@ -3,8 +3,8 @@
 // Pure: no DOM, no clocks, no randomness of its own (rand is given). Times are in seconds.
 import { levelKind } from './level.js';
 import {
-  MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, STRIKES, stunOf,
-  muzzleOf, rayLength, bulletRange, bulletAt, sweep,
+  MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, GUN_BY_CODE, STRIKES, stunOf,
+  shoulderOf, muzzleOf, rayLength, bulletRange, bulletAt, sweep,
   regenHp, fleeKiller, nextStrike, strikeBox, boxHits, strikeKnock, bulletKnock, inDodge, pickSpawn, nearPickup,
 } from './fight.js';
 
@@ -17,6 +17,7 @@ const TOUCH = 1e-6; // cells: a body flush against the wall a bullet stops at is
 
 const r2 = (v) => Math.round(v * 100) / 100 + 0;
 const r1 = (v) => Math.round(v * 10) / 10 + 0; // + 0 turns -0 into 0
+const shownHp = (hp) => (hp > 0 ? Math.max(1, Math.round(hp)) : 0); // alive never shows 0
 
 // A plain record: it survives structuredClone and JSON (Durable Object attachments).
 export function newFighter(id, now) {
@@ -51,8 +52,9 @@ export function createReferee({ level, rand }) {
     const e = estimate(T, now);
     T.x = e.x; T.y = e.y; T.at = now;
     T.vx = kx;
-    if (ky) T.vy = ky;
-    const out = [{ t: 'h', id: T.id, by, w, n: n ?? -1, d, hp: Math.max(0, Math.round(T.hp)), kx: r1(kx), ky: r1(ky) }];
+    // A bullet doesn't cancel a jump: its knock adds to vy. A strike's replaces it.
+    if (GUN_BY_CODE[w]) T.vy += ky; else if (ky) T.vy = ky;
+    const out = [{ t: 'h', id: T.id, by, w, n: n ?? -1, d, hp: shownHp(T.hp), kx: r1(kx), ky: r1(ky) }];
     if (T.hp <= 0) {
       T.alive = false; T.deadAt = now; T.hp = 0;
       toDeagle(T);
@@ -64,7 +66,7 @@ export function createReferee({ level, rand }) {
   }
 
   function enter(F, now) {
-    Object.assign(F, { arena: true, hp: MAX_HP, hurtAt: -1e9, alive: true, safeUntil: now + SAFE_TIME, hitBy: null });
+    Object.assign(F, { arena: true, hp: MAX_HP, hurtAt: -1e9, alive: true, safeUntil: now + SAFE_TIME, hitBy: null, i: 0, rollAt: null });
     toDeagle(F);
     return [{ t: 'aj', id: F.id, hp: MAX_HP, kills: F.kills }];
   }
@@ -74,7 +76,7 @@ export function createReferee({ level, rand }) {
     F.x = s.x; F.y = s.y; F.vx = s.vx; F.vy = s.vy; F.f = s.f; F.g = s.g; F.i = s.i; F.a = s.a;
     F.at = now;
     if (s.g === 0) F.airAt = now;
-    if (s.i & 32) { if (!was) F.rollAt = Math.max(sentAt, now - ROLL_BACK); } else F.rollAt = null;
+    if (s.i & 32) { if (!was || F.rollAt == null) F.rollAt = Math.max(sentAt, now - ROLL_BACK); } else F.rollAt = null;
   }
 
   function fire(F, m, now, all) {
@@ -85,10 +87,15 @@ export function createReferee({ level, rand }) {
     const near = Math.abs(m.x - mz.x) <= ORIGIN.x && Math.abs(m.y - mz.y) <= ORIGIN.y; // false for NaN
     const x = r2(near ? m.x : mz.x), y = r2(near ? m.y : mz.y);
     const range = bulletRange(F.gun);
+    // No shot starts past a wall: the way from the shoulder of the last accepted state (not the
+    // estimate, which ignores walls) to the origin must be clear, or the bullet dies at once.
+    const sh = shoulderOf(F.x, F.y, F.f);
+    const ox = x - sh.x, oy = (y - sh.y) * 2, dist = Math.hypot(ox, oy);
+    const blocked = dist > 0 && rayLength(kindAt, sh.x, sh.y, Math.atan2(oy, ox), dist) < dist;
     const n = seq;
     seq = (seq + 1) % 65536;
     // The wall it will hit is found once, now.
-    bullets.push({ n, owner: F.id, gun: F.gun, x, y, angle: m.a, t0: now, last: now, len: Math.min(rayLength(kindAt, x, y, m.a, range), range) });
+    bullets.push({ n, owner: F.id, gun: F.gun, x, y, angle: m.a, t0: now, last: now, len: blocked ? 0 : Math.min(rayLength(kindAt, x, y, m.a, range), range) });
     const out = [{ t: 's', id: F.id, n, x, y, a: m.a, w: G.code }];
     if (F.ammo > 0 && --F.ammo === 0) {
       toDeagle(F);
@@ -166,18 +173,20 @@ export function createReferee({ level, rand }) {
     if (F.alive || now - F.deadAt < RESPAWN_MIN) return { ok: false, out: [] };
     const others = all.filter((o) => o !== F && o.arena && o.alive).map((o) => estimate(o, now));
     const s = spot ?? level.spawns[pickSpawn(level.spawns, others, rand)];
-    Object.assign(F, { x: s.x, y: s.y, vx: 0, vy: 0, at: now, hp: MAX_HP, hurtAt: -1e9, alive: true, safeUntil: now + SAFE_TIME, hitBy: null, rollAt: null });
+    Object.assign(F, { x: s.x, y: s.y, vx: 0, vy: 0, at: now, hp: MAX_HP, hurtAt: -1e9, alive: true, safeUntil: now + SAFE_TIME, hitBy: null, i: 0, rollAt: null });
     toDeagle(F);
     return { ok: true, out: [{ t: 'sp', id: F.id, x: s.x, y: s.y }] };
   }
 
   function leave(F, now, all) {
+    if (!F.arena) return []; // al, then the socket closing: one leave
     const out = [];
     const by = F.alive ? fleeKiller(F, now) : null;
     const K = by && all.find((o) => o.id === by);
     if (K) {
       K.kills++;
       out.push({ t: 'k', id: F.id, by: K.id, kills: K.kills, fled: 1 });
+      F.hitBy = null;
     }
     out.push({ t: 'ax', id: F.id });
     F.arena = false;
@@ -186,7 +195,7 @@ export function createReferee({ level, rand }) {
   }
 
   const view = (F, now) => ({
-    id: F.id, hp: F.alive ? Math.round(regenHp(F.hp, F.hurtAt, now)) : 0, kills: F.kills,
+    id: F.id, hp: F.alive ? shownHp(regenHp(F.hp, F.hurtAt, now)) : 0, kills: F.kills,
     alive: F.alive ? 1 : 0, safe: now < F.safeUntil ? 1 : 0, w: GUNS[F.gun].code, ammo: F.ammo,
     x: F.x, y: F.y, vx: F.vx, vy: F.vy, f: F.f, g: F.g, i: F.i, a: F.a,
   });

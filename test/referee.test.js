@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseLevel, levelKind } from '../src/level.js';
 import { createReferee, newFighter } from '../src/referee.js';
-import { muzzleOf, GUNS, STRIKES } from '../src/fight.js';
+import { muzzleOf, bulletKnock, GUNS, STRIKES } from '../src/fight.js';
 import { newBody, stepBody, knock } from '../src/arena.js';
 
 const L = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
@@ -240,4 +240,80 @@ test('a strike skips the protected, the popped and a dodging target, and hits fr
   M.vx = 40; M.at = 0.95; // estimated 2 cells on by now: in front of A
   const hs = R.strike(A, { k: 'p' }, 1, [A, P, D, X, M]).out.filter((m) => m.t === 'h');
   assert.deepEqual(hs.map((h) => [h.id, h.kx, h.ky]), [['m', 25, -10]]);
+});
+
+test('fix 1: no shot starts past a pillar: a sniper flush against each face claims an origin 2.99 cells past its muzzle', () => {
+  for (const [x, f] of [[34.6, 1], [43.4, -1], [132.6, 1], [140.4, -1]]) {
+    const R = ref(), A = F('a', x, 27.5, f), B = F('b', x + 12 * f);
+    A.gun = 'sniper'; A.ammo = 5;
+    const m = muzzleOf(A.x, A.y, f, 0, 'sniper');
+    const { ok } = R.fire(A, { x: m.x + 2.99 * f, y: m.y, a: f > 0 ? 0 : Math.PI }, 1, [A, B]);
+    assert.equal(ok, true);
+    assert.equal(run(R, 1, 1.5, [A, B]).filter((h) => h.t === 'h').length, 0, `x ${x}`);
+    assert.equal(R.live(), 0);
+  }
+});
+
+test('fix 1: a deagle whose last state has a big vx cannot fire from where the estimate carries it past a pillar', () => {
+  const R = ref(), A = F('a', 34.6), B = F('b', 50.5);
+  A.vx = 60; // estimated 6 cells on, past the pillar, by now
+  const m = muzzleOf(40.6, 27.5, 1, 0, 'deagle');
+  R.fire(A, { x: m.x, y: m.y, a: 0 }, 1, [A, B]);
+  assert.equal(run(R, 1, 1.5, [A, B]).filter((h) => h.t === 'h').length, 0);
+});
+
+test('fix 2: leaving twice (al, then the socket closing) gives one flee kill', () => {
+  const R = ref(), A = F('a', 20.5), B = F('b', 30.5);
+  Object.assign(B, { hitBy: 'a', hurtAt: 10 });
+  assert.equal(R.leave(B, 11, [A, B]).length, 2);
+  assert.deepEqual(R.leave(B, 11.1, [A, B]), []);
+  assert.equal(A.kills, 1);
+  assert.equal(B.hitBy, null);
+});
+
+test('fix 3: a fighter popped mid-roll respawns, or re-enters, able to fire, and its next roll opens a dodge window', () => {
+  for (const back of ['respawn', 'enter']) {
+    const R = ref(), A = F('a', 60.5);
+    Object.assign(A, { i: 32, rollAt: 0.5, alive: false, deadAt: 1, hp: 0 });
+    if (back === 'respawn') R.respawn(A, 3, [A], { x: 60.5, y: 27.5 });
+    else { R.leave(A, 3, [A]); R.enter(A, 3); A.safeUntil = 0; }
+    assert.equal(A.i, 0, back);
+    assert.equal(shoot(R, A, 4, [A]).ok, true, back);
+    R.state(A, { x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 32, a: 0 }, 5);
+    assert.equal(A.rollAt, 5, back);
+  }
+});
+
+test('fix 3: a roll bit already on with no roll open opens one', () => {
+  const R = ref(), A = F('a', 60.5);
+  A.i = 32;
+  R.state(A, { x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 32, a: 0 }, 2, 1.95);
+  assert.equal(A.rollAt, 1.95);
+});
+
+test('fix 4: a living fighter never shows 0 hp, in h or view', () => {
+  const R = ref(), A = F('a', 20.5), B = F('b', 30.5);
+  Object.assign(B, { hp: 25.3, hurtAt: 0.9 });
+  shoot(R, A, 1, [A, B]);
+  const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
+  assert.equal(B.alive, true);
+  assert.equal(h.hp, 1);
+  assert.equal(R.view(B, 1.3).hp, 1);
+  Object.assign(B, { alive: false, hp: 0 });
+  assert.equal(R.view(B, 9).hp, 0);
+});
+
+test('fix 5: a bullet adds its knock to a mid-air target\'s vy; a strike replaces it', () => {
+  const R = ref(), A = F('a', 20.5), B = F('b', 30.5);
+  Object.assign(B, { vy: -20, g: 0, at: 1.3 }); // at in the future: the estimate holds B still
+  shoot(R, A, 1, [A, B], 0.1);
+  const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
+  const { ky } = bulletKnock('deagle', 0.1);
+  assert.ok(ky > 0.4);
+  assert.equal(B.vy, -20 + ky);
+  assert.equal(h.ky, Math.round(ky * 10) / 10);
+  const S = F('s', 60.5), T = F('t', 62.6);
+  T.vy = -20;
+  R.strike(S, { k: 'p' }, 2, [S, T]);
+  assert.equal(T.vy, -STRIKES.punch.ky);
 });
