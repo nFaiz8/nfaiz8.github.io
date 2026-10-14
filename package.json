@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/prepare-photos.mjs && vite",
+    "dev:live": "node scripts/dev-live.mjs",
     "build": "node scripts/prepare-photos.mjs && vite build",
     "preview": "vite preview",
     "test": "node --test \"test/*.test.js\"",
