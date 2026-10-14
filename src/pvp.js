@@ -299,7 +299,6 @@ export function createPvp({
 
   function control(inp, now) {
     const p = world.player;
-    world.collide = collide(now);
     if (!entered || !me.alive) { world.aimFacing = 0; aimed = false; bits = 0; return { ...IDLE }; }
     let facing = p.facing < 0 ? -1 : 1;
     const mouse = inp.mouse && inp.mouse.on && num(inp.mouse.x) && num(inp.mouse.y) ? inp.mouse : null;
@@ -336,7 +335,7 @@ export function createPvp({
     fighters.step(dt, now);
     const on = dummyShown(now);
     if (on && dt > 0) {
-      stepBody(dummy.body, dt, IDLE, world.kindAt, { inside: world.inside, door, others: [{ ...myBox(now), tie: tie(DUMMY, me.id) }] });
+      stepBody(dummy.body, dt, IDLE, world.kindAt, { inside: world.inside, door, solid: dummy.rec.alive, others: [{ ...myBox(now), tie: tie(DUMMY, me.id) }] });
       syncDummy(now);
     }
     runLocal(ref.tick(t, everyone(now)), now);
@@ -355,6 +354,8 @@ export function createPvp({
       else if (now - lastRs >= RS_EVERY) { send({ t: 'rs' }); lastRs = now; }
     }
     if (on && !dummy.rec.alive && now - dummy.deadAt >= RESPAWN_TIME * 1000) runLocal(ref.respawn(dummy.rec, t, [dummy.rec], DUMMY_SPOT).out, now);
+    // What my body bumps into on the next step: set every frame, also when no controls ran (away).
+    world.collide = collide(now);
   }
 
   // ---------- what to draw ----------

@@ -739,7 +739,9 @@ const TL = parseLevel(text), TK = levelKind(TL);
 const STAND = TL.door.y; // a body standing on the floor
 const X0 = TL.spawns.find((s) => s.r === TL.door.r).x; // a floor spawn in car A, open floor either side
 const HEAD = BODY.h; // a body standing on another's head is this much higher
-const box = (b, solid = true) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, solid });
+const ids = new WeakMap();
+const idOf = (b) => { if (!ids.has(b)) ids.set(b, `f${Math.random().toString(36).slice(2)}`); return ids.get(b); };
+const box = (b, solid = true) => ({ id: idOf(b), x: b.x, y: b.y, vx: b.vx, vy: b.vy, solid });
 // Steps b for `seconds` at 60 fps against others (a list, or a function of t giving one).
 const go = (b, seconds, input = IDLE, others = [], opts = {}, each = () => {}) => {
   for (let t = 0; t < seconds - 1e-9; t += 1 / 60) {
@@ -876,27 +878,55 @@ test('collision: centres that coincide separate by the tie each other box gives'
   assert.ok(a.x < b.x && b.x - a.x >= BODY.w - 1e-9, `a west, b east (${a.x}, ${b.x})`);
 });
 
-test('collision: standing on a moving body carries you with it', () => {
-  const o = standing(X0);
-  const b = newBody(X0 + 0.2, STAND - 8);
-  go(b, 1, IDLE, [box(o)]);
-  assert.equal(b.y, o.y - HEAD);
-  const dx = b.x - o.x;
-  for (let k = 0; k < 60; k++) {
-    stepBody(b, 1 / 60, IDLE, TK, { others: [box(o)] });
-    stepBody(o, 1 / 60, { ...IDLE, x: 1 }, TK);
+// Riding, in the game's order: the rider steps first against the box from the last frame, then the one
+// underneath steps the whole frame in 1/60 s steps (fighters.js). The rider must keep its spot on the head.
+for (const dt of [1 / 60, 1 / 30]) {
+  for (const d of [-0.5, 0.5]) {
+    test(`collision: standing ${d < 0 ? 'behind' : 'ahead of'} the centre of someone who sprints off and stops, at ${Math.round(1 / dt)} fps, you ride along`, () => {
+      const o = standing(X0);
+      const b = newBody(X0 + d, STAND - 8);
+      go(b, 1, IDLE, [box(o)]);
+      assert.equal(b.y, o.y - HEAD);
+      const n = Math.round(dt * 60);
+      for (let k = 0; k * dt < 1.5 - 1e-9; k++) {
+        const seen = box(o);
+        stepBody(b, dt, IDLE, TK, { others: [seen] });
+        assert.ok(b.onGround && b.y === seen.y - HEAD, `on the head at ${(k * dt).toFixed(2)} s (${b.x - seen.x}, ${b.y})`);
+        assert.ok(Math.abs(b.x - seen.x - d) < 1e-6, `at its spot at ${(k * dt).toFixed(2)} s (${b.x - seen.x})`);
+        for (let i = 0; i < n; i++) stepBody(o, 1 / 60, { ...IDLE, x: k * dt < 1 ? 1 : 0, run: true }, TK);
+      }
+      assert.ok(o.x > X0 + 30, `it sprinted (${o.x})`);
+    });
   }
-  assert.ok(o.x > X0 + 15, `it ran (${o.x})`);
-  assert.ok(Math.abs(b.x - o.x - dx) < 0.5, `carried along (${b.x - o.x} vs ${dx})`);
-  assert.equal(b.y, o.y - HEAD, 'still on its head');
+}
+
+// The lowest ═ over the floor with room for two bodies side by side, from the level: its row and a column on it.
+function lowLedge() {
+  for (let r = TL.door.r; r > 0; r--) {
+    for (let c = 0; c + 2 < TL.cols; c++) if ([0, 1, 2].every((k) => TL.cells[r * TL.cols + c + k] === PLATFORM)) return { row: r, col: c + 1 };
+  }
+  return null;
+}
+
+test('collision: ↓ off the head of someone standing on a ═ lands on that ═ beside them, not the ledge below', () => {
+  const { row, col } = lowLedge();
+  const s = newBody(col + 0.5, row - 1.5);
+  go(s, 0.2);
+  assert.equal(s.onPlatform, true, 'they stand on the ═');
+  const b = newBody(col + 0.8, s.y - HEAD - 0.5); // just over their head, under the next ═ up
+  go(b, 0.5, IDLE, [box(s)]);
+  assert.equal(b.y, s.y - HEAD, 'on their head');
+  for (let k = 0; k < 90; k++) {
+    stepBody(b, 1 / 60, { ...IDLE, down: k < 3 }, TK, { others: [box(s)] });
+    stepBody(s, 1 / 60, IDLE, TK, { others: [box(b)] });
+  }
+  assert.equal(b.y, row - 1.5, `on the ═ at row ${row} (${b.y})`);
+  assert.equal(s.y, row - 1.5, 'and they are still on it');
+  assert.ok(Math.abs(b.x - s.x) >= BODY.w - 1e-9, 'side by side');
 });
 
 test('collision: jumping up through someone standing on a ═ never shoves them sideways', () => {
-  // The lowest ═ over the floor with room for two bodies side by side, from the level.
-  let row = -1, col = -1;
-  for (let r = TL.door.r; r > 0 && row < 0; r--) {
-    for (let c = 0; c + 2 < TL.cols; c++) if ([0, 1, 2].every((k) => TL.cells[r * TL.cols + c + k] === PLATFORM)) { row = r; col = c + 1; break; }
-  }
+  const { row, col } = lowLedge();
   const s = newBody(col + 0.5, row - 1.5);
   go(s, 0.2);
   assert.equal(s.onPlatform, true, 'standing on the ═');

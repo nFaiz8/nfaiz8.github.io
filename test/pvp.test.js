@@ -615,3 +615,26 @@ test('collision: protected, I walk through the dummy', () => {
   s.frames(40, { x: 1 });
   assert.ok(s.world.player.x > s.pvp.bodies(s.now).find((b) => b.dummy).state.x + 0.8);
 });
+
+test('collision: a popped dummy passes through me: never pushed off me, and it falls past my head', () => {
+  const s = setup();
+  s.frames(100); // past my protection
+  const p = s.world.player, d = s.pvp.dummy;
+  Object.assign(d.rec, { alive: false }); d.deadAt = s.now; // popped, its respawn 2 s off
+  p.x = d.body.x + 0.3;
+  s.frames(30);
+  assert.equal(d.body.x, off.x + 50.5, 'not pushed');
+  d.body.x = p.x; d.body.y = p.y - 6; d.body.vy = 0;
+  s.frames(60);
+  assert.equal(d.body.y, p.y, 'fell past my head to the floor');
+});
+
+test('collision: what I collide with is refreshed every frame, also on frames with no controls (away)', () => {
+  const s = setup();
+  s.frames(100);
+  const d = s.pvp.dummy;
+  d.body.x += 3;
+  s.pvp.frame(1 / 60, s.now + 1000 / 60);
+  const box = s.world.collide && s.world.collide.others.find((o) => o.id === 'dummy');
+  assert.ok(box && Math.abs(box.x - d.body.x) < 1e-9, `the dummy's box is where it is now (${box && box.x}, ${d.body.x})`);
+});

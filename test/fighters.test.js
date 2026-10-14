@@ -534,3 +534,32 @@ test('collision: a correction gliding out never draws a remote body inside me (n
     assert.ok(x >= X0 + 0.8 - 1e-9, `drawn inside me at ${ms.toFixed(0)} ms (${x})`);
   }
 });
+
+// A mover that is dead or protected passes through too (it is not only passed through).
+test('collision: a remote popped above my head falls past me to the floor, not onto my head', () => {
+  const me = { x: X0, y: STAND, vx: 0, vy: 0, solid: true, id: 'me' };
+  const F = createFighters({ kindAt: kinds, me: () => me });
+  F.apply({ t: 'aw', fighters: [fighter('b', X0 + 0.2, { y: STAND - 6, g: 0 })] }, 0);
+  F.apply({ t: 'k', id: 'b', by: 'me', kills: 1 }, 0);
+  runAt(F, 0, 1500);
+  assert.equal(F.list(1500)[0].state.y, STAND, 'on the floor');
+});
+
+test('collision: walking through a corpse never shoves it', () => {
+  const me = { x: X0 + 0.3, y: STAND, vx: 30, vy: 0, solid: true, id: 'me' };
+  const F = createFighters({ kindAt: kinds, me: () => me });
+  F.apply({ t: 'aw', fighters: [fighter('b', X0, { alive: 0 })] }, 0);
+  runAt(F, 0, 500);
+  assert.equal(F.list(500)[0].state.x, X0);
+});
+
+test('collision: a protected remote walks through me on my screen too', () => {
+  const me = { x: X0, y: STAND, vx: 0, vy: 0, solid: true, id: 'me' };
+  const F = createFighters({ kindAt: kinds, me: () => me });
+  F.apply({ t: 'aw', fighters: [fighter('b', X0 + 6, { vx: -30, i: 1, safe: 1 })] }, 0);
+  runAt(F, 0, 600);
+  F.apply({ t: 'a', id: 'b', x: F.get('b').body.x, y: STAND, vx: -30, vy: 0, f: -1, g: 1, i: 1, a: 0, ts: 600 }, 600);
+  runAt(F, 600, 1000);
+  assert.ok(F.list(1000)[0].state.safe, 'still protected');
+  assert.ok(F.list(1000)[0].state.x < X0 - 0.8, `walked through (${F.list(1000)[0].state.x})`);
+});

@@ -61,6 +61,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     if (!n) return;
     opts.others = boxesAt(now);
     boxesFor(opts.others, F);
+    opts.solid = F.alive && now >= F.safeUntil; // the dead and the protected pass through (a roll: stepBody)
     for (let k = 0; k < n; k++) stepBody(b, ms / 1000 / n, input, kindAt, opts);
     opts.others = null;
   }
@@ -104,6 +105,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     // The air jump: the count, how long ago it was last taken and how long since the ground (as of when
     // this state was sent) carry on from the body as predicted; touching the ground refills the count.
     if (old) {
+      if (b.onGround) { b.onBody = old.onBody; b.rideId = old.rideId; b.rideX = old.rideX; } // still on the same head
       b.airJumps = old.airJumps;
       b.airJumpT = old.airJumpT - old.t + age / 1000;
       if (old.cutJumpT != null) b.cutJumpT = old.cutJumpT - old.t + age / 1000; // re-based alike, so it still matches
@@ -208,6 +210,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       if (!F.body) continue;
       const input = !F.alive || now - F.lastAt > SILENT ? NONE : F.input;
       const own = boxesFor(boxes, F);
+      opts.solid = F.alive && now >= F.safeUntil; // the dead and the protected pass through (a roll: stepBody)
       for (let k = 0; k < n; k++) stepBody(F.body, h, input, kindAt, opts);
       flipOf(F, now);
       F.corr.x *= kc;

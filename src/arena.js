@@ -33,7 +33,8 @@ export function doorZone(level, off = { x: 0, y: 0 }) {
 }
 
 export function newBody(x, y) {
-  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity };
+  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity,
+    onBody: false, rideId: null, rideX: 0, headDropUntil: 0 }; // on someone's head: whose (by box id), and where they were
 }
 
 export const rolling = (b) => b.rollT >= 0;
@@ -94,7 +95,8 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     if (!jump && b.prevJump && b.vy < 0 && !b.cut) { b.vy *= 0.5; b.cut = true; }
     b.prevJump = jump;
     b.sinceGround = b.onGround ? 0 : b.sinceGround + dt;
-    if (input.down && b.onGround && b.onPlatform) { b.dropUntil = b.t + DROP; b.onGround = false; }
+    // ↓ on a ═ drops through it; ↓ on a head drops off that head only, onto any ═ just under it.
+    if (input.down && b.onGround && b.onPlatform) { if (b.onBody) b.headDropUntil = b.t + DROP; else b.dropUntil = b.t + DROP; b.onGround = false; }
     // A jump pressed a moment before landing, or a moment after running off a ledge, still counts.
     if (b.sinceJump <= BUFFER && b.sinceGround <= COYOTE) {
       b.vy = -JUMP_V;
@@ -134,7 +136,7 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
   // A roll passes through everyone. Otherwise: pushed out of anyone already overlapping, and carried by
   // the one underfoot.
   const block = solid && !rolled && others && others.length ? sortOthers(b, others, door) : null;
-  if (block) mx += push(b, dt) + rideVx(b, block) * dt;
+  if (block) mx += push(b, dt) + rideDx(b, block);
   move(b, mx, my, kinds, block);
   if (b.onGround) b.airJumps = AIR_JUMPS; // the floor, a platform or a ▓ top
   // The roll ends after its time, or when it runs off a ledge (keeping its speed).
@@ -178,11 +180,12 @@ function push(b, dt) {
   return Math.max(-PUSH * dt, Math.min(PUSH * dt, px));
 }
 
-// The horizontal speed of the body this one stands on, if any.
-function rideVx(b, block) {
-  if (!b.onGround) return 0;
+// How far the one this body stands on has moved since it last stood there: it keeps its spot on the head,
+// whatever the frame rate, and even against a box from the last frame (it lands against the same box).
+function rideDx(b, block) {
+  if (!b.onGround || b.rideId == null) return 0;
   for (const o of block) {
-    if (Math.abs(b.x - o.x) < BODY.w - TOUCH && Math.abs(b.y - (o.y - BODY.h)) <= LIP) return o.vx || 0;
+    if (o.id === b.rideId && Math.abs(b.y - (o.y - BODY.h)) <= LIP) return o.x - b.rideX;
   }
   return 0;
 }
@@ -204,12 +207,13 @@ export function keepDrawnOut(b, corr, others, door = null) {
 
 function move(b, mx, my, kindAt, block) {
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(mx), Math.abs(my)) / 0.4));
-  const dropping = b.t < b.dropUntil;
-  b.onGround = b.onPlatform = false;
+  const dropping = b.t < b.dropUntil, offHead = dropping || b.t < b.headDropUntil;
+  b.onGround = b.onPlatform = b.onBody = false;
+  b.rideId = null;
   let hitY = false;
   for (let i = 0; i < n; i++) {
     moveX(b, mx / n, kindAt, block);
-    if (!hitY) hitY = moveY(b, my / n, kindAt, dropping, block);
+    if (!hitY) hitY = moveY(b, my / n, kindAt, dropping, offHead ? null : block);
   }
 }
 
@@ -231,27 +235,27 @@ function moveX(b, dx, kindAt, block) {
   if (hit) b.vx = 0;
 }
 
-// Returns true when the move was stopped (landed or bumped a ceiling).
-function moveY(b, dy, kindAt, dropping, block) {
+// Returns true when the move was stopped (landed or bumped a ceiling). heads: the ones it can land on.
+function moveY(b, dy, kindAt, dropping, heads) {
   if (!dy) return false;
   const ny = b.y + dy;
   const c0 = Math.floor(b.x - HW + EPS), c1 = Math.floor(b.x + HW - EPS);
   if (dy > 0) {
     const row = Math.floor(ny + HH - EPS);
-    let land = Infinity, onBody = false;
+    let land = Infinity, on = null;
     if (row > Math.floor(b.y + HH - EPS)) { // the feet cross into a new row: land on ▓ always, on ═ unless dropping
       let solid = false, platform = false;
       for (let c = c0; c <= c1; c++) { const k = kindAt(c, row); solid ||= k === SOLID; platform ||= k === PLATFORM; }
       if (solid || (platform && !dropping)) { land = row - HH; b.onPlatform = !solid; }
     }
     // A head is one-way, like ═: landed on from above (↓ drops through), passed through from below.
-    if (block && !dropping) for (const o of block) {
+    if (heads) for (const o of heads) {
       const top = o.y - BODY.h; // where this body's centre is, standing on it
-      if (Math.abs(b.x - o.x) < BODY.w - TOUCH && b.y <= top + LIP && ny > top && top <= land) { land = top; onBody = true; }
+      if (Math.abs(b.x - o.x) < BODY.w - TOUCH && b.y <= top + LIP && ny > top && top <= land) { land = top; on = o; }
     }
     if (land < Infinity) {
       b.y = land; b.vy = 0; b.onGround = true;
-      if (onBody) b.onPlatform = true;
+      if (on) { b.onPlatform = b.onBody = true; b.rideId = on.id ?? null; b.rideX = on.x; }
       return true;
     }
   } else {
