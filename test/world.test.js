@@ -56,9 +56,9 @@ test('movement accelerates and glides to a stop instead of starting and stopping
   const x0 = w.player.x;
   step(w, 1 / 60, { x: 1, y: 0 });
   const firstStep = w.player.x - x0;
-  assert.ok(firstStep > 0 && firstStep < 12 / 60 * 0.5, 'the first frame is slower than full speed');
+  assert.ok(firstStep > 0 && firstStep < 48 / 60 * 0.5, 'the first frame is slower than full speed');
   run(w, 0.4, { x: 1, y: 0 });
-  assert.ok(w.player.vx > 11, 'reaches full speed quickly');
+  assert.ok(w.player.vx > 44, 'reaches full speed quickly');
   const xRelease = w.player.x;
   run(w, 0.5, { x: 0, y: 0 });
   assert.ok(w.player.x > xRelease + 0.2, 'carries on a little after letting go');
@@ -86,21 +86,21 @@ test('click paths are pulled straight: few legs, each one walkable', () => {
   assert.deepEqual(legs.at(-1), { x: f.stand.x + 0.5, y: f.stand.y + 0.5 });
 });
 
-test('walking is the calm pace; holding Shift sprints well past the old default', () => {
+test('walking is the old sprint pace; holding Shift sprints faster still', () => {
   const normal = createWorld(map), fast = createWorld(map);
   run(normal, 0.5, { x: 1, y: 0 });
   run(fast, 0.5, { x: 1, y: 0, run: true });
-  assert.ok(Math.abs(normal.player.vx - 12) < 0.5, `walk ${normal.player.vx}`);
-  assert.ok(fast.player.vx > 28, `sprint ${fast.player.vx}`);
+  assert.ok(Math.abs(normal.player.vx - 48) < 1, `walk ${normal.player.vx}`);
+  assert.ok(fast.player.vx > 68, `sprint ${fast.player.vx}`);
 });
 
-test('tap-to-walk keeps its brisk pace', () => {
+test('tap-to-walk goes at walking pace', () => {
   const w = createWorld(map);
   const f = map.frames[0];
   assert.ok(walkTo(w, f.stand.x, f.stand.y));
   let peak = 0;
   for (let t = 0; t < 1; t += 1 / 60) { step(w, 1 / 60, { x: 0, y: 0 }); peak = Math.max(peak, Math.hypot(w.player.vx, w.player.vy)); }
-  assert.ok(peak > 20, `path pace ${peak}`);
+  assert.ok(peak > 40, `path pace ${peak}`);
 });
 
 test('running into a wall on a slow frame rate stops at the wall instead of passing through', () => {

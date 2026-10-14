@@ -3,9 +3,9 @@ import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
 
-const SPEED = 12; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
-const SPRINT = 2.5; // holding Shift
-const PATH_SPEED = 24; // tap/click-to-walk keeps its brisk pace
+const SPEED = 48; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
+const SPRINT = 1.5; // holding Shift
+const PATH_SPEED = SPEED; // tap/click-to-walk goes at walking pace
 const HALF = 0.3; // player half-size in cells
 const FOCUS_DIST = 7; // in horizontal-cell units
 const ACCEL = 0.07; // seconds to reach about 63% of the target speed
@@ -174,7 +174,15 @@ export function step(world, dt, input) {
   p.vx += (tx - p.vx) * k;
   p.vy += (ty - p.vy) * k;
   if (!tx && !ty && Math.hypot(p.vx, p.vy) < 0.05) p.vx = p.vy = 0;
-  const hit = moveBy(world, p.vx * dt, (p.vy / CELL_ASPECT) * dt);
+  // Move in steps of under half a cell, so a fast sprint on a slow frame can't jump over a wall.
+  const mx = p.vx * dt, my = (p.vy / CELL_ASPECT) * dt;
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(mx), Math.abs(my)) / 0.4));
+  const hit = { hitX: false, hitY: false };
+  for (let i = 0; i < n; i++) {
+    const h = moveBy(world, hit.hitX ? 0 : mx / n, hit.hitY ? 0 : my / n);
+    hit.hitX ||= h.hitX;
+    hit.hitY ||= h.hitY;
+  }
   if (hit.hitX) p.vx *= 0.5;
   if (hit.hitY) p.vy *= 0.5;
   p.moving = Math.hypot(p.vx, p.vy) > 0.5;
