@@ -11,7 +11,7 @@ import {
 import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
 import { createFx } from './fx.js';
-import { flipCut } from './stick.js';
+import { flipCut, SHOULDER } from './stick.js';
 import { arenaTicker } from './live.js';
 import { enterSide } from './world.js';
 
@@ -305,7 +305,9 @@ export function createPvp({
     if (mouse) {
       const s = shoulderOf(p.x, p.y, facing);
       const r = pointAim(s.x, s.y, mouse.x, mouse.y, facing);
-      facing = r.facing;
+      // Facing turns only once the cursor is past the other shoulder: between the shoulders (aiming
+      // straight up or down) it holds, or each turn would put the cursor behind the new shoulder.
+      if (Math.abs(mouse.x - p.x) > SHOULDER.dx) facing = r.facing;
       aim = r.aim;
       world.aimFacing = facing;
     } else {

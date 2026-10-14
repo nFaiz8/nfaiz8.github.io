@@ -638,3 +638,35 @@ test('collision: what I collide with is refreshed every frame, also on frames wi
   const box = s.world.collide && s.world.collide.others.find((o) => o.id === 'dummy');
   assert.ok(box && Math.abs(box.x - d.body.x) < 1e-9, `the dummy's box is where it is now (${box && box.x}, ${d.body.x})`);
 });
+
+// Final review, Important 1: the mouse straight above or below my body, between my shoulders, never flips
+// my facing back and forth: facing turns only once the cursor is past the other shoulder.
+test('a cursor held straight above or below me keeps one facing: no flips, and no urgent a', () => {
+  for (const start of [1, -1]) {
+    for (const dx of [0, 0.05, -0.05, 0.1, -0.1, 0.14, -0.14]) {
+      for (const dy of [-10, 6]) {
+        const s = setup({ online: true });
+        s.pvp.onMessage(emptyAw(), s.now);
+        s.frames(10, { mouse: { on: true, x: s.world.player.x + start * 10, y: s.world.player.y } });
+        assert.equal(s.world.player.facing, start);
+        const n = s.sent.length, faced = [];
+        for (let k = 0; k < 120; k++) {
+          s.frames(1, { mouse: { on: true, x: s.world.player.x + dx, y: s.world.player.y + dy } });
+          faced.push(s.world.player.facing);
+        }
+        const what = `facing ${start}, cursor ${dx}, ${dy}`;
+        assert.ok(faced.every((f) => f === start), `${what}: ${faced.slice(0, 8)}`);
+        const as = s.sent.slice(n).filter((m) => m.t === 'a');
+        assert.ok(as.every((m) => m.f === start), what);
+        assert.ok(as.length <= 3, `${what}: ${as.length} a in 2 s`);
+      }
+    }
+  }
+  // Past the other shoulder, it turns.
+  const s = setup({ online: true });
+  s.frames(5, { mouse: { on: true, x: s.world.player.x + 10, y: s.world.player.y } });
+  s.frames(1, { mouse: { on: true, x: s.world.player.x - 0.2, y: s.world.player.y - 10 } });
+  assert.equal(s.world.player.facing, -1);
+  s.frames(1, { mouse: { on: true, x: s.world.player.x + 0.2, y: s.world.player.y - 10 } });
+  assert.equal(s.world.player.facing, 1);
+});
