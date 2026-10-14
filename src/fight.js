@@ -14,7 +14,7 @@ export const hurtOf = (low) => HURTS[low] || HURTS[0];
 export const lowOf = (i, g) => (g === 1 && !(i & 32) ? (i & 128 ? 2 : i & 64 ? 1 : 0) : 0);
 export const LOW_RANGE = 1.5; // a shot fired low flies this much further
 export const LOW_KNOCK = 0.5; // a body hit while low takes this much of the knock and the stun
-export const CRAWL_SPREAD = 0.5; // radians: a shot fired crawling goes off its aim by up to this, either way
+export const CRAWL_SPREAD = 0.5; // radians: a shot fired crawling goes up off its aim by up to this
 export const REGEN_RATE = 20;
 export const REGEN_AFTER = 4;
 export const SAFE_TIME = 1.5;

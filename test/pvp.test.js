@@ -772,7 +772,7 @@ test('offline: a crouched level shot hits the standing dummy; a crawl moves at 1
   assert.ok(Math.abs(x0 - s.world.player.x - 10) < 1, `crawled ${x0 - s.world.player.x}`);
 });
 
-test('crawling, shots go wild: up to 0.5 rad off the aim either way; crouched and still, they are level', () => {
+test('crawling, shots go wild: up to 0.5 rad above the aim, never below level (the floor); crouched and still, they are level', () => {
   const angles = [];
   for (const r of [0, 0.25, 0.75, 1]) {
     const s = setup({ online: true, rand: () => r });
@@ -782,11 +782,24 @@ test('crawling, shots go wild: up to 0.5 rad off the aim either way; crouched an
     s.frames(1, { down: true, x: 1, fire: true });
     angles.push(s.sent.find((m) => m.t === 'f').a);
   }
-  assert.deepEqual(angles, [-0.5, -0.25, 0.25, 0.5]);
+  assert.deepEqual(angles, [0, -0.12, -0.37, -0.5]);
   const c = setup({ online: true, rand: () => 1 });
   c.pvp.onMessage(emptyAw(), c.now);
   c.frames(20);
   c.frames(3, { down: true });
   c.frames(1, { down: true, fire: true });
   assert.equal(c.sent.find((m) => m.t === 'f').a, 0, 'crouched and still: no spread');
+});
+
+test('crawling, a shot aimed down with the mouse still leaves level or higher, and flies (not into the floor at the muzzle)', () => {
+  const s = setup({ rand: () => 0 });
+  s.frames(130);
+  const p = s.world.player;
+  s.frames(3, { down: true, x: 1 });
+  const mouse = { on: true, x: p.x + 10, y: p.y + 4 };
+  s.frames(1, { down: true, x: 1, fire: true, mouse });
+  const g = s.pvp.glyphs(s.now).filter((q) => q.ch === '•');
+  s.frames(2, { down: true, x: 1, mouse });
+  const g2 = s.pvp.glyphs(s.now).filter((q) => q.ch === '•');
+  assert.ok(g.length + g2.length > 0, 'a bullet is drawn');
 });
