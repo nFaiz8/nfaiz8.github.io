@@ -670,3 +670,49 @@ test('a cursor held straight above or below me keeps one facing: no flips, and n
   s.frames(1, { mouse: { on: true, x: s.world.player.x + 0.2, y: s.world.player.y - 10 } });
   assert.equal(s.world.player.facing, 1);
 });
+
+// Final review, Minor 1 (re-graded Important): a state forced out ahead of a shot counts against the
+// ticker's 20 a a second, and still reaches the server before its shot.
+function rifleTenSeconds(inpAt, fps = 60) {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw('r', 40), s.now);
+  let now = s.now;
+  for (let k = 0; k < fps * 10; k++) {
+    now += 1000 / fps;
+    if (k % fps === 0) s.pvp.onMessage({ t: 'w', id: 'me', w: 'r', ammo: 40 }, now); // never runs dry
+    const at = s.sent.length;
+    step(s.world, 1 / fps, s.pvp.control({ ...IN, fire: true, ...inpAt(k, s.world.player) }, now));
+    s.pvp.frame(1 / fps, now);
+    for (let j = at; j < s.sent.length; j++) s.sent[j].sentAt = now;
+  }
+  const as = s.sent.filter((m) => m.t === 'a');
+  let most = 0;
+  for (let i = 0, j = 0; i < as.length; i++) { while (as[i].sentAt - as[j].sentAt >= 1000) j++; most = Math.max(most, i - j + 1); }
+  return { sent: s.sent, most, shots: s.sent.filter((m) => m.t === 'f').length };
+}
+
+test('10 s of rifle fire held sends at most 20 a in any second, also when every few shots turn me round', () => {
+  const swing = (every) => (k, p) => ({ x: Math.floor(k / 60) % 2 ? 1 : -1, mouse: { on: true, x: p.x + (Math.floor(k / every) % 2 ? 5 : -5), y: p.y + Math.sin(k / 10) * 5 } });
+  const cases = {
+    'standing, aiming ahead': (k, p) => ({ mouse: { on: true, x: p.x + 10, y: p.y } }),
+    'running, aim sweeping': (k, p) => ({ x: Math.floor(k / 60) % 2 ? 1 : -1, mouse: { on: true, x: p.x + 10, y: p.y + Math.sin(k / 10) * 5 } }),
+    'running, turning every 6 frames': swing(6),
+    'running, turning every 3 frames': swing(3),
+    'turning every frame': (k, p) => ({ mouse: { on: true, x: p.x + (k % 2 ? 0.3 : -0.3), y: p.y - 10 } }),
+  };
+  for (const [name, inp] of Object.entries(cases)) {
+    const { sent, most, shots } = rifleTenSeconds(inp);
+    assert.ok(most <= 20, `${name}: ${most} a in one second`);
+    assert.ok(shots >= 50, `${name}: ${shots} shots`);
+    // Every shot is near the muzzle the server expects from the last state it heard, moved on by its
+    // velocity for at most 0.1 s (the referee's estimate): its facing went out first.
+    let last = null;
+    for (const m of sent) {
+      if (m.t === 'a') last = m;
+      if (m.t !== 'f' || !last) continue;
+      const k = Math.min(0.1, (m.sentAt - last.sentAt) / 1000);
+      const mz = muzzleOf(last.x + last.vx * k, last.y + last.vy * k, last.f, last.a, 'rifle');
+      assert.ok(Math.abs(m.x - mz.x) <= 3 && Math.abs(m.y - mz.y) <= 2, `${name}: a shot far from the muzzle the server expects ${JSON.stringify([m, last, mz])}`);
+    }
+  }
+});

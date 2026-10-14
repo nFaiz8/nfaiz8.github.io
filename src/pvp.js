@@ -33,13 +33,11 @@ const SHAKE = { time: 0.15, amp: 0.4 }; // kicked or popped
 const HEAD_SHAKE = { time: 0.1, amp: 0.2 }; // my bullet landed a headshot
 const AIM_WARN = 0.3; // s: a sniper's aim line brightens this long before its next shot is ready
 const MAX_PRESSES = 4; // strike presses handled in one frame
-const URGENT_GAP = 30; // ms: arenaTicker's gap; a forced state stands in for its urgent send within it
 const IDLE = { x: 0, y: 0, run: false, jump: false, down: false };
 const BULLETS = new Set(['d', 'r', 'n']);
 
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const r2 = (v) => Math.round(v * 100) / 100 + 0; // + 0 turns -0 into 0
-const r1 = (v) => Math.round(v * 10) / 10 + 0;
 const sec = (ms) => ms / 1000;
 
 export function createPvp({
@@ -62,7 +60,7 @@ export function createPvp({
   const shotAt = new Map(); // id -> ms of their last shot (for sniper aim lines)
 
   let entered = false, online = false, enteredAt = 0, ticker = null;
-  let lastF = null, forced = null, awaitAw = false; // the facing in my last a; a state sent ahead of a shot
+  let lastF = null, awaitAw = false; // the facing in my last a
   let act = null; // my last act: { act, at, for } in ms
   let aim = 0, aimed = false, bits = 0, urgent = false, wasRolling = false, kills = 0;
   let lastShot = -Infinity, lastPk = -Infinity, lastRs = -Infinity, deadAt = 0;
@@ -149,22 +147,11 @@ export function createPvp({
     }
   }
 
-  // The ticker's sends. A state forced out ahead of a shot stands in for the ticker's next urgent send
-  // (same facing, input and ground, within its gap), so the ticker records it as sent and nothing repeats.
+  // The ticker's sends, also the states it forces out ahead of a shot.
   function tickerSend(m) {
-    const f = forced;
-    forced = null;
-    if (f && m.ts - f.ts < URGENT_GAP && m.f === f.f && m.i === f.i && m.g === f.g) return true;
     const ok = send(m);
     if (ok) lastF = m.f;
     return ok;
-  }
-  // A facing the server hasn't heard yet goes out before the shot, or it would find the shot ~6 cells
-  // from the muzzle it expects and fire from the other side.
-  function forceState(now, facing) {
-    const s = snap(now, facing);
-    const c = { t: 'a', ...s, x: r2(s.x), y: r2(s.y), a: r2(s.a), vx: r1(s.vx), vy: r1(s.vy) };
-    if (send(c)) { forced = c; lastF = c.f; }
   }
 
   // The local referees' messages: offline all of them, online only what happens to the dummy.
@@ -264,6 +251,10 @@ export function createPvp({
   function fire(facing, now) {
     const gun = me.gun, t = sec(now);
     if (now - lastShot < GUNS[gun].cooldown * 1000 - 1e-6) return;
+    // A facing the server hasn't heard yet goes out before the shot, or it would find the shot ~6 cells
+    // from the muzzle it expects and fire from the other side. It counts against the 20 a a second: with
+    // the cap full, the shot waits for the next slot.
+    if (online && (facing < 0 ? -1 : 1) !== lastF && !ticker.force(snap(now, facing), now)) return;
     const p = world.player, l = local(p.x, p.y);
     const mz = muzzleOf(l.x, l.y, facing, aim, gun);
     const x = r2(mz.x), y = r2(mz.y), a = r2(absAngle(facing, aim));
@@ -275,7 +266,6 @@ export function createPvp({
     act = { act: 'shoot', at: now, for: ACT_TIME.shoot * 1000 };
     fx.shot({ id: me.id, n: null, x: x + off.x, y: y + off.y, angle: a, gun, color: colorOf(me.id), mine: true, at: now });
     if (online) {
-      if ((facing < 0 ? -1 : 1) !== lastF) forceState(now, facing);
       send({ t: 'f', x, y, a, ts: ts(now) });
       if (atDummy(now)) { syncGhost(now, facing, gun); runLocal(practice.fire(ghost, { x, y, a }, t, [ghost, dummy.rec]).out, now); }
     }
@@ -436,7 +426,7 @@ export function createPvp({
     me.id = myId() || me.id;
     ref.bullets.length = 0;
     practice.bullets.length = 0;
-    lastF = forced = null;
+    lastF = null;
     ref.enter(me, sec(now));
     Object.assign(me, { combo: 0, strikeAt: -1e9, lastStrike: null });
     act = null;

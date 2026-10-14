@@ -69,24 +69,32 @@ export function positionTicker(send) {
 
 // The arena state stream: snap is { x, y, vx, vy, f, g, i, a, ts } in arena-local cells. Sends at most
 // every `every` ms while something moves; input, ground and facing changes (or urgent) go after `gap` ms;
-// never more than `cap` in any second. A send that fails is retried on the next call.
+// never more than `cap` in any second. A send that fails is retried on the next call. force sends a state
+// out of turn (ahead of a shot), counted against the cap like any other; false only when the cap is full.
 export function arenaTicker(send, { every = 67, gap = 30, cap = 20 } = {}) {
   const r = (v, d) => Math.round(v * d) / d;
   let last = null, lastAt = -Infinity, pend = false;
   let sent = [];
   const changed = (a, b) => !b || a.x !== b.x || a.y !== b.y || a.vx !== b.vx || a.vy !== b.vy || a.i !== b.i || a.g !== b.g || a.f !== b.f || Math.abs(a.a - b.a) > 0.05;
-  return (snap, now, urgent = false) => {
-    const c = { ...snap, x: r(snap.x, 100), y: r(snap.y, 100), a: r(snap.a, 100), vx: r(snap.vx, 10), vy: r(snap.vy, 10) };
-    sent = sent.filter((t) => now - t < 1000);
-    if (sent.length >= cap) return;
+  const round = (snap) => ({ ...snap, x: r(snap.x, 100), y: r(snap.y, 100), a: r(snap.a, 100), vx: r(snap.vx, 10), vy: r(snap.vy, 10) });
+  const full = (now) => { sent = sent.filter((t) => now - t < 1000); return sent.length >= cap; };
+  const go = (c, now) => { if (send({ t: 'a', ...c })) { last = c; lastAt = now; pend = false; sent.push(now); } };
+  const tick = (snap, now, urgent = false) => {
+    const c = round(snap);
+    if (full(now)) return;
     const urg = urgent || (last && (c.i !== last.i || c.g !== last.g || c.f !== last.f));
-    let go = false;
+    let due = false;
     if (pend || urg) {
-      if (now - lastAt >= gap) go = true; else pend = true;
-    } else if (changed(c, last) && now - lastAt >= every - 1) go = true;
-    if (!go) return;
-    if (send({ t: 'a', ...c })) { last = c; lastAt = now; pend = false; sent.push(now); }
+      if (now - lastAt >= gap) due = true; else pend = true;
+    } else if (changed(c, last) && now - lastAt >= every - 1) due = true;
+    if (due) go(c, now);
   };
+  tick.force = (snap, now) => {
+    if (full(now)) return false;
+    go(round(snap), now);
+    return true;
+  };
+  return tick;
 }
 
 const ARENA_T = new Set(['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']);
