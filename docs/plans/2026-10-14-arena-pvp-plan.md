@@ -3063,3 +3063,72 @@ stickman spec's §3, §4 and §5 for everything the addendum keeps.
     Every pose must read clearly, with the gun in the hand at chest height when carried. Canvas and GL
     must match. It must hold 120 fps (30 fps exactly means the Mac is on battery).
 - [ ] **Step 6: Commit** with the message `Arena PvP: the stickman becomes a rig: jointed limbs, rotating glyph sprites, the gun in the hand`.
+
+---
+
+## Amendment (2026-10-14, user request: headshots and the double jump)
+
+Spec: docs/specs/2026-10-14-arena-headshots-double-jump.md. Task 17 runs alongside 14R (disjoint files). Task 18 runs after 14R, 15 and 17 land, since it shares stick.js, pvp.js and fighters.js with them.
+
+### Task 17: Headshots: ×2 damage on the head row, decided by the referee, shown in fx and the feed
+
+**Spec:** `docs/specs/2026-10-14-arena-headshots-double-jump.md` §1 (binding). Use the PvP spec for context.
+
+**Files:**
+- Modify:
+  - `src/fight.js`: a `HEADSHOT = 2` constant and a pure helper `isHeadshot(rel)` or `headHit(p, c)`, which
+    takes the hit point relative to the target centre in rows and returns true when `dy < −0.5`;
+  - `src/referee.js`: the bullet tick computes the hit point at `hitT` and applies ×2 with `hs: 1` on `h`
+    and on the `k` it causes;
+  - `src/fx.js`: a headshot damage number `-50!` in flash white, lasting 1.3×;
+  - `src/pvp.js`: pass `hs` to fx; a small shake when *my* bullet lands a headshot (none with Reduce
+    Motion); the feed line gets ` ◎ headshot` for a headshot kill;
+  - `src/fighters.js`: only if remote `h` handling needs `hs` passed through to fx.
+- Test:
+  - `test/fight.test.js`, `test/referee.test.js`, `test/fx.test.js`, `test/pvp.test.js`;
+  - `server/test/server.test.js`: one test that `hs` reaches the wire. The Worker forwards referee
+    output; check `server/gallery.js` needs no change.
+- Don't touch:
+  - `src/main.js`, `src/fighthud.js`, `index.html`, `src/style.css`;
+  - `src/stick.js`, `src/render/*`, `src/arena.js`.
+
+**Steps (TDD):**
+1. Write the failing tests from the spec's §3 "Headshots" list. Also add:
+   - an `fx` test: a headshot number has `!` and white tone;
+   - a `pvp` test: a headshot `k` gives a feed line ending ` ◎ headshot`.
+2. Run them and watch them fail: `node --test test/fight.test.js test/referee.test.js test/fx.test.js test/pvp.test.js < /dev/null`.
+3. Implement.
+4. Run `npm test < /dev/null` and `cd server && npm test < /dev/null`, which uses port 8797.
+5. Commit with the message `Arena PvP: headshots: double damage on the head, called by the referee`.
+
+### Task 18: The double jump: one air jump with a redirect, predicted for remote fighters, a flip in the rig
+
+**Spec:** `docs/specs/2026-10-14-arena-headshots-double-jump.md` §2 (binding); the rig addendum for the pose layer.
+
+**Files:**
+- Modify:
+  - `src/arena.js`:
+    - `AIR_JUMPS`, `DOUBLE_V = 34`;
+    - `b.airJumps` and `b.airJumpT` in `newBody`;
+    - the air jump in `stepBody`, with refill on touching the ground.
+  - `src/fighters.js`: prediction, so remote bodies double-jump on an airborne bit edge; `flipT` in each
+    fighter's stick state.
+  - `src/pvp.js`: `flipT` in my stick state.
+  - `src/main.js`: only if the stick state is assembled there; pass `flipT` through.
+  - `src/stick.js`: the whole-body flip and the puff, per spec §2 "Animation".
+  - `server/rules.js`: only if `clampMove` rejects an honest double jump.
+- Test:
+  - `test/arena.test.js`, `test/fighters.test.js`, `test/stick.test.js`;
+  - `server/test/server.test.js` (an honest double jump is accepted);
+  - the level reachability tests, if they change: update the expectations and keep the clearance rules.
+  - `e2e/run.mjs`:
+    - a double jump peaks higher than a single jump;
+    - add a flip entry to the pose sheet.
+
+**Steps (TDD):**
+1. Write the failing tests from the spec's §3 "Double jump" and pose lists.
+2. Watch them fail.
+3. Implement, in this order: physics, prediction, state, pose.
+4. Run `npm test`, `cd server && npm test`, and `e2e/run.mjs` and `e2e/multiplayer.mjs` through the e2e lock.
+5. Look at the pose sheet with the flip, in both renderers.
+6. Commit with the message `Arena PvP: the double jump: one air jump with a redirect and a flip`.
