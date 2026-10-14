@@ -82,7 +82,7 @@ test('parseLevel: ═ is a platform, ▓ is solid, anything else is air, and sho
   assert.equal(L.cells[33 * 160 + 159], AIR);
 });
 
-import { newBody, stepBody, sideCamera, coverCrop } from '../src/arena.js';
+import { newBody, stepBody, sideCamera, coverCrop, knock, startRoll, BODY, ROLL } from '../src/arena.js';
 
 // A small test room, 40 × 20: floor below row 19, walls left and right, a platform at row 15 (cols 10–19, 5 rows up),
 // a solid block at rows 16–19 (cols 30–33) and a low ▓ ceiling at row 15 (cols 0–5).
@@ -102,66 +102,66 @@ const sim = (b, seconds, input = IDLE, dt = 1 / 60, each = () => {}) => {
 test('falling lands on the floor', () => {
   const b = newBody(7.5, 3.5);
   sim(b, 2);
-  assert.equal(b.y, 19.5);
+  assert.equal(b.y, 18.5);
   assert.equal(b.onGround, true);
 });
 
 test('a full jump rises about 6 rows and is about 0.6 s in the air', () => {
-  const b = newBody(7.5, 19.5);
+  const b = newBody(7.5, 18.5);
   sim(b, 0.2);
   let top = b.y, air = 0;
   sim(b, 1.2, { ...IDLE, jump: true }, 1 / 60, (s) => { top = Math.min(top, s.y); if (!s.onGround) air += 1 / 60; });
-  assert.ok(Math.abs(19.5 - top - 6) <= 0.5, `rose ${19.5 - top}`);
+  assert.ok(Math.abs(18.5 - top - 6) <= 0.5, `rose ${18.5 - top}`);
   assert.ok(Math.abs(air - 0.6) <= 0.06, `air ${air}`);
 });
 
 test('letting go of jump early makes a short hop', () => {
-  const b = newBody(7.5, 19.5);
+  const b = newBody(7.5, 18.5);
   sim(b, 0.2);
   let top = b.y;
   sim(b, 1, (t) => ({ ...IDLE, jump: t < 0.03 }), 1 / 60, (s) => { top = Math.min(top, s.y); });
-  assert.ok(19.5 - top < 4, `rose ${19.5 - top}`);
+  assert.ok(18.5 - top < 4, `rose ${18.5 - top}`);
 });
 
 test('you jump up through ═, stand on it, and ↓ drops you back through', () => {
-  const b = newBody(14.5, 19.5);
+  const b = newBody(14.5, 18.5);
   sim(b, 0.2);
   sim(b, 1.5, (t) => ({ ...IDLE, jump: t < 0.5 }));
-  assert.equal(b.y, 14.5, 'standing on the platform');
+  assert.equal(b.y, 13.5, 'standing on the platform');
   assert.equal(b.onPlatform, true);
   sim(b, 0.05, { ...IDLE, down: true });
   sim(b, 1);
-  assert.equal(b.y, 19.5, 'back on the floor');
+  assert.equal(b.y, 18.5, 'back on the floor');
 });
 
 test('▓ blocks from the side, from above and from below; ↓ on ▓ does nothing', () => {
-  const b = newBody(25.5, 19.5);
+  const b = newBody(25.5, 18.5);
   sim(b, 2, { ...IDLE, x: 1, run: true });
-  assert.ok(b.x <= 30 - 0.3 + 1e-9 && b.x > 29, `stopped at the block (${b.x})`);
+  assert.ok(b.x <= 30 - 0.4 + 1e-9 && b.x > 29, `stopped at the block (${b.x})`);
   const top = newBody(31.5, 5.5);
   sim(top, 2);
-  assert.equal(top.y, 15.5, 'lands on top');
+  assert.equal(top.y, 14.5, 'lands on top');
   sim(top, 0.5, { ...IDLE, down: true });
-  assert.equal(top.y, 15.5, 'no dropping through ▓');
-  const under = newBody(3.5, 19.5);
+  assert.equal(top.y, 14.5, 'no dropping through ▓');
+  const under = newBody(3.5, 18.5);
   sim(under, 0.2);
   let high = under.y;
   sim(under, 1, { ...IDLE, jump: true }, 1 / 60, (s) => { high = Math.min(high, s.y); });
-  assert.equal(high, 16.5, 'head stops under the ceiling');
+  assert.equal(high, 17.5, 'head stops under the ceiling');
 });
 
 test('nothing tunnels at 20 fps', () => {
   const b = newBody(14.5, 0.5);
   sim(b, 3, IDLE, 1 / 20);
-  assert.equal(b.y, 14.5, 'a long fall still lands on a one-row platform');
-  const r = newBody(20.5, 19.5);
+  assert.equal(b.y, 13.5, 'a long fall still lands on a one-row platform');
+  const r = newBody(20.5, 18.5);
   sim(r, 3, { ...IDLE, x: 1, run: true }, 1 / 20);
   assert.ok(r.x < 30, 'sprinting at 20 fps still stops at the block');
 });
 
 test('coyote time: a jump just after running off a ledge still works, a late one does not', () => {
   const offEdge = (lateFrames) => {
-    const b = newBody(17.5, 14.5);
+    const b = newBody(17.5, 13.5);
     sim(b, 0.1);
     let left = -1, frame = 0, jumped = false, landed = false;
     sim(b, 1, () => ({ ...IDLE, x: 1, jump: left >= 0 && frame - left >= lateFrames }), 1 / 60, (s) => {
@@ -177,24 +177,137 @@ test('coyote time: a jump just after running off a ledge still works, a late one
 });
 
 test('jump buffer: pressing just before landing jumps on landing; too early does nothing', () => {
-  const land = () => { const b = newBody(7.5, 9.5); let f = 0; while (!b.onGround) { stepBody(b, 1 / 60, IDLE, kindAt); f++; } return f; };
+  const land = () => { const b = newBody(7.5, 8.5); let f = 0; while (!b.onGround) { stepBody(b, 1 / 60, IDLE, kindAt); f++; } return f; };
   const L = land();
   const pressAt = (early) => {
-    const b = newBody(7.5, 9.5);
+    const b = newBody(7.5, 8.5);
     let f = 0, top = 99;
     sim(b, 1.5, () => ({ ...IDLE, jump: f >= L - early && f < L + 1 }), 1 / 60, (s) => { f++; if (f > L) top = Math.min(top, s.y); });
-    return 19.5 - top;
+    return 18.5 - top;
   };
   assert.ok(pressAt(4) > 1, 'buffered jump fired');
   assert.ok(pressAt(12) < 0.01, 'a press 0.2 s early is forgotten');
 });
 
 test('a held jump never fires again by itself, and entering with jump held does not jump', () => {
-  const b = newBody(7.5, 19.5);
+  const b = newBody(7.5, 18.5);
   b.prevJump = true; // as on arrival through the door with W held
-  let top = 19.5;
+  let top = 18.5;
   sim(b, 1, { ...IDLE, jump: true }, 1 / 60, (s) => { top = Math.min(top, s.y); });
-  assert.equal(top, 19.5);
+  assert.equal(top, 18.5);
+});
+
+test('the body is 0.8 cells by 3 rows', () => assert.deepEqual(BODY, { w: 0.8, h: 3 }));
+
+// The test room with a 3-row door in its east wall (col 40, rows 17–19) into a corridor to col 50.
+const doorKind = (c, r) => {
+  if (r >= 20 || c < 0 || c > 50 || r < 0) return SOLID;
+  if (c >= 40) return r >= 17 ? AIR : SOLID;
+  return AIR;
+};
+const inside = (c) => c < 40;
+const simIn = (b, seconds, input, kinds = doorKind, opts = { inside }, dt = 1 / 60) => {
+  for (let t = 0; t < seconds - 1e-9; t += dt) stepBody(b, dt, typeof input === 'function' ? input(t) : input, kinds, opts);
+};
+
+test('the 3-row body walks through a 3-row door both ways', () => {
+  const b = newBody(35.5, 18.5);
+  simIn(b, 0.2, IDLE);
+  simIn(b, 1, { ...IDLE, x: 1 });
+  assert.ok(b.x > 45, `east through the door (${b.x})`);
+  simIn(b, 1, { ...IDLE, x: -1 });
+  assert.ok(b.x < 38, `back west (${b.x})`);
+});
+
+test('knock: sets the velocity, leaves the ground when ky is upward, and stuns; input is ignored and speed decays with a 0.35 s time constant', () => {
+  const b = newBody(10.5, 18.5);
+  sim(b, 0.2);
+  knock(b, 20, -22, 0.4);
+  assert.equal(b.onGround, false);
+  stepBody(b, 1 / 60, { ...IDLE, x: -1, jump: true }, kindAt);
+  assert.ok(Math.abs(b.vx - 20 * Math.exp(-1 / 60 / 0.35)) < 1e-9, `vx ${b.vx}`);
+  for (let i = 1; i < 21; i++) stepBody(b, 1 / 60, { ...IDLE, x: -1 }, kindAt);
+  assert.ok(Math.abs(b.vx - 20 * Math.exp(-21 / 60 / 0.35)) < 1e-6, 'still decaying after 0.35 s');
+  const r = newBody(10.5, 18.5);
+  sim(r, 0.2);
+  knock(r, 20, 0, 0.2);
+  stepBody(r, 1 / 60, IDLE, kindAt, { reducedMotion: true });
+  assert.ok(Math.abs(r.vx - 20 * Math.exp(-1 / 60 / 0.35)) < 1e-9, 'Reduce Motion does not change the decay');
+});
+
+test('a bullet-style knock (ky 0) keeps a jump going', () => {
+  const b = newBody(10.5, 18.5);
+  sim(b, 0.2);
+  sim(b, 0.1, { ...IDLE, jump: true });
+  const vy = b.vy;
+  knock(b, 10, 0, 0.1);
+  assert.equal(b.vy, vy);
+});
+
+test('the door blocks a stunned body but not a walking one', () => {
+  const b = newBody(35.5, 18.5);
+  simIn(b, 0.2, IDLE);
+  knock(b, 45, 0, 0.4);
+  simIn(b, 0.4, IDLE);
+  assert.ok(b.x <= 40 - 0.4 + 1e-9, `stopped at the door (${b.x})`);
+});
+
+test('a roll covers 14 ± 1 cells in 0.30 s the way it was asked, ignoring steering, then ends', () => {
+  for (const dt of [1 / 20, 1 / 60, 1 / 144]) {
+    const b = newBody(5.5, 18.5);
+    sim(b, 0.2, IDLE, dt);
+    const x0 = b.x;
+    stepBody(b, dt, { ...IDLE, roll: 1 }, kindAt);
+    sim(b, 0.3 - dt, { ...IDLE, x: -1 }, dt);
+    assert.ok(Math.abs(b.x - x0 - 14.4) <= 1, `moved ${b.x - x0} at ${Math.round(1 / dt)} fps`);
+    sim(b, 2 * dt, { ...IDLE, x: -1 }, dt);
+    assert.equal(b.rollT, -1);
+  }
+});
+
+test('no roll in the air, while stunned, or within 0.5 s of the last', () => {
+  const air = newBody(5.5, 10.5);
+  assert.equal(startRoll(air, 1), false);
+  const st = newBody(5.5, 18.5);
+  sim(st, 0.2);
+  knock(st, 0, 0, 0.2);
+  assert.equal(startRoll(st, 1), false);
+  const b = newBody(5.5, 18.5);
+  sim(b, 0.2);
+  assert.equal(startRoll(b, 1), true);
+  sim(b, 0.35);
+  assert.equal(startRoll(b, -1), false, 'cooling down');
+  sim(b, 0.5);
+  assert.equal(startRoll(b, -1), true);
+});
+
+test('a jump during a roll ends it and keeps its speed (a long jump)', () => {
+  const b = newBody(5.5, 18.5);
+  sim(b, 0.2);
+  stepBody(b, 1 / 60, { ...IDLE, roll: 1 }, kindAt);
+  sim(b, 0.1);
+  stepBody(b, 1 / 60, { ...IDLE, jump: true }, kindAt);
+  assert.equal(b.rollT, -1);
+  assert.equal(b.onGround, false);
+  assert.ok(b.vx > 40, `kept its speed (${b.vx})`);
+});
+
+test('a roll off a ledge ends and falls, keeping its speed', () => {
+  const b = newBody(17.5, 13.5); // on the platform at row 15, cols 10–19
+  sim(b, 0.2);
+  stepBody(b, 1 / 60, { ...IDLE, roll: 1 }, kindAt);
+  sim(b, 0.1);
+  assert.equal(b.rollT, -1);
+  assert.equal(b.onGround, false);
+  assert.ok(b.vx > 40);
+});
+
+test('a knock ends a roll', () => {
+  const b = newBody(5.5, 18.5);
+  sim(b, 0.2);
+  startRoll(b, 1);
+  knock(b, -10, 0, 0.1);
+  assert.equal(b.rollT, -1);
 });
 
 test('the side camera leads, clamps to the room, and keeps the floor in view', () => {

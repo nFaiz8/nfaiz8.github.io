@@ -2,7 +2,7 @@
 import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
-import { newBody, stepBody, sideCamera, kindsFor } from './arena.js';
+import { newBody, stepBody, sideCamera, kindsFor, insideFor } from './arena.js';
 
 const SPEED = 30; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
 const SPRINT = 1.5; // holding Shift
@@ -32,6 +32,7 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     frozen: false, // input ignored (during the tilt)
     view: { cols: 150, rows: 50 }, // cells on screen; main.js keeps it current
     kindAt: map.arena ? kindsFor(map) : null,
+    inside: map.arena ? insideFor(map) : null,
   };
 }
 
@@ -227,7 +228,7 @@ function moveCamera(world, dt) {
 function stepSide(world, dt, input) {
   const p = world.player;
   if (!world.frozen) {
-    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion });
+    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside });
     p.moving = Math.abs(p.vx) > 0.5 || !p.onGround;
     if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);
     if (!world.want && !inArena(world.map, p.x, p.y)) world.want = 'top';
@@ -269,7 +270,7 @@ function snapCamera(world) {
 // Into the side view: on the floor just inside the door, facing west (or where you already are).
 export function enterSide(world, { place = true } = {}) {
   const { player: p, map } = world, a = map.arena;
-  if (place) { p.x = a.entry.x + 0.5; p.y = a.floorY - 0.5; p.facing = -1; }
+  if (place) { p.x = a.entry.x + 0.5; p.y = a.floorY - 1.5; p.facing = -1; }
   // prevJump: a key still held from walking in through the door (W, ↑, Space) must not fire a jump on
   // arrival. A teleport (a link, the viewer) has no such key, so the first press there jumps.
   Object.assign(p, newBody(p.x, p.y), { prevJump: place });

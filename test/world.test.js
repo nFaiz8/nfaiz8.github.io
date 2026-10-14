@@ -173,20 +173,20 @@ test('walking west through the door asks for the side view; entering puts you on
   assert.equal(w.mode, 'side');
   assert.equal(w.want, null);
   assert.equal(w.player.x, A.entry.x + 0.5);
-  assert.equal(w.player.y, A.floorY - 0.5);
+  assert.equal(w.player.y, A.floorY - 1.5);
   assert.equal(w.player.facing, -1);
   step(w, 1 / 60, SIDE_IDLE);
-  assert.equal(w.player.y, A.floorY - 0.5, 'standing, not falling');
+  assert.equal(w.player.y, A.floorY - 1.5, 'standing, not falling');
   assert.equal(w.focus, A.backdrop, 'the backdrop is what you look at');
 });
 
 test('in side view you run and jump; running east out of the door asks to go back; exiting faces east in the corridor', () => {
   const w = createWorld(amap);
-  teleport(w, A.entry.x + 0.5, A.floorY - 0.5);
+  teleport(w, A.entry.x + 0.5, A.floorY - 1.5);
   assert.equal(w.mode, 'side', 'a teleport into the arena switches at once');
   let top = w.player.y;
   for (let i = 0; i < 30; i++) { step(w, 1 / 60, { ...SIDE_IDLE, jump: true }); top = Math.min(top, w.player.y); }
-  assert.ok(A.floorY - 0.5 - top > 3, 'jumped');
+  assert.ok(A.floorY - 1.5 - top > 3, 'jumped');
   for (let i = 0; i < 120; i++) step(w, 1 / 60, SIDE_IDLE);
   // The jump may land on a platform over the door's floor: ↓ drops back through it first.
   for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, down: true });
@@ -201,7 +201,7 @@ test('in side view you run and jump; running east out of the door asks to go bac
 
 test('a teleport out of the arena (e.g. → in the viewer) switches back to top-down at once', () => {
   const w = createWorld(amap);
-  teleport(w, A.entry.x + 0.5, A.floorY - 0.5);
+  teleport(w, A.entry.x + 0.5, A.floorY - 1.5);
   const f = amap.frames[0];
   teleport(w, f.stand.x + 0.5, f.stand.y + 0.5);
   assert.equal(w.mode, 'top');
@@ -220,13 +220,13 @@ test('while frozen (tilting) input is ignored; a held jump at the door does not 
   w.frozen = false;
   enterSide(w);
   for (let i = 0; i < 30; i++) step(w, 1 / 60, { ...SIDE_IDLE, jump: true });
-  assert.equal(w.player.y, A.floorY - 0.5, 'jump still held from before: no jump');
+  assert.equal(w.player.y, A.floorY - 1.5, 'jump still held from before: no jump');
 });
 
 test('the side camera stays inside the room and shows the floor', () => {
   const w = createWorld(amap, { reducedMotion: true });
   w.view = { cols: 142, rows: 32 };
-  teleport(w, A.entry.x + 0.5, A.floorY - 0.5);
+  teleport(w, A.entry.x + 0.5, A.floorY - 1.5);
   for (let i = 0; i < 600; i++) {
     step(w, 1 / 60, { ...SIDE_IDLE, x: -1, run: true, jump: i % 50 < 20 });
     assert.ok(w.cam.x - w.view.cols / 2 >= A.x - 1e-9 && w.cam.x + w.view.cols / 2 <= A.x + A.w + 1e-9, 'x inside');
@@ -236,7 +236,7 @@ test('the side camera stays inside the room and shows the floor', () => {
 
 test('walkTo from the arena leaves it first; a target inside the arena is refused', () => {
   const w = createWorld(amap);
-  teleport(w, A.entry.x + 0.5, A.floorY - 0.5);
+  teleport(w, A.entry.x + 0.5, A.floorY - 1.5);
   assert.equal(walkTo(w, A.entry.x - 5, A.entry.y), false);
   assert.equal(w.mode, 'side');
   assert.equal(walkTo(w, Math.floor(amap.spawn.x), Math.floor(amap.spawn.y)), true);
@@ -250,4 +250,15 @@ test('fake visitors never go into the arena', () => {
     step(w, 1 / 30, { x: 0, y: 0 });
     for (const v of w.visitors) assert.ok(!inArena(amap, v.x, v.y), `visitor in the arena at ${v.x},${v.y}`);
   }
+});
+
+test('stunned in the side view, the arena door is a wall', async () => {
+  const { knock } = await import('../src/arena.js');
+  const w = createWorld(amap);
+  teleport(w, A.entry.x - 3.5, A.floorY - 1.5);
+  for (let i = 0; i < 12; i++) step(w, 1 / 60, SIDE_IDLE);
+  knock(w.player, 45, 0, 0.4);
+  for (let i = 0; i < 30; i++) step(w, 1 / 60, SIDE_IDLE);
+  assert.equal(w.want, null, 'not carried out of the door');
+  assert.equal(w.mode, 'side');
 });

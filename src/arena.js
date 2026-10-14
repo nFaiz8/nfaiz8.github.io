@@ -14,15 +14,54 @@ export const MAX_FALL = 60;
 const ACCEL = 0.07; // seconds to reach about 63% of the target speed (as walking)
 const AIR_CONTROL = 0.6;
 const COYOTE = 0.1, BUFFER = 0.1, DROP = 0.25;
-const HW = 0.3, HH = 0.5; // half width (cells), half height (rows)
+export const BODY = { w: 0.8, h: 3 }; // cells across, rows down
+const HW = 0.4, HH = 1.5; // half width (cells), half height (rows); the feet are at y + 1.5
+export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
+export const STUN_DECAY = 0.35; // seconds: a knocked-back body's speed falls by 1/e in this long
+const NONE = {};
 const EPS = 1e-6;
 
 export function newBody(x, y) {
-  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0 };
+  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, carry: false };
 }
 
-export function stepBody(b, dt, input, kindAt, { reducedMotion = false } = {}) {
+export const rolling = (b) => b.rollT >= 0;
+
+// A hit: set the velocity and stun for a while. An upward ky leaves the ground; ky 0 leaves vy alone.
+export function knock(b, kx, ky, stun) {
+  b.vx = kx;
+  if (ky) { b.vy = ky; if (ky < 0) b.onGround = b.onPlatform = false; }
+  b.stun = Math.max(b.stun, stun);
+  b.rollT = -1;
+  b.carry = false;
+}
+
+// Start a roll: on the ground, not stunned, not already rolling, and cooled down.
+export function startRoll(b, dir) {
+  if (!dir || !b.onGround || b.stun > 0 || b.rollT >= 0 || b.rollCool > 0) return false;
+  b.rollT = 0;
+  b.rollDir = Math.sign(dir);
+  b.vx = b.rollDir * ROLL.speed;
+  return true;
+}
+
+// The arena's interior in map cells (the door and corridor are outside it).
+export function insideFor(map) {
+  const a = map.arena;
+  return (cx, cy) => cx > a.x && cx < a.x + a.w - 1 && cy > a.y && cy < a.y + a.h - 1;
+}
+
+// A roll that ends in the air (a jump, a ledge) carries its speed: with no steering held, the air
+// doesn't slow you until you land.
+const endRoll = (b) => { b.rollT = -1; b.rollCool = ROLL.cooldown; b.carry = !b.onGround; };
+
+export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside = null } = {}) {
   b.t += dt;
+  const stunned = b.stun > 0;
+  if (stunned) { b.stun = Math.max(0, b.stun - dt); input = NONE; } // knocked back: no control until it ends
+  b.rollCool = Math.max(0, b.rollCool - dt);
+  if (b.onGround) b.carry = false;
+  if (input.roll) startRoll(b, Math.sign(input.roll));
   const jump = !!input.jump;
   if (jump && !b.prevJump) b.sinceJump = 0; else b.sinceJump += dt;
   // Letting go while rising cuts the jump short.
@@ -37,16 +76,36 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false } = {}) {
     if (!jump) { b.vy *= 0.5; b.cut = true; } // a buffered tap that was already let go: a short hop
     b.sinceJump = b.sinceGround = Infinity;
     b.onGround = false;
+    if (b.rollT >= 0) endRoll(b); // a jump out of a roll keeps its speed
   }
 
+  // While stunned the door is a wall: the cells outside the arena are solid.
+  const kinds = stunned && inside ? (c, r) => (inside(c, r) ? kindAt(c, r) : SOLID) : kindAt;
+  if (b.rollT >= 0) {
+    b.vx = b.rollDir * ROLL.speed; // a roll ignores steering
+    b.rollT += dt;
+  } else if (stunned) {
+    b.vx *= Math.exp(-dt / STUN_DECAY);
+  } else {
+    steer(b, dt, input, reducedMotion);
+  }
+  const vy0 = b.vy;
+  b.vy = Math.min(MAX_FALL, b.vy + GRAVITY * dt);
+  const mx = b.vx * dt, my = ((vy0 + b.vy) / 2) * dt; // exact for constant gravity
+  move(b, mx, my, kinds);
+  // The roll ends after its time, or when it runs off a ledge (keeping its speed).
+  if (b.rollT >= 0 && (b.rollT >= ROLL.time - 1e-9 || !b.onGround)) endRoll(b);
+}
+
+function steer(b, dt, input, reducedMotion) {
+  if (b.carry && !input.x) return; // coasting on a roll's speed
   const target = (input.x || 0) * RUN * (input.run ? SPRINT : 1);
   const k = reducedMotion ? 1 : 1 - Math.exp((-dt * (b.onGround ? 1 : AIR_CONTROL)) / ACCEL);
   b.vx += (target - b.vx) * k;
   if (!target && Math.abs(b.vx) < 0.05) b.vx = 0;
-  const vy0 = b.vy;
-  b.vy = Math.min(MAX_FALL, b.vy + GRAVITY * dt);
-  const mx = b.vx * dt, my = ((vy0 + b.vy) / 2) * dt; // exact for constant gravity
+}
 
+function move(b, mx, my, kindAt) {
   const n = Math.max(1, Math.ceil(Math.max(Math.abs(mx), Math.abs(my)) / 0.4));
   const dropping = b.t < b.dropUntil;
   b.onGround = b.onPlatform = false;
