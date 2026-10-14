@@ -1,4 +1,19 @@
 {
+  "50300020": {
+    "film": true
+  },
+  "06560009": {
+    "film": true
+  },
+  "06560011": {
+    "film": true
+  },
+  "06560015": {
+    "film": true
+  },
+  "06620008": {
+    "film": true
+  },
   "dscf0547": {
     "hidden": true
   },
@@ -94,5 +109,11 @@
   },
   "dsf7413": {
     "hidden": true
+  },
+  "img-6258": {
+    "film": true
+  },
+  "img-6259": {
+    "film": true
   }
 }
