@@ -11,6 +11,7 @@ const DROP = ['KeyS', 'ArrowDown', 'Drop'];
 export function createDoubleTap(gap = 0.25) {
   let dir = 0, at = -Infinity;
   return {
+    reset() { dir = 0; at = -Infinity; },
     press(d, t) {
       if (d === dir && t - at <= gap) { dir = 0; at = -Infinity; return d; }
       dir = d; at = t;
@@ -30,21 +31,21 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
   let mouseFire = false;
   const dtap = createDoubleTap();
   const mouse = { on: false, px: 0, py: 0 };
-  const tapRoll = (code) => { const d = ROLL_DIR[code]; if (d) roll = dtap.press(d, now()) || roll; };
+  const tapRoll = (code) => { if (!arena()) return; const d = ROLL_DIR[code]; if (d) roll = dtap.press(d, now()) || roll; };
 
   const editable = (e) => e.target.closest && e.target.closest('input, textarea, [contenteditable]');
   win.addEventListener('keydown', (e) => {
     if (editable(e) || e.metaKey || e.ctrlKey || e.altKey) return;
     run = e.shiftKey;
     if (e.code === 'KeyJ') { held.add('KeyJ'); mouse.on = false; e.preventDefault(); return; }
-    if (e.code === 'KeyK') { if (!e.repeat) strikes++; e.preventDefault(); return; }
+    if (e.code === 'KeyK') { if (!e.repeat && arena()) strikes++; e.preventDefault(); return; }
     if (ROLL_DIR[e.code] && !e.repeat) tapRoll(e.code);
     if (KEYS[e.code]) { held.add(e.code); e.preventDefault(); return; }
     if (e.code === 'Space') held.add('Space'); // a jump in the arena; onKey decides what else it does
     if (onKey(e)) e.preventDefault();
   });
   win.addEventListener('keyup', (e) => { held.delete(e.code); run = e.shiftKey; });
-  const clear = () => { held.clear(); pad.clear(); mouseFire = false; strikes = 0; roll = 0; };
+  const clear = () => { held.clear(); pad.clear(); mouseFire = false; strikes = 0; roll = 0; mouse.on = false; dtap.reset(); };
   win.addEventListener('blur', clear);
 
   // The mouse aims, left fires, right strikes (arena only; touch never does)
@@ -64,9 +65,14 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
     if (e.button === 0) mouseFire = true;
     else if (e.button === 2) strikes++;
   });
-  target.addEventListener('pointercancel', () => { mouseFire = false; });
+  // Released over a HUD overlay or outside the window? The window hears it too.
+  const release = (e) => { if (e.pointerType === 'mouse' && e.button === 0) mouseFire = false; };
+  const cancel = () => { mouseFire = false; };
+  target.addEventListener('pointercancel', cancel);
+  win.addEventListener('pointercancel', cancel);
+  win.addEventListener('pointerup', release);
   target.addEventListener('pointerup', (e) => {
-    if (e.pointerType === 'mouse' && e.button === 0) mouseFire = false;
+    release(e);
     if (!down) return;
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
     down = null;
@@ -79,11 +85,11 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
       const all = new Set([...held, ...pad]);
       for (const code of all) { const k = KEYS[code]; if (k) { x += k[0]; y += k[1]; } }
       return { x: Math.sign(x), y: Math.sign(y), run, jump: JUMP.some((c) => all.has(c)), down: DROP.some((c) => all.has(c)),
-        fire: all.has('KeyJ') || all.has('Fire') || mouseFire };
+        fire: all.has('KeyJ') || all.has('Fire') || (mouseFire && arena()) };
     },
     press(code, on) {
       if (on && !pad.has(code)) {
-        if (code === 'Hit') strikes++;
+        if (code === 'Hit') { if (arena()) strikes++; }
         else tapRoll(code);
       }
       if (on) pad.add(code); else pad.delete(code);

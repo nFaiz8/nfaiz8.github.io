@@ -83,3 +83,56 @@ test('the pad: Fire held fires, Hit strikes per press, ◀ ◀ rolls left', asyn
   assert.equal(input.takeRoll(), -1);
   delete globalThis.window;
 });
+
+test('mouse fire releases on a window pointerup, and drops when the arena is left', async () => {
+  const win = fakeTarget(), stage = fakeTarget();
+  globalThis.window = win;
+  const { createInput } = await import('../src/input.js?fix1');
+  let inArena = true;
+  const input = createInput(stage, { onTap() {}, onKey: () => false, arena: () => inArena, now: () => 0 });
+  stage.fire('pointerdown', { pointerType: 'mouse', button: 0, clientX: 1, clientY: 1 });
+  win.fire('pointerup', { pointerType: 'mouse', button: 0 });
+  assert.equal(input.state().fire, false, 'released outside the stage');
+  stage.fire('pointerdown', { pointerType: 'mouse', button: 0, clientX: 1, clientY: 1 });
+  win.fire('pointercancel', { pointerType: 'mouse' });
+  assert.equal(input.state().fire, false, 'cancelled');
+  stage.fire('pointerdown', { pointerType: 'mouse', button: 0, clientX: 1, clientY: 1 });
+  inArena = false;
+  assert.equal(input.state().fire, false, 'not in the arena');
+  delete globalThis.window;
+});
+
+test('clear forgets a pending roll, mouse fire, pad Fire, a held direction and mouse aim', async () => {
+  const win = fakeTarget(), stage = fakeTarget();
+  globalThis.window = win;
+  const { createInput } = await import('../src/input.js?fix2');
+  let t = 0;
+  const input = createInput(stage, { onTap() {}, onKey: () => false, arena: () => true, now: () => t });
+  const key = (type, code) => win.fire(type, { code, target: {}, preventDefault() {}, shiftKey: false });
+  key('keydown', 'KeyD'); key('keyup', 'KeyD');
+  stage.fire('pointermove', { pointerType: 'mouse', clientX: 5, clientY: 5 });
+  stage.fire('pointerdown', { pointerType: 'mouse', button: 0, clientX: 5, clientY: 5 });
+  input.press('Fire', true);
+  key('keydown', 'KeyA');
+  input.clear();
+  t = 0.1; key('keydown', 'KeyD');
+  assert.equal(input.takeRoll(), 0, 'the earlier tap is forgotten');
+  key('keyup', 'KeyD');
+  assert.deepEqual([input.state().fire, input.state().x, input.mouse.on], [false, 0, false]);
+  delete globalThis.window;
+});
+
+test('strikes and rolls are not counted outside the arena', async () => {
+  const win = fakeTarget(), stage = fakeTarget();
+  globalThis.window = win;
+  const { createInput } = await import('../src/input.js?fix3');
+  let inArena = false;
+  const input = createInput(stage, { onTap() {}, onKey: () => false, arena: () => inArena, now: () => 0 });
+  const key = (type, code) => win.fire(type, { code, target: {}, preventDefault() {}, shiftKey: false });
+  key('keydown', 'KeyK'); input.press('Hit', true); input.press('Hit', false);
+  key('keydown', 'KeyD'); key('keyup', 'KeyD'); key('keydown', 'KeyD');
+  inArena = true;
+  assert.equal(input.takeStrikes(), 0);
+  assert.equal(input.takeRoll(), 0);
+  delete globalThis.window;
+});
