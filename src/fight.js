@@ -1,11 +1,19 @@
 // The numbers and geometry of the arena fight, shared by the rules engine, the Worker and the browser.
 // Pure: no DOM, no randomness of its own, no clocks. Times are in seconds; angles are on screen.
 import { SOLID } from './level.js';
-import { SHOULDER, MUZZLE_R } from './stick.js';
+import { SHOULDERS, MUZZLE_R } from './stick.js';
 
 export const MAX_HP = 100;
 export const FIGURE_ROWS = 3;
 export const HURT = { hw: 0.5, hh: 1.5 };
+// The hurtbox by stance (crouch addendum §2), low 0 standing, 1 crouched, 2 prone: dy is its centre's offset
+// below the body's (the feet stay at +1.5). A standing shot's line (-0.3) passes over the low two.
+export const HURTS = [{ dy: 0, hw: 0.5, hh: 1.5 }, { dy: 0.65, hw: 0.5, hh: 0.85 }, { dy: 1, hw: 1.75, hh: 0.5 }];
+export const hurtOf = (low) => HURTS[low] || HURTS[0];
+// The stance in a state's input bits: 64 crouched, 128 prone, honoured only on the ground and not rolling.
+export const lowOf = (i, g) => (g === 1 && !(i & 32) ? (i & 128 ? 2 : i & 64 ? 1 : 0) : 0);
+export const LOW_RANGE = 1.5; // a shot fired low flies this much further
+export const LOW_KNOCK = 0.5; // a body hit while low takes this much of the knock and the stun
 export const REGEN_RATE = 20;
 export const REGEN_AFTER = 4;
 export const SAFE_TIME = 1.5;
@@ -46,10 +54,13 @@ export function pointAim(sx, sy, px, py, facing) {
 
 export const absAngle = (facing, aim) => (facing > 0 ? aim : aim >= 0 ? Math.PI - aim : -Math.PI - aim);
 export const along = (angle, r) => ({ dx: r * Math.cos(angle), dy: r * Math.sin(angle) / 2 });
-export const shoulderOf = (x, y, facing) => ({ x: x + SHOULDER.dx * facing, y: y + SHOULDER.dy });
+export const shoulderOf = (x, y, facing, low = 0) => {
+  const S = SHOULDERS[low] || SHOULDERS[0];
+  return { x: x + S.dx * facing, y: y + S.dy };
+};
 
-export function muzzleOf(x, y, facing, aim, gun) {
-  const s = shoulderOf(x, y, facing);
+export function muzzleOf(x, y, facing, aim, gun, low = 0) {
+  const s = shoulderOf(x, y, facing, low);
   const d = along(absAngle(facing, aim), MUZZLE_R[gun]);
   return { x: s.x + d.dx, y: s.y + d.dy };
 }
@@ -74,7 +85,7 @@ export function rayLength(kindAt, x, y, angle, max) {
   return max;
 }
 
-export const bulletRange = (gun) => GUNS[gun].speed * GUNS[gun].flight;
+export const bulletRange = (gun, long = false) => GUNS[gun].speed * GUNS[gun].flight * (long ? LOW_RANGE : 1);
 
 export function bulletAt(b, t) {
   const d = along(b.angle, GUNS[b.gun].speed * (t - b.t0));
@@ -103,11 +114,17 @@ export function sweep(p0, p1, c0, c1, hw = 0.5, hh = 1.5) {
   return enter <= exit && exit >= 0 && enter <= 1 ? Math.max(0, enter) : -1;
 }
 
-// Headshots: a bullet's hit point (dx cells, dy rows from the target's centre), clamped into the hurtbox,
-// is on the head when it is in the top row of the box. Damage is HEADSHOT times; melee has none.
+// Headshots: a bullet's hit point (dx cells, dy rows from the target's centre), clamped into the stance's
+// hurtbox, is on the head when it is in the top row of the box; crouched, above HEAD_LINE_LOW; prone, the
+// front of the box in the facing direction f. Damage is HEADSHOT times; melee has none.
 export const HEADSHOT = 2;
-const HEAD_LINE = -0.5;
-export const isHeadshot = (rel) => Math.max(-HURT.hh, Math.min(HURT.hh, rel.dy)) < HEAD_LINE;
+const HEAD_LINE = -0.5, HEAD_LINE_LOW = 0.3, HEAD_FRONT = 0.75;
+export function isHeadshot(rel, low = 0, f = 1) {
+  const H = hurtOf(low);
+  if (low === 2) return Math.max(-H.hw, Math.min(H.hw, rel.dx)) * (f < 0 ? -1 : 1) > HEAD_FRONT;
+  const dy = Math.max(H.dy - H.hh, Math.min(H.dy + H.hh, rel.dy));
+  return dy < (low === 1 ? HEAD_LINE_LOW : HEAD_LINE);
+}
 
 // Health.
 export const regenHp = (hp, hurtAt, now) => Math.min(MAX_HP, hp + Math.max(0, now - hurtAt - REGEN_AFTER) * REGEN_RATE);
@@ -129,7 +146,10 @@ export function strikeBox(x, y, facing, kind) {
     : { x0: Math.min(a, b), x1: Math.max(a, b), y0: y - 1.05, y1: y + 1.05 };
 }
 
-export const boxHits = (box, x, y) => box.x0 < x + HURT.hw && box.x1 > x - HURT.hw && box.y0 < y + HURT.hh && box.y1 > y - HURT.hh;
+export function boxHits(box, x, y, low = 0) {
+  const H = hurtOf(low), cy = y + H.dy;
+  return box.x0 < x + H.hw && box.x1 > x - H.hw && box.y0 < cy + H.hh && box.y1 > cy - H.hh;
+}
 export const strikeKnock = (kind, facing) => ({ kx: facing * STRIKES[kind].kx, ky: -STRIKES[kind].ky });
 
 export const bulletKnock = (gun, angle) => ({ kx: GUNS[gun].kb * Math.cos(angle), ky: GUNS[gun].kb * Math.sin(angle) / 2 });

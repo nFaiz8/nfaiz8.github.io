@@ -716,3 +716,58 @@ test('10 s of rifle fire held sends at most 20 a in any second, also when every 
     }
   }
 });
+
+// ---- crouch and crawl (docs/specs/2026-10-14-arena-crouch.md) ----
+
+test('crouching sends an a with bit 64, crawling one with 128; my state carries low', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw(), s.now);
+  s.frames(20);
+  let n = s.sent.length;
+  s.frames(2, { down: true });
+  const c = s.sent.slice(n).find((m) => m.t === 'a');
+  assert.ok(c && (c.i & 64) && !(c.i & 128), JSON.stringify(c));
+  assert.equal(s.pvp.bodies(s.now)[0].state.low, 1);
+  n = s.sent.length;
+  s.frames(3, { down: true, x: 1 });
+  const p = s.sent.slice(n).find((m) => m.t === 'a');
+  assert.ok(p && (p.i & 128) && !(p.i & 64), JSON.stringify(p));
+  assert.equal(s.pvp.bodies(s.now)[0].state.low, 2);
+  s.frames(3);
+  assert.equal(s.pvp.bodies(s.now)[0].state.low, 0);
+});
+
+test('crouched, ↓ doesn\'t tilt the keyboard aim: the shot is level, from the crouch\'s shoulder, and flies long', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw(), s.now);
+  s.frames(20);
+  s.frames(2, { down: true, aimDown: true });
+  s.frames(1, { down: true, aimDown: true, fire: true });
+  const f = s.sent.find((m) => m.t === 'f');
+  assert.equal(f.a, 0);
+  const p = s.world.player, m = muzzleOf(p.x - off.x, p.y - off.y, 1, 0, 'deagle', 1);
+  assert.ok(Math.abs(f.y - m.y) < 0.02, `from the crouch: ${f.y} vs ${m.y}`);
+  const b = s.pvp.bodies(s.now)[0];
+  assert.equal(b.state.aimed, false);
+});
+
+test('hit while low (lo): half the stun; the knock as sent', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw(), s.now);
+  s.frames(5);
+  s.pvp.onMessage({ t: 'h', id: 'me', by: 'b', w: 'k', n: -1, d: 22, hp: 78, kx: 22.5, ky: -11, lo: 1 }, s.now);
+  assert.ok(Math.abs(s.world.player.stun - 0.2) < 1e-9, `stun ${s.world.player.stun}`);
+  assert.equal(s.world.player.vx, 22.5);
+});
+
+test('offline: a crouched level shot hits the standing dummy; a crawl moves at 10 cells/s', () => {
+  const s = setup();
+  s.frames(15);
+  s.frames(2, { down: true });
+  s.frames(1, { down: true, fire: true });
+  s.frames(30, { down: true });
+  assert.equal(s.pvp.bodies(s.now).find((b) => b.dummy).state.hp, 75);
+  const x0 = s.world.player.x;
+  s.frames(60, { down: true, x: -1 });
+  assert.ok(Math.abs(x0 - s.world.player.x - 10) < 1, `crawled ${x0 - s.world.player.x}`);
+});

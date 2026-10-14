@@ -175,3 +175,61 @@ test('fight.js uses no randomness or browser APIs of its own', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../src/fight.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /Math\.random|window|document|performance/);
 });
+
+// Crouch and crawl (docs/specs/2026-10-14-arena-crouch.md §2, §3).
+test('stances: the hurtboxes keep the feet at +1.5; a standing level shot (-0.3) passes over crouched and prone', () => {
+  assert.deepEqual(F.hurtOf(0), { dy: 0, hw: 0.5, hh: 1.5 });
+  for (const low of [0, 1, 2]) close(F.hurtOf(low).dy + F.hurtOf(low).hh, 1.5, 1e-9, `feet, low ${low}`);
+  close(F.hurtOf(1).dy - F.hurtOf(1).hh, -0.2);
+  close(F.hurtOf(2).dy - F.hurtOf(2).hh, 0.5);
+  assert.equal(F.hurtOf(2).hw, 1.75);
+  const stand = F.muzzleOf(0, 0, 1, 0, 'deagle').y;
+  assert.ok(stand < F.hurtOf(1).dy - F.hurtOf(1).hh, 'over a crouch');
+  const crouch = F.muzzleOf(0, 0, 1, 0, 'deagle', 1).y, prone = F.muzzleOf(0, 0, 1, 0, 'deagle', 2).y;
+  for (const low of [0, 1, 2]) {
+    const H = F.hurtOf(low);
+    assert.ok(crouch > H.dy - H.hh && crouch < H.dy + H.hh, `a crouched shot reaches low ${low}`);
+    assert.ok(prone > H.dy - H.hh && prone < H.dy + H.hh, `a prone shot reaches low ${low}`);
+  }
+  assert.equal(F.hurtOf(7), F.hurtOf(0));
+});
+
+test('lowOf: 64 crouched, 128 prone, only with g 1 and the roll bit off', () => {
+  assert.equal(F.lowOf(64, 1), 1);
+  assert.equal(F.lowOf(128 | 2, 1), 2);
+  assert.equal(F.lowOf(0, 1), 0);
+  assert.equal(F.lowOf(64, 0), 0);
+  assert.equal(F.lowOf(64 | 32, 1), 0);
+});
+
+test('shoulderOf and muzzleOf by stance, mirrored by facing', () => {
+  const s1 = F.shoulderOf(10, 20, 1, 1), s2 = F.shoulderOf(10, 20, -1, 2);
+  close(s1.x, 10.6); close(s1.y, 20.6);
+  close(s2.x, 9.45); close(s2.y, 21.1);
+  const m = F.muzzleOf(10, 20, -1, 0, 'rifle', 2);
+  close(m.x, 9.45 - 4.8); close(m.y, 21.1);
+  assert.deepEqual(F.shoulderOf(10, 20, 1), F.shoulderOf(10, 20, 1, 0));
+});
+
+test('headshots by stance: crouched above 0.3, prone the front of the box', () => {
+  assert.equal(F.isHeadshot({ dx: 0, dy: 0.1 }, 1), true);
+  assert.equal(F.isHeadshot({ dx: 0, dy: 0.6 }, 1), false, 'a crouched shot into a croucher: the body');
+  assert.equal(F.isHeadshot({ dx: 0, dy: -1 }, 1), true, 'above the box clamps to its top');
+  assert.equal(F.isHeadshot({ dx: 1.2, dy: 1 }, 2, 1), true, 'prone facing right: the right end');
+  assert.equal(F.isHeadshot({ dx: 1.2, dy: 1 }, 2, -1), false, 'prone facing left: the feet');
+  assert.equal(F.isHeadshot({ dx: -3, dy: 1 }, 2, -1), true, 'clamped into the box');
+  assert.equal(F.isHeadshot({ dx: 0, dy: 1 }, 2, 1), false);
+});
+
+test('boxHits by stance; the range and knock while low', () => {
+  const punch = F.strikeBox(10, 20, 1, 'punch');
+  assert.equal(F.boxHits(punch, 12, 20, 1), true, 'a punch reaches a croucher');
+  assert.equal(F.boxHits(punch, 12, 20, 2), true, 'and someone prone');
+  assert.equal(F.boxHits({ x0: 11, x1: 13, y0: 18, y1: 20.1 }, 12, 20, 2), false, 'over someone prone');
+  assert.equal(F.boxHits({ x0: 11, x1: 13, y0: 18, y1: 20.1 }, 12, 20, 0), true);
+  assert.equal(F.boxHits({ x0: 13.3, x1: 14, y0: 20, y1: 21 }, 12, 20, 2), true, 'the long prone box');
+  assert.equal(F.LOW_RANGE, 1.5);
+  assert.equal(F.LOW_KNOCK, 0.5);
+  close(F.bulletRange('deagle', true), 96);
+  close(F.bulletRange('deagle'), 64);
+});

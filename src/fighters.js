@@ -3,7 +3,7 @@
 // their own screen. A new state is run forward to the present; the difference from where they were
 // drawn glides out over ~80 ms, or snaps when it is large. Pure: no DOM, no clocks; times in ms.
 import { newBody, stepBody, knock, rolling, keepDrawnOut, ROLL, AIR_JUMPS, COYOTE } from './arena.js';
-import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME, REGEN_AFTER } from './fight.js';
+import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME, REGEN_AFTER, lowOf, LOW_KNOCK } from './fight.js';
 import { flipCut } from './stick.js';
 
 const SILENT = 300; // ms since the last state was sent before their input counts as released
@@ -100,6 +100,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     b.vx = num(m.vx) ? m.vx : 0;
     b.vy = num(m.vy) ? m.vy : 0;
     b.onGround = !!m.g;
+    b.low = lowOf(i, m.g); // crouched or prone as sent; stepBody predicts it from the bits from here on
     // Jump held since the last state is no new press; jump that came on with this state is the take-off.
     b.prevJump = !!((old ? F.bits : i) & 4);
     // The air jump: the count, how long ago it was last taken and how long since the ground (as of when
@@ -175,7 +176,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
         break;
       }
       case 'h': {
-        const stun = stunOf(m.w) || 0;
+        const stun = (stunOf(m.w) || 0) * (m.lo ? LOW_KNOCK : 1); // hit while low: half the stun
         if (F.body && num(m.kx) && num(m.ky)) knock(F.body, m.kx, m.ky, stun, BULLETS.has(m.w));
         if (num(m.hp)) F.hp = m.hp;
         F.hurtAt = now;
@@ -244,7 +245,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       const b = F.body, { act, actT } = actOf(F, now);
       const hp = F.alive ? regenHp(F.hp, F.hurtAt / 1000, now / 1000) : 0;
       out.push({ id: F.id, kills: F.kills, alive: F.alive, state: {
-        x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround, flipT: flipOf(F, now),
+        x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround, low: b.low || 0, flipT: flipOf(F, now),
         aim: F.aim, act, actT, hp, safe: now < F.safeUntil, gun: F.gun, aimed: F.aimTo !== 0, // the smoothed aim only nears 0
       } });
     }

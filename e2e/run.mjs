@@ -580,7 +580,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.goto(`${url}#/room/arena`); await ready(page);
     const entered = () => page.evaluate(() => window.__ascii.pvp().entered);
     await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
-    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · mouse aims');
+    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · ↓ crouch · mouse aims');
     // A photo.
     await page.keyboard.press('KeyE');
     await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });

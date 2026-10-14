@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { stickPose, SHOULDER, MUZZLE_R, GUN_ART, HAND_R, RIG, createMotionMemory } from '../src/stick.js';
+import { stickPose, SHOULDER, SHOULDERS, MUZZLE_R, GUN_ART, HAND_R, RIG, createMotionMemory } from '../src/stick.js';
 import { muzzleOf } from '../src/fight.js';
 import { GRAVITY, DOUBLE_V } from '../src/arena.js';
 
@@ -64,6 +64,13 @@ for (let flipT = 0; flipT < 0.4; flipT += 0.01) {
   SAMPLES.push([{ ground: false, vy: -20, flipT, act: 'shoot', actT: flipT / 2, aim: -0.6, gun: 'rifle' }], [{ ground: false, vy: 5, flipT, aimed: true, aim: 1.2 }]);
   SAMPLES.push([{ ground: false, vy: -20, flipT, act: 'kick', actT: flipT }], [{ ground: false, vy: -20, flipT, act: 'hurt', actT: flipT / 3 }]);
 }
+// Crouched and prone (crouch addendum §5): still, crawling, aimed, shooting, striking, and on the way in.
+for (const low of [1, 2]) {
+  SAMPLES.push([{ low }], [{ low, gun: 'sniper' }], [{ low, aimed: true, aim: -0.5 }], [{ low, act: 'shoot', actT: 0.02, aim: 0, gun: 'rifle' }]);
+  for (let actT = 0; actT < 0.45; actT += 0.05) SAMPLES.push([{ low, act: 'punch', actT }], [{ low, act: 'kick', actT }]);
+  for (const k of [0.25, 0.5, 0.75]) SAMPLES.push([{ low, crouchK: k, proneK: low === 2 ? k : 0 }]);
+}
+for (let x = 0; x < 4; x += 0.5) SAMPLES.push([{ low: 2, vx: 10, x }], [{ low: 2, vx: -10, x }]);
 const label = ([s, t]) => `${JSON.stringify(s)} t=${t || 0}`;
 
 test('purity: same input, same output; state untouched; no Math.random; out is appended to and returned', () => {
@@ -589,4 +596,94 @@ test('flip: interrupted by a kick or a hurt, it never snaps back into the tumble
       prev = cur;
     }
   }
+});
+
+// Crouch and crawl (docs/specs/2026-10-14-arena-crouch.md §2, §5).
+// Every point of the body (bone ends, the head) in rows and cells.
+function bodyPoints(g) {
+  const out = [];
+  for (const x of g) {
+    if (x.part === 'gun' || x.part === 'fx') continue;
+    if (x.part === 'head') out.push({ x: x.dx, y: x.dy });
+    else for (const e of ends(x)) out.push({ x: e.x, y: e.y / 2 });
+  }
+  return out;
+}
+
+test('crouched: 2 rows, the head in the top half-row of the box (-0.2 to 0.3); the feet on the feet line', () => {
+  for (const s of [{ low: 1 }, { low: 1, gun: 'sniper', aimed: true, aim: 0.4 }, { low: 1, act: 'shoot', actT: 0.02 }]) {
+    const g = pose(s), pts = bodyPoints(g), h = head(g);
+    assert.ok(h.dy > -0.2 && h.dy < 0.3, `head at ${h.dy}`);
+    assert.ok(pts.every((p) => p.y > -0.7 && p.y <= 1.5), `inside 2 rows: ${Math.min(...pts.map((p) => p.y))}`);
+    const k = skeleton(g, 'crouch');
+    assert.ok(Math.abs(k.legF.tip.y - 2.9) < 0.02 && Math.abs(k.legB.tip.y - 2.9) < 0.02, 'feet on the feet line');
+  }
+});
+
+test('prone: 1 row (0.5 to 1.5 below the centre), about 3.5 cells long, the head at the front either way it faces', () => {
+  for (const facing of [1, -1]) for (const x of [0, 1, 2, 3]) {
+    const g = pose({ low: 2, vx: 10 * facing, x, facing }), pts = bodyPoints(g), h = head(g);
+    assert.ok(pts.every((p) => p.y >= 0.5 && p.y <= 1.55), `1 row: ${Math.min(...pts.map((p) => p.y)).toFixed(2)}..${Math.max(...pts.map((p) => p.y)).toFixed(2)}`);
+    assert.ok(pts.every((p) => Math.abs(p.x) <= 2.4), `length: ${Math.min(...pts.map((p) => p.x)).toFixed(2)}..${Math.max(...pts.map((p) => p.x)).toFixed(2)}`);
+    assert.ok(h.dx * facing > 0.75 && h.dy >= 0.5 && h.dy <= 1.5, `head at ${h.dx},${h.dy}`);
+  }
+});
+
+test('the drawn shoulder is SHOULDERS[low], within 0.1, so shots leave from the shoulder you see', () => {
+  for (const low of [0, 1, 2]) {
+    const k = skeleton(pose({ low }), `low ${low}`), S = SHOULDERS[low];
+    assert.ok(Math.abs(k.armF.root.x - S.dx) < 0.1 && Math.abs(k.armF.root.y / 2 - S.dy) < 0.1, `low ${low}: ${k.armF.root.x}, ${k.armF.root.y / 2}`);
+  }
+  assert.equal(SHOULDERS[0], SHOULDER);
+  // Aimed while low: the gun lies along the aim from that shoulder, its muzzle at muzzleOf by stance.
+  for (const low of [1, 2]) for (const aim of [-0.6, 0, 0.3]) {
+    const g = pose({ low, act: 'shoot', actT: 0.2, aim, gun: 'rifle' }), gun = part(g, 'gun');
+    const m = muzzleOf(0, 0, 1, aim, 'rifle', low), last = gun[gun.length - 1];
+    const tip = { x: last.dx + 0.5 * Math.cos(aim), y: last.dy + 0.25 * Math.sin(aim) };
+    assert.ok(Math.abs(tip.x - m.x) < 0.15 && Math.abs(tip.y - m.y) < 0.15, `low ${low} aim ${aim}: ${tip.x},${tip.y} vs ${m.x},${m.y}`);
+  }
+});
+
+test('crawl: the back elbow and the knees cycle with x, every 4 cells; still, prone holds', () => {
+  const at = (x) => pose({ low: 2, vx: 10, x });
+  const sig = (g) => g.filter((q) => q.part === 'armB' || q.part === 'legB' || q.part === 'legF').map((q) => q.dx.toFixed(4)).join();
+  assert.notEqual(sig(at(1)), sig(at(3)), 'half a stride on, the limbs moved');
+  assert.equal(sig(at(1)), sig(at(5)), 'a stride on, the same');
+  assert.equal(sig(pose({ low: 2, x: 1 })), sig(pose({ low: 2, x: 3 })), 'not moving: no cycle');
+});
+
+test('crouch and prone: the blend in and out is continuous (1 ms steps), and a prone punch keeps the torso down', () => {
+  const runs = [
+    ['crouch in', (ms) => ({ low: 1, crouchK: ms / 150, proneK: 0 })],
+    ['prone in', (ms) => ({ low: 2, crouchK: 1, proneK: ms / 150 })],
+    ['stand from prone', (ms) => ({ low: 0, crouchK: 1 - ms / 150, proneK: 1 - ms / 150 })],
+    ['crawl', (ms) => ({ low: 2, vx: 10, x: 10 + 0.01 * ms })],
+    ['crawl left', (ms) => ({ low: 2, vx: -10, x: 10 - 0.01 * ms, facing: -1 })],
+  ];
+  for (const [name, at] of runs) {
+    let prev = pose(at(0));
+    for (let ms = 1; ms <= 150; ms++) {
+      const cur = pose(at(ms));
+      assert.ok(jump(prev, cur) <= 0.35, `${name}: a jump of ${jump(prev, cur).toFixed(3)} u at ${ms} ms`);
+      prev = cur;
+    }
+  }
+  const pts = bodyPoints(pose({ low: 2, act: 'punch', actT: 0.1 }));
+  assert.ok(pts.every((p) => p.y >= 0.4), 'punching prone, still down');
+  const kick = bodyPoints(pose({ low: 2, act: 'kick', actT: 0.15 }));
+  assert.ok(kick.every((p) => p.y >= 0.4), 'kicking prone, still down');
+});
+
+test('motion memory: crouchK and proneK ease 0.15 s each way; a first sighting starts where it is', () => {
+  const m = createMotionMemory();
+  const s0 = m.fill('a', { ground: true, low: 0 }, 0);
+  assert.deepEqual([s0.crouchK, s0.proneK], [0, 0]);
+  const s1 = m.fill('a', { ground: true, low: 2 }, 0.075);
+  assert.ok(Math.abs(s1.crouchK - 0.5) < 1e-9 && Math.abs(s1.proneK - 0.5) < 1e-9);
+  const s2 = m.fill('a', { ground: true, low: 1 }, 0.15);
+  assert.ok(Math.abs(s2.crouchK - 1) < 1e-9 && Math.abs(s2.proneK - 0) < 1e-9);
+  const s3 = m.fill('a', { ground: true, low: 0 }, 1);
+  assert.deepEqual([s3.crouchK, s3.proneK], [0, 0]);
+  const b = m.fill('b', { ground: true, low: 2 }, 1);
+  assert.deepEqual([b.crouchK, b.proneK], [1, 1]);
 });

@@ -6,7 +6,7 @@ import {
   MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, GUN_BY_CODE, STRIKES, stunOf,
   shoulderOf, muzzleOf, rayLength, bulletRange, bulletAt, sweep,
   regenHp, fleeKiller, nextStrike, strikeBox, boxHits, strikeKnock, bulletKnock, inDodge, pickSpawn, nearPickup,
-  HEADSHOT, isHeadshot, ROLL,
+  HEADSHOT, isHeadshot, ROLL, hurtOf, lowOf, LOW_KNOCK,
 } from './fight.js';
 
 const EST_MAX = 0.1; // how far ahead a fighter's last state is moved on by its velocity, then held
@@ -47,10 +47,14 @@ export function createReferee({ level, rand }) {
     return { x: F.x + F.vx * k, y: F.y + F.vy * k };
   };
   const ready = (F) => F.arena && F.alive && !(F.i & 32);
+  const low = (F) => lowOf(F.i, F.g); // crouched or prone, as of the last state (crouch addendum §4)
   const target = (T, t) => T.arena && T.alive && t >= T.safeUntil && !inDodge(T.rollAt, t);
 
-  // hs: a headshot; h and the k it causes carry hs: 1, and leave it out otherwise.
+  // hs: a headshot; h and the k it causes carry hs: 1, and leave it out otherwise. A body hit while low takes
+  // half the knock, and lo: 1 tells everyone to halve its stun too.
   function hurt(T, by, w, n, d, kx, ky, stun, now, all, hs = false) {
+    const lo = low(T) > 0;
+    if (lo) { kx *= LOW_KNOCK; ky *= LOW_KNOCK; }
     T.hp = regenHp(T.hp, T.hurtAt, now) - d;
     T.hurtAt = now;
     T.hitBy = by;
@@ -61,6 +65,7 @@ export function createReferee({ level, rand }) {
     if (GUN_BY_CODE[w]) T.vy += ky; else if (ky) T.vy = ky;
     const out = [{ t: 'h', id: T.id, by, w, n: n ?? -1, d, hp: shownHp(T.hp), kx: r1(kx), ky: r1(ky) }];
     if (hs) out[0].hs = 1;
+    if (lo) out[0].lo = 1;
     if (T.hp <= 0) {
       T.alive = false; T.deadAt = now; T.hp = 0;
       toDeagle(T);
@@ -97,14 +102,14 @@ export function createReferee({ level, rand }) {
   function fire(F, m, now, all) {
     const G = GUNS[F.gun];
     if (!ready(F) || bullets.filter((b) => b.owner === F.id).length >= G.max) return { ok: false, out: [] };
-    const e = estimate(F, now);
-    const mz = muzzleOf(e.x, e.y, F.f, F.a, F.gun);
+    const e = estimate(F, now), l = low(F);
+    const mz = muzzleOf(e.x, e.y, F.f, F.a, F.gun, l);
     const near = Math.abs(m.x - mz.x) <= ORIGIN.x && Math.abs(m.y - mz.y) <= ORIGIN.y; // false for NaN
     const x = r2(near ? m.x : mz.x), y = r2(near ? m.y : mz.y);
-    const range = bulletRange(F.gun);
+    const range = bulletRange(F.gun, l > 0); // fired low: LOW_RANGE times as far
     // No shot starts past a wall: the way from the shoulder of the last accepted state (not the
     // estimate, which ignores walls) to the origin must be clear, or the bullet dies at once.
-    const sh = shoulderOf(F.x, F.y, F.f);
+    const sh = shoulderOf(F.x, F.y, F.f, l);
     const ox = x - sh.x, oy = (y - sh.y) * 2, dist = Math.hypot(ox, oy);
     const blocked = dist > 0 && rayLength(kindAt, sh.x, sh.y, Math.atan2(oy, ox), dist) < dist;
     const n = seq;
@@ -112,6 +117,7 @@ export function createReferee({ level, rand }) {
     // The wall it will hit is found once, now.
     bullets.push({ n, owner: F.id, gun: F.gun, x, y, angle: m.a, t0: now, last: now, len: blocked ? 0 : Math.min(rayLength(kindAt, x, y, m.a, range), range) });
     const out = [{ t: 's', id: F.id, n, x, y, a: m.a, w: G.code }];
+    if (l) out[0].l = 1;
     if (F.ammo > 0 && --F.ammo === 0) {
       toDeagle(F);
       out.push({ t: 'w', id: F.id, w: 'd', ammo: -1 });
@@ -136,7 +142,7 @@ export function createReferee({ level, rand }) {
     for (const T of all) {
       if (T === F || !target(T, now)) continue;
       const t = estimate(T, now);
-      if (boxHits(box, t.x, t.y)) out.push(...hurt(T, F.id, S.code, null, S.damage, kx, ky, S.stun, now, all));
+      if (boxHits(box, t.x, t.y, low(T))) out.push(...hurt(T, F.id, S.code, null, S.damage, kx, ky, S.stun, now, all));
     }
     return { ok: true, out };
   }
@@ -155,16 +161,19 @@ export function createReferee({ level, rand }) {
         let hit = null, hitT = Infinity;
         for (const T of all) {
           if (T.id === b.owner || !T.arena || !T.alive) continue;
-          const s = sweep(p0, p1, estimate(T, b.last), estimate(T, t1));
+          // The stance's box: its centre H.dy below the body's.
+          const H = hurtOf(low(T)), c0 = estimate(T, b.last), c1 = estimate(T, t1);
+          c0.y += H.dy; c1.y += H.dy;
+          const s = sweep(p0, p1, c0, c1, H.hw, H.hh);
           if (s < 0) continue;
           const t = b.last + s * (t1 - b.last);
           if (t < hitT && target(T, t)) { hit = T; hitT = t; }
         }
         if (hit) {
           // Where it struck: the bullet at the hit time against the target's estimate then (clamped into
-          // the box by isHeadshot). The head row takes HEADSHOT times the damage; knock and stun stay.
+          // the stance's box by isHeadshot). The head takes HEADSHOT times the damage; knock and stun stay.
           const p = bulletAt(b, hitT), c = estimate(hit, hitT);
-          const hs = isHeadshot({ dx: p.x - c.x, dy: p.y - c.y });
+          const hs = isHeadshot({ dx: p.x - c.x, dy: p.y - c.y }, low(hit), hit.f);
           const { kx, ky } = bulletKnock(b.gun, b.angle);
           out.push(...hurt(hit, b.owner, G.code, b.n, hs ? G.damage * HEADSHOT : G.damage, kx, ky, stunOf(G.code), hitT, all, hs));
           bullets.splice(j--, 1);

@@ -6,7 +6,7 @@ import { newBody, stepBody, knock, rolling, doorZone } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
-  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup,
+  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup, LOW_KNOCK,
 } from './fight.js';
 import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
@@ -75,11 +75,15 @@ export function createPvp({
   const shake = (S = SHAKE) => { if (!reducedMotion) world.shake = { until: world.t + S.time, amp: S.amp }; };
   const myHeadshot = (m) => { if (m.hs && isMe(m.by) && !isMe(m.id)) shake(HEAD_SHAKE); };
 
-  // My state for the wire and the local referee (arena-local).
+  // My state for the wire and the local referee (arena-local). The input bits gain 32 rolling, and 64
+  // crouched or 128 prone from what my body does (crouch addendum §4).
+  const lowBits = (p) => (p.low === 2 ? 128 : p.low === 1 ? 64 : 0);
   function snap(now, facing = world.player.facing) {
     const p = world.player, l = local(p.x, p.y);
-    return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0), a: aim, ts: ts(now) };
+    return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0) | lowBits(p), a: aim, ts: ts(now) };
   }
+  // A hit's stun, halved when it landed on a body that was low (lo).
+  const stunFor = (m) => (stunOf(m.w) || 0) * (m.lo ? LOW_KNOCK : 1);
 
   // ---------- bodies colliding (body collision addendum) ----------
   // Which way a goes when its centre is on b's: by id, so both screens agree.
@@ -136,7 +140,7 @@ export function createPvp({
       // Online, local bullet numbers aren't the server's: the bullet already stopped at the dummy on screen.
       fx.hit({ n: online ? undefined : m.n, x: b.x, y: b.y, d: m.d, at: now, hs: !!m.hs });
       myHeadshot(m);
-      const stun = stunOf(m.w) || 0;
+      const stun = stunFor(m);
       if (num(m.kx) && num(m.ky)) knock(b, m.kx, m.ky, stun, BULLETS.has(m.w));
       if (dummy.rec.alive) dummy.act = { act: 'hurt', at: now, for: stun * 1000 };
     } else if (m.t === 'k') dummy.deadAt = now; // quietly: no feed line, no kill
@@ -178,7 +182,7 @@ export function createPvp({
         if (num(m.hp)) me.hp = m.hp;
         me.hurtAt = t;
         if (m.by != null) me.hitBy = m.by;
-        const stun = stunOf(m.w) || 0;
+        const stun = stunFor(m);
         if (num(m.kx) && num(m.ky)) knock(p, m.kx, m.ky, stun, BULLETS.has(m.w));
         act = { act: 'hurt', at: now, for: stun * 1000 };
         urgent = true;
@@ -239,7 +243,7 @@ export function createPvp({
       case 's': {
         if (!F || !num(m.x) || !num(m.y) || !num(m.a)) break;
         // Drawn from where it is now: half my round trip after it was fired.
-        fx.shot({ id: m.id, n: m.n, x: m.x + off.x, y: m.y + off.y, angle: m.a, gun: GUN_BY_CODE[m.w] || 'deagle', color: colorOf(m.id), mine: false, at: now - rtt() / 2 });
+        fx.shot({ id: m.id, n: m.n, x: m.x + off.x, y: m.y + off.y, angle: m.a, gun: GUN_BY_CODE[m.w] || 'deagle', color: colorOf(m.id), mine: false, at: now - rtt() / 2, long: m.l === 1 });
         shotAt.set(m.id, now);
         break;
       }
@@ -255,8 +259,8 @@ export function createPvp({
     // from the muzzle it expects and fire from the other side. It counts against the 20 a a second: with
     // the cap full, the shot waits for the next slot.
     if (online && (facing < 0 ? -1 : 1) !== lastF && !ticker.force(snap(now, facing), now)) return;
-    const p = world.player, l = local(p.x, p.y);
-    const mz = muzzleOf(l.x, l.y, facing, aim, gun);
+    const p = world.player, l = local(p.x, p.y), low = p.low || 0;
+    const mz = muzzleOf(l.x, l.y, facing, aim, gun, low); // from the stance's shoulder
     const x = r2(mz.x), y = r2(mz.y), a = r2(absAngle(facing, aim));
     ref.state(me, snap(now, facing), t); // this frame's facing, so the muzzle check agrees
     // The referee checks alive, not rolling and the in-flight cap, and spends a pickup gun's round.
@@ -264,7 +268,7 @@ export function createPvp({
     if (!r.ok) return;
     lastShot = now;
     act = { act: 'shoot', at: now, for: ACT_TIME.shoot * 1000 };
-    fx.shot({ id: me.id, n: null, x: x + off.x, y: y + off.y, angle: a, gun, color: colorOf(me.id), mine: true, at: now });
+    fx.shot({ id: me.id, n: null, x: x + off.x, y: y + off.y, angle: a, gun, color: colorOf(me.id), mine: true, at: now, long: low > 0 });
     if (online) {
       send({ t: 'f', x, y, a, ts: ts(now) });
       if (atDummy(now)) { syncGhost(now, facing, gun); runLocal(practice.fire(ghost, { x, y, a }, t, [ghost, dummy.rec]).out, now); }
@@ -292,8 +296,10 @@ export function createPvp({
     if (!entered || !me.alive) { world.aimFacing = 0; aimed = false; bits = 0; return { ...IDLE }; }
     let facing = p.facing < 0 ? -1 : 1;
     const mouse = inp.mouse && inp.mouse.on && num(inp.mouse.x) && num(inp.mouse.y) ? inp.mouse : null;
+    // Crouching (↓ on solid floor): ↓ doesn't tilt the shot, which stays level (crouch addendum §3).
+    const crouching = !!inp.down && !!p.onGround && !p.onPlatform;
     if (mouse) {
-      const s = shoulderOf(p.x, p.y, facing);
+      const s = shoulderOf(p.x, p.y, facing, p.low || 0);
       const r = pointAim(s.x, s.y, mouse.x, mouse.y, facing);
       // Facing turns only once the cursor is past the other shoulder: between the shoulders (aiming
       // straight up or down) it holds, or each turn would put the cursor behind the new shoulder.
@@ -301,10 +307,10 @@ export function createPvp({
       aim = r.aim;
       world.aimFacing = facing;
     } else {
-      aim = keyAim(!!inp.aimUp, !!inp.aimDown);
+      aim = keyAim(!!inp.aimUp, !!inp.aimDown && !crouching);
       world.aimFacing = 0;
     }
-    aimed = !!mouse || !!inp.aimUp || !!inp.aimDown;
+    aimed = !!mouse || !!inp.aimUp || (!!inp.aimDown && !crouching);
     const x = num(inp.x) ? inp.x : 0;
     bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (inp.down ? 8 : 0) | (inp.run ? 16 : 0);
     if (!rolling(p)) { // a roll drops shots and strikes for its length
@@ -370,14 +376,14 @@ export function createPvp({
     const t = sec(now), p = world.player, out = [];
     const a = actNow(act, now, me.alive, deadAt, p), flipT = flipOf(a, p);
     out.push({ id: me.id, me: true, dummy: false, kills, color: colorOf(me.id), state: {
-      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, flipT, aim, act: a.act, actT: a.actT,
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, low: p.low || 0, flipT, aim, act: a.act, actT: a.actT,
       hp: me.alive ? regenHp(me.hp, me.hurtAt, t) : 0, safe: me.alive && t < me.safeUntil, combo: me.combo, gun: me.gun, aimed,
     } });
     for (const f of fighters.list(now)) out.push({ id: f.id, me: false, dummy: false, kills: f.kills, color: colorOf(f.id), state: f.state });
     if (dummyShown(now)) {
       const b = dummy.body, R = dummy.rec, d = actNow(dummy.act, now, R.alive, dummy.deadAt, b);
       out.push({ id: DUMMY, me: false, dummy: true, kills: 0, label: 'dummy', color: DUMMY_COLOR, state: {
-        x: b.x, y: b.y, vx: b.vx, vy: b.vy, facing: 1, ground: !!b.onGround, aim: 0, act: d.act, actT: d.actT,
+        x: b.x, y: b.y, vx: b.vx, vy: b.vy, facing: 1, ground: !!b.onGround, low: 0, aim: 0, act: d.act, actT: d.actT,
         hp: R.alive ? regenHp(R.hp, R.hurtAt, t) : 0, safe: false, combo: 0, gun: 'deagle', aimed: false,
       } });
     }
@@ -390,7 +396,7 @@ export function createPvp({
       const s = b.state;
       if (s.gun !== 'sniper' || s.act === 'dead') continue;
       const last = b.me ? lastShot : shotAt.has(b.id) ? shotAt.get(b.id) : -Infinity;
-      aims.push({ x: s.x, y: s.y, facing: s.facing, aim: s.aim, color: b.color, ready: now - last >= (GUNS.sniper.cooldown - AIM_WARN) * 1000 });
+      aims.push({ x: s.x, y: s.y, facing: s.facing, aim: s.aim, low: s.low || 0, color: b.color, ready: now - last >= (GUNS.sniper.cooldown - AIM_WARN) * 1000 });
     }
     const pickups = level.pickups.map((q) => ({ x: q.x + off.x, y: q.y + off.y, gun: q.gun, there: now >= taken[q.n] }));
     return fx.glyphs(now, { bodies: list, pickups, aims }, out);
@@ -404,7 +410,7 @@ export function createPvp({
       const last = b.me ? lastShot : shotAt.has(b.id) ? shotAt.get(b.id) : -Infinity;
       const age = now - last;
       if (!(age >= 0 && age < FLASH_MS)) continue;
-      const s = b.state, mz = muzzleOf(s.x - off.x, s.y - off.y, s.facing, s.aim || 0, s.gun || 'deagle');
+      const s = b.state, mz = muzzleOf(s.x - off.x, s.y - off.y, s.facing, s.aim || 0, s.gun || 'deagle', s.low || 0);
       out.push({ x: mz.x, y: mz.y, k: 1.8 * (1 - age / FLASH_MS) });
     }
     return out;

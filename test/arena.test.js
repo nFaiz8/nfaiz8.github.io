@@ -637,7 +637,7 @@ test('kindsFor: level cells inside, walls solid, the door open', () => {
 import { SIDE_ROWS, sideZoom, ZOOM_TIME } from '../src/arena.js';
 
 test('SIDE_ROWS: deagle 20, rifle 25, sniper 33 (the whole height), no fight 24', () => {
-  assert.deepEqual(SIDE_ROWS, { deagle: 20, rifle: 25, sniper: 33, none: 24 });
+  assert.deepEqual(SIDE_ROWS, { deagle: 20, rifle: 25, sniper: 33, scope: 45, none: 24 });
   assert.equal(ZOOM_TIME, 0.35);
 });
 
@@ -950,4 +950,84 @@ test('collision: bodies touching within a rounding of each other (0.05) are not 
   assert.equal(b.x, X0 + BODY.w - 0.01, 'b not pushed');
   go(a, 0.5, { ...IDLE, x: 1 }, [box(b)]);
   assert.ok(Math.abs(a.x - (b.x - BODY.w)) < 1e-9, `walking on, a stops at contact (${a.x})`);
+});
+
+// Crouch and crawl (docs/specs/2026-10-14-arena-crouch.md §1).
+import { CRAWL } from '../src/arena.js';
+const DOWN = { ...IDLE, down: true };
+
+test('crouch: ↓ on the floor or a ▓ top is low 1, still, the feet where they were; letting go stands', () => {
+  const b = newBody(7.5, 18.5);
+  sim(b, 0.2);
+  assert.equal(b.low, 0);
+  sim(b, 0.1, DOWN);
+  assert.deepEqual([b.low, b.y, b.x, b.vx], [1, 18.5, 7.5, 0]);
+  sim(b, 1 / 60);
+  assert.equal(b.low, 0, 'let go: standing');
+  const top = newBody(31.5, 14.5);
+  sim(top, 0.2);
+  sim(top, 0.1, DOWN);
+  assert.deepEqual([top.low, top.y], [1, 14.5], 'on a ▓ top');
+});
+
+test('crawl: ↓ with → or ← is low 2 at 10 cells/s, Shift or not; letting go of the direction crouches again', () => {
+  assert.equal(CRAWL, 10);
+  for (const run of [false, true]) {
+    const b = newBody(7.5, 18.5);
+    sim(b, 0.2);
+    sim(b, 0.5, { ...DOWN, x: 1, run });
+    assert.equal(b.low, 2);
+    assert.ok(Math.abs(b.vx - CRAWL) < 0.01, `crawling at ${b.vx}`);
+    sim(b, 0.5, DOWN);
+    assert.equal(b.low, 1);
+    assert.ok(Math.abs(b.vx) < 0.01);
+  }
+  const l = newBody(20.5, 18.5);
+  sim(l, 0.2);
+  sim(l, 0.5, { ...DOWN, x: -1 });
+  assert.equal(l.low, 2);
+  assert.ok(Math.abs(l.vx + CRAWL) < 0.01);
+  // Into a crawl from a sprint: down to crawl speed as quickly as walking slows.
+  const s = newBody(29.5, 18.5);
+  sim(s, 0.3, { ...IDLE, x: -1, run: true });
+  sim(s, 0.3, { ...DOWN, x: -1, run: true });
+  assert.ok(Math.abs(s.vx + CRAWL) < 0.5, `slowed to ${s.vx}`);
+});
+
+test('crouch: not on a ═ (↓ drops through), not in the air, not stunned, not rolling', () => {
+  const b = newBody(14.5, 13.5);
+  sim(b, 0.2);
+  assert.equal(b.onPlatform, true);
+  stepBody(b, 1 / 60, DOWN, kindAt);
+  assert.equal(b.low, 0, 'on ═: dropping');
+  sim(b, 1);
+  assert.equal(b.y, 18.5, 'dropped through');
+  const air = newBody(7.5, 10.5);
+  sim(air, 0.1, DOWN);
+  assert.equal(air.low, 0, 'in the air');
+  const k = newBody(7.5, 18.5);
+  sim(k, 0.2);
+  knock(k, 5, 0, 0.3);
+  sim(k, 0.1, DOWN);
+  assert.equal(k.low, 0, 'stunned');
+  const r = newBody(7.5, 18.5);
+  sim(r, 0.2);
+  sim(r, 0.1, { ...DOWN, roll: 1 });
+  assert.equal(r.low, 0, 'rolling');
+});
+
+test('crouch: a jump or a roll from a crouch or a crawl works as standing and stands you up', () => {
+  const b = newBody(7.5, 18.5);
+  sim(b, 0.2);
+  sim(b, 0.1, DOWN);
+  let top = b.y;
+  sim(b, 1.2, { ...DOWN, jump: true }, 1 / 60, (s) => { top = Math.min(top, s.y); });
+  assert.ok(Math.abs(18.5 - top - 6) <= 0.5, `jumped ${18.5 - top} out of a crouch`);
+  const r = newBody(7.5, 18.5);
+  sim(r, 0.2);
+  sim(r, 0.2, { ...DOWN, x: 1 });
+  assert.equal(r.low, 2);
+  stepBody(r, 1 / 60, { ...DOWN, x: 1, roll: 1 }, kindAt);
+  assert.equal(r.low, 0);
+  assert.equal(r.vx, ROLL.speed, 'rolling out of a crawl at full roll speed');
 });

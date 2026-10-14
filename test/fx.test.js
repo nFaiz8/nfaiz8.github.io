@@ -182,3 +182,35 @@ test('bullets and sparks are marked to glow (the train\'s halation); numbers, ba
   assert.ok(g.filter((q) => q.y < 18).every((q) => !q.glow), 'not the pickup');
   assert.ok(g.filter((q) => q.color.join() === '9,9,9').every((q) => !q.glow), 'not the aim line');
 });
+
+// Crouch and crawl (docs/specs/2026-10-14-arena-crouch.md §2, §3).
+test('my standing level bullet flies over a fighter crouched or prone on my screen, and stops at one crouched when fired low', () => {
+  const left = (low, y0) => {
+    const f = fx();
+    f.shot({ id: 'me', n: null, x: 23.45, y: y0, angle: 0, gun: 'deagle', color: [255, 206, 110], mine: true, at: 0 });
+    const bodies = [{ id: 'b', state: { x: 30.5, y: 24.5, low } }];
+    for (let ms = 16; ms <= 200; ms += 16) f.step(0.016, ms, bodies);
+    return f.glyphs(200, { bodies: [] }).filter((g) => g.ch === '•').length;
+  };
+  assert.equal(left(1, 24.2), 1, 'over a crouch');
+  assert.equal(left(2, 24.2), 1, 'over someone prone');
+  assert.equal(left(1, 25.1), 0, 'fired from a crouch: it stops');
+  assert.equal(left(2, 25.1), 0, 'and at someone prone');
+});
+
+test('a long shot (fired low) flies 1.5× as far on every screen; the sniper aim line of someone low reaches as far', () => {
+  const run = (long) => {
+    const f = fx();
+    f.shot({ id: 'b', n: 1, x: 20.5, y: 25.1, angle: 0, gun: 'deagle', color: [1, 1, 1], mine: false, at: 0, long });
+    let last = 0;
+    for (let ms = 16; ms <= 2000; ms += 16) { f.step(0.016, ms, []); const h = f.glyphs(ms, {}).find((g) => g.ch === '•'); if (h) last = h.x; }
+    return last - 20.5;
+  };
+  const short = run(false), long = run(true);
+  assert.ok(short > 60 && short <= 64, `standing: ${short}`);
+  assert.ok(long > 90 && long <= 96, `low: ${long}`);
+  const f = fx();
+  const dots = (low) => f.glyphs(0, { aims: [{ id: 'b', x: 20.5, y: 24.5, facing: 1, aim: 0, color: [9, 9, 9], ready: true, low }] }).filter((g) => g.ch === '·');
+  const far = (low) => Math.max(...dots(low).map((g) => g.x));
+  assert.ok(far(1) > far(0), `the line reaches further low (${far(1)} vs ${far(0)})`);
+});

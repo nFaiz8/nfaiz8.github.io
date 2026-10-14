@@ -1,6 +1,6 @@
 // The fight's visual effects as glyph lists: bullets, sparks, damage numbers, hp bars, pickups, sniper aim lines.
 // Pure: no DOM, no randomness. Positions in and out are map cells; offset is map minus arena-local.
-import { GUNS, MAX_HP, rayLength, bulletRange, bulletAt, bulletGlyphs, along, muzzleOf, absAngle, sweep, inDodge } from './fight.js';
+import { GUNS, MAX_HP, rayLength, bulletRange, bulletAt, bulletGlyphs, along, muzzleOf, absAngle, sweep, inDodge, hurtOf } from './fight.js';
 import { GUN_ART } from './stick.js';
 
 const SPARK_COLOR = [255, 214, 140];
@@ -20,9 +20,10 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
   let numbers = [];
   const local = (x, y) => ({ x: x - offset.x, y: y - offset.y });
 
-  function shot({ id, n, x, y, angle, gun, color, mine, at }) {
-    const l = local(x, y);
-    const end = Math.min(rayLength(kindAt, l.x, l.y, angle, bulletRange(gun)), bulletRange(gun));
+  // long: fired crouched or prone, so it flies LOW_RANGE times as far (crouch addendum §3).
+  function shot({ id, n, x, y, angle, gun, color, mine, at, long = false }) {
+    const l = local(x, y), range = bulletRange(gun, long);
+    const end = Math.min(rayLength(kindAt, l.x, l.y, angle, range), range);
     bullets.push({ id, n, x, y, angle, gun, color, mine, t0: at / 1000, end, last: at / 1000 });
   }
 
@@ -53,8 +54,8 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
         for (const o of bodies) {
           if (o.id === b.id || !o.state || o.state.act === 'dead' || o.state.safe) continue;
           if (o.state.act === 'roll' && inDodge(0, o.state.actT)) continue; // inside its dodge window: it flies on
-          const c = { x: o.state.x, y: o.state.y };
-          if (sweep(a, z, c, c) >= 0) return false;
+          const H = hurtOf(o.state.low), c = { x: o.state.x, y: o.state.y + H.dy }; // the stance's box
+          if (sweep(a, z, c, c, H.hw, H.hh) >= 0) return false;
         }
       }
       b.last = now;
@@ -107,9 +108,9 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     }
     for (const q of aims) {
       const angle = absAngle(q.facing, q.aim);
-      const m = muzzleOf(q.x, q.y, q.facing, q.aim, 'sniper');
+      const m = muzzleOf(q.x, q.y, q.facing, q.aim, 'sniper', q.low || 0);
       const l = local(m.x, m.y);
-      const len = rayLength(kindAt, l.x, l.y, angle, bulletRange('sniper'));
+      const len = rayLength(kindAt, l.x, l.y, angle, bulletRange('sniper', !!q.low)); // as far as the shot would go
       for (let r = 2; r < len; r += 2) {
         const d = along(angle, r);
         out.push({ x: m.x + d.dx, y: m.y + d.dy, ch: '·', color: q.color, a: q.ready ? 0.5 : 0.25 });

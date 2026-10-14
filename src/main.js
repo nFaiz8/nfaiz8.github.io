@@ -118,8 +118,10 @@ function sideView(t) {
     world.inset = null;
     return;
   }
-  // The gun in hand; while popped, keep the last zoom; not fighting, the plain side view.
-  const gun = pvp && pvp.entered ? (pvp.me.alive ? pvp.me.gun : undefined) : null;
+  // The gun in hand; while popped, keep the last zoom; not fighting, the plain side view. The sniper held
+  // crouched or prone is the scope (crouch addendum §3).
+  let gun = pvp && pvp.entered ? (pvp.me.alive ? pvp.me.gun : undefined) : null;
+  if (gun === 'sniper' && world.player.low) gun = 'scope';
   const first = !zoom;
   zoom = sideZoom(zoom, gun, t / 1000, { reducedMotion });
   renderer.setView({ rows: zoom.rows, settled: zoom.settled });
@@ -222,11 +224,21 @@ function onTap(px, py) {
   walkTo(world, cell.x, cell.y);
 }
 
+// F: fullscreen and back, where the browser has it (iPhone Safari doesn't: there F does nothing).
+function toggleFullscreen() {
+  const d = document, el = d.documentElement;
+  const on = d.fullscreenElement || d.webkitFullscreenElement;
+  const go = on ? d.exitFullscreen || d.webkitExitFullscreen : el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!go) return;
+  try { Promise.resolve(go.call(on ? d : el)).catch(() => {}); } catch {}
+}
+
 function onKey(e) {
   if (viewer.isOpen || grid.isOpen) return false;
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
   if (e.code === 'KeyG') { openGrid(); return true; }
+  if (e.code === 'KeyF') { toggleFullscreen(); return true; }
   if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
   if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') {
     if (world.focus) openFrame(world.focus, world.mode === 'side' ? { instant: true } : undefined);
@@ -303,7 +315,7 @@ function syncFight(t) {
     // and the gallery would keep drawing me there while I fight.
     if (live) live.tick(world.player);
     pvp.enter(t, fightOnline());
-    if (!touch && !keysNoted) { keysNoted = true; note('J shoot · K hit · mouse aims', 4000); }
+    if (!touch && !keysNoted) { keysNoted = true; note('J shoot · K hit · ↓ crouch · mouse aims', 4000); }
   } else if (!want && pvp.entered) leaveFight(t);
 }
 function leaveFight(t) {
@@ -543,7 +555,7 @@ const memory = {
 // fight: my state from pvp.js, when I'm in the fight.
 function myBody(now, fight = null) {
   const p = world.player;
-  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, flipT: p.t - p.airJumpT, act: 'idle', gun: 'deagle' };
+  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, low: p.low || 0, flipT: p.t - p.airJumpT, act: 'idle', gun: 'deagle' };
   // A pinned pose is drawn as pinned: unprotected unless `safe` is pinned too.
   const state = posePin ? { ...own, safe: false, ...posePin } : { ...own };
   const emoting = mine.emote && now - mine.emoteAt < MY_EMOTE_MS;

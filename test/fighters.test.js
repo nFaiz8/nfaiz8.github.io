@@ -563,3 +563,26 @@ test('collision: a protected remote walks through me on my screen too', () => {
   assert.ok(F.list(1000)[0].state.safe, 'still protected');
   assert.ok(F.list(1000)[0].state.x < X0 - 0.8, `walked through (${F.list(1000)[0].state.x})`);
 });
+
+// Crouch and crawl (docs/specs/2026-10-14-arena-crouch.md §4).
+test('a remote fighter crouched (64) or crawling (128 with ↓ and →) is drawn low, and crawls at the crawl\'s speed', () => {
+  const G = createFighters({ kindAt: kinds });
+  G.apply({ t: 'aj', id: 'b', hp: 100, kills: 0 }, 0);
+  G.apply({ t: 'a', id: 'b', x: 40.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 8 | 64, a: 0, ts: 0 }, 0);
+  assert.equal(G.list(0)[0].state.low, 1);
+  G.step(1 / 60, 16);
+  assert.equal(G.list(16)[0].state.low, 1, 'predicted: still crouched');
+  G.apply({ t: 'a', id: 'b', x: 40.5, y: 24.5, vx: 10, vy: 0, f: 1, g: 1, i: 8 | 2 | 128, a: 0, ts: 100 }, 100);
+  for (let ms = 116; ms <= 200; ms += 16) G.step(0.016, ms);
+  const s = G.list(200)[0].state;
+  assert.equal(s.low, 2);
+  assert.ok(Math.abs(s.vx - 10) < 0.01, `crawling at ${s.vx}`);
+});
+
+test('a remote fighter hit while low (lo) is stunned half as long', () => {
+  const G = createFighters({ kindAt: kinds });
+  G.apply({ t: 'aj', id: 'b', hp: 100, kills: 0 }, 0);
+  G.apply({ t: 'a', id: 'b', x: 40.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 8 | 64, a: 0, ts: 0 }, 0);
+  G.apply({ t: 'h', id: 'b', by: 'c', w: 'k', n: -1, d: 22, hp: 78, kx: 22.5, ky: -11, lo: 1 }, 10);
+  assert.ok(Math.abs(G.get('b').body.stun - 0.2) < 1e-9);
+});

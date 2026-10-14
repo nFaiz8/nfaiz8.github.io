@@ -10,6 +10,7 @@ export { AIR, PLATFORM, SOLID, LEVEL_COLS, LEVEL_ROWS, parseLevel } from './leve
 
 export const RUN = 30; // cells/s, the gallery's walking speed
 export const SPRINT = 1.5;
+export const CRAWL = 10; // cells/s, prone (crouch addendum §1): Shift doesn't change it
 export const JUMP_V = 40; // rows/s at take-off: with GRAVITY that is ~6 rows up, ~0.6 s in the air
 export const GRAVITY = 133;
 export const MAX_FALL = 60;
@@ -34,7 +35,7 @@ export function doorZone(level, off = { x: 0, y: 0 }) {
 }
 
 export function newBody(x, y) {
-  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity,
+  return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity, low: 0,
     onBody: false, rideId: null, rideX: 0, headDropUntil: 0 }; // on someone's head: whose (by box id), and where they were
 }
 
@@ -119,6 +120,10 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     }
   }
 
+  // Low (crouch addendum §1): ↓ held on solid floor (not a ═, not a head), not stunned or rolling, and no
+  // jump just taken: 1 crouched, 2 prone with ←/→ held. Steering then aims for the crawl's speed.
+  const low = !stunned && !rolled && input.down && b.onGround && !b.onPlatform ? (input.x ? 2 : 1) : 0;
+
   // While stunned the door is a wall: the cells outside the arena are solid.
   const kinds = stunned && inside ? (c, r) => (inside(c, r) ? kindAt(c, r) : SOLID) : kindAt;
   let mx;
@@ -128,7 +133,7 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     if (b.rollT >= 0) b.rollT += dt;
   } else {
     if (stunned) b.vx *= Math.exp(-dt / STUN_DECAY);
-    else steer(b, dt, input, reducedMotion);
+    else steer(b, dt, input, reducedMotion, low);
     mx = b.vx * dt;
   }
   const vy0 = b.vy;
@@ -140,12 +145,13 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
   if (block) mx += push(b, dt) + rideDx(b, block);
   move(b, mx, my, kinds, block);
   if (b.onGround) b.airJumps = AIR_JUMPS; // the floor, a platform or a ▓ top
+  b.low = low && b.onGround && !b.onPlatform ? low : 0;
   // The roll ends after its time, or when it runs off a ledge (keeping its speed).
   if (b.rollT >= 0 && (b.rollT >= ROLL.time - 1e-9 || !b.onGround)) endRoll(b);
 }
 
-function steer(b, dt, input, reducedMotion) {
-  const target = (input.x || 0) * RUN * (input.run ? SPRINT : 1);
+function steer(b, dt, input, reducedMotion, low) {
+  const target = (input.x || 0) * (low ? CRAWL : RUN * (input.run ? SPRINT : 1));
   const k = reducedMotion ? 1 : 1 - Math.exp((-dt * (b.onGround ? 1 : AIR_CONTROL)) / ACCEL);
   b.vx += (target - b.vx) * k;
   if (!target && Math.abs(b.vx) < 0.05) b.vx = 0;
@@ -308,7 +314,8 @@ export function sideCamera(a, view, p, lead = 0, inset = null) {
 
 // How many rows the side view shows, by the gun in your hand (train level addendum §2): pick up the sniper
 // and it pulls back to the whole room; back to the deagle, it pushes in.
-export const SIDE_ROWS = { deagle: 20, rifle: 25, sniper: 33, none: 24 };
+// scope: the sniper in hand while crouched or prone (crouch addendum §3) pulls back further still.
+export const SIDE_ROWS = { deagle: 20, rifle: 25, sniper: 33, scope: 45, none: 24 };
 export const ZOOM_TIME = 0.35; // s
 
 // The zoom, eased: z is the last result (null at first), gun the gun in hand, null when not fighting and

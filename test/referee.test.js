@@ -487,3 +487,62 @@ test('a roll held past its length ends there: the next may open 0.4 s after that
   R.state(A, rollState(32), 1.7, 1.7); // 0.4 s after 1.3, its end
   assert.equal(A.rollAt, 1.7);
 });
+
+// Crouch and crawl (docs/specs/2026-10-14-arena-crouch.md §2–§4): the stance comes from the state's bits.
+const lowShoot = (R, A, now, all, low) => { const m = muzzleOf(A.x, A.y, A.f, 0, A.gun, low); return R.fire(A, { x: m.x, y: m.y, a: 0 }, now, all); };
+
+test('crouch: a standing level shot passes over a croucher and over someone prone; a crouched one hits', () => {
+  for (const i of [64, 128]) {
+    const R = ref(), A = F('a', 20.5), B = Object.assign(F('b', 30.5), { i });
+    shoot(R, A, 1, [A, B]);
+    assert.equal(run(R, 1, 2, [A, B]).filter((m) => m.t === 'h').length, 0, `over i ${i}`);
+    const C = Object.assign(F('c', 20.5), { i: 64 });
+    lowShoot(R, C, 3, [C, B], 1);
+    const h = run(R, 3, 4, [C, B]).find((m) => m.t === 'h');
+    assert.ok(h, `a crouched shot hits i ${i}`);
+    assert.equal(h.hs, undefined, 'in the body');
+  }
+});
+
+test('crouch: half the knock and lo: 1 for a body hit low, by a bullet or a strike; none standing', () => {
+  const R = ref(), A = Object.assign(F('a', 20.5), { i: 64 }), B = Object.assign(F('b', 30.5), { i: 64 });
+  lowShoot(R, A, 1, [A, B], 1);
+  const h = run(R, 1, 2, [A, B]).find((m) => m.t === 'h');
+  assert.deepEqual([h.kx, h.ky, h.lo], [5, 0, 1]);
+  const P = F('p', 20.5), T = Object.assign(F('t', 22), { i: 128 });
+  const s = R.strike(P, { k: 'p' }, 5, [P, T]).out.find((m) => m.t === 'h');
+  assert.deepEqual([s.kx, s.ky, s.lo], [STRIKES.punch.kx / 2, -STRIKES.punch.ky / 2, 1]);
+  const U = F('u', 22);
+  const s2 = R.strike(P, { k: 'p' }, 6, [P, U]).out.find((m) => m.t === 'h');
+  assert.equal(s2.lo, undefined);
+  assert.equal(s2.kx, STRIKES.punch.kx);
+});
+
+test('crouch: a shot fired low flies 1.5× as far and s carries l: 1; a standing one has no l', () => {
+  // Car A's open floor: a target ~80 cells away, past the deagle's 64 but within 96.
+  const far = (i, low) => {
+    const R = ref(), A = Object.assign(F('a', 20.5), { i }), B = Object.assign(F('b', 20.5 + 80), { i: 64 });
+    const r = lowShoot(R, A, 1, [A, B], low);
+    return { s: r.out[0], len: R.bullets[0].len };
+  };
+  const lo = far(64, 1), up = far(0, 0);
+  assert.equal(lo.s.l, 1);
+  assert.equal(up.s.l, undefined);
+  assert.ok(up.len <= 64 + 1e-9);
+  assert.ok(lo.len > 64, `the low shot runs ${lo.len}`);
+});
+
+test('crouch: the bits count only on the ground and not rolling; a prone body\'s head is its front', () => {
+  const R = ref(), A = Object.assign(F('a', 20.5), { i: 64, g: 0 }), B = F('b', 30.5);
+  const m = muzzleOf(A.x, A.y, A.f, 0, A.gun, 1); // claimed from a crouch, but in the air: from too low?
+  const r = R.fire(A, { x: m.x, y: m.y, a: 0 }, 1, [A, B]);
+  assert.equal(r.out[0].l, undefined, 'in the air: standing range');
+  // A prone target facing the shooter: its front is toward the shot, so a hit from a prone shooter is to the head.
+  const R2 = ref(), S = Object.assign(F('s', 20.5), { i: 128 }), T = Object.assign(F('t', 30.5, 24.5, -1), { i: 128 });
+  lowShoot(R2, S, 1, [S, T], 2);
+  const h = run(R2, 1, 2, [S, T]).find((q) => q.t === 'h');
+  assert.equal(h.hs, 1, 'facing it: the head');
+  const R3 = ref(), S3 = Object.assign(F('s', 20.5), { i: 128 }), T3 = Object.assign(F('t', 30.5, 24.5, 1), { i: 128 });
+  lowShoot(R3, S3, 1, [S3, T3], 2);
+  assert.equal(run(R3, 1, 2, [S3, T3]).find((q) => q.t === 'h').hs, undefined, 'facing away: the feet');
+});

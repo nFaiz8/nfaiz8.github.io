@@ -2,6 +2,8 @@
 // Pure: no DOM, no randomness. The rig: docs/specs/2026-10-14-arena-stickman-rig.md.
 
 export const SHOULDER = { dx: 0.15, dy: -0.3 };
+// The shoulder by stance (crouch addendum §2): standing, crouched, prone, where the rig draws it (cells, rows).
+export const SHOULDERS = [SHOULDER, { dx: 0.6, dy: 0.6 }, { dx: 0.55, dy: 1.1 }];
 export const HAND_R = 1.3;
 export const MUZZLE_R = { deagle: 2.8, rifle: 4.8, sniper: 6.8 };
 // hand is the index of the glyph at the hand.
@@ -52,6 +54,12 @@ const PIVOT_Y = 1.6; // the ball's centre, so it rolls on the floor (rig addendu
 // the rig. FLIP: how long the whole flip lasts, the tuck's way in, the untuck at its end, and with Reduce
 // Motion the tuck's length (no turn). PUFF2: the two ~ of the air jump: how long, how far they spread.
 const FLIP_TUCK = pose({ hx: -0.1, hy: 1.05, st: -0.4, hdx: 0.15, hdy: 0.25, bx: 0.4, by: 0.3, fx: 0.55, fy: 0.25, lbx: 0.15, lby: 1.25, lfx: 0.3, lfy: 1.2, ga: 0.5 });
+// Crouch and crawl (crouch addendum §5): squatting, the hip low over the heels, knees forward, the gun level;
+// prone, the torso along the floor with the head in front, the knees on the feet line and the shins raised
+// behind. CRAWL_CYCLE: the crawl's stride (cells of x per cycle) and how far the elbow and knees reach.
+const CROUCH = pose({ hx: -0.15, hy: 2.6, lean: 0.4, bx: 0.24, by: 0.52, fx: 0.9, fy: -0.25, lbx: -0.1, lby: FEET, lfx: 0.65, lfy: FEET, ga: 0 });
+const PRONE = pose({ hx: -0.75, hy: 2.2, lean: 1.35, st: -0.3, hdy: -0.15, bx: 1.3, by: 0.09, fx: 1.45, fy: -0.3, lbx: -1.75, lby: 1.6, lfx: -1.95, lfy: 1.6, ga: 0 });
+const CRAWL_CYCLE = { stride: 4, hand: 0.3, lift: 0.25, knee: 0.35 };
 const FLIP = { time: 0.36, in: 0.05, out: 0.08, rm: 0.2, rmIn: 0.04, rmOut: 0.06 };
 const PUFF2 = { time: 0.15, r0: 0.5, r1: 2 };
 const G_ROWS = 133; // arena.js's GRAVITY (rows/s²), which stick.js may not import: the puff stays where the jump was
@@ -86,8 +94,8 @@ const frac = (v) => v - Math.floor(v);
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const smooth = (v) => { const k = clamp01(v); return k * k * (3 - 2 * k); };
 
-// Scratch poses, reused: L is locomotion, A an act's target, P what is drawn, Q the flip's target.
-const L = pose({}), A = pose({}), P = pose({}), Q = pose({});
+// Scratch poses, reused: L is locomotion, A an act's target, P what is drawn, Q the flip's target, R prone.
+const L = pose({}), A = pose({}), P = pose({}), Q = pose({}), R = pose({});
 function copy(dst, src) { for (const k of FIELDS) dst[k] = src[k]; }
 // Blend pose a into b by k (0..1), into dst; upper: only the upper body. The hands swing on arcs about the
 // shoulder and the feet about the hip, so a hand passing the shoulder never flips the arm.
@@ -138,6 +146,31 @@ function locomotion(s, rm, breath) {
   }
 }
 
+// Crouch and prone over locomotion (crouch addendum §5): crouchK and proneK, 0..1, are how far into each.
+// Prone crawls: the back elbow and the knees reach forward in turn, by x, weighted in by speed.
+function lowPose(s, crouchK, proneK, rm) {
+  if (crouchK <= 0 && proneK <= 0) return;
+  copy(R, PRONE);
+  const w = Math.abs(s.vx) < RUN_VX ? 0 : smooth((Math.abs(s.vx) - RUN_VX) / (RUN_FULL - RUN_VX));
+  if (proneK > 0 && w > 0 && !rm) {
+    const psi = 2 * Math.PI * frac((s.x * s.facing) / CRAWL_CYCLE.stride), c = Math.cos(psi);
+    R.bx += CRAWL_CYCLE.hand * c * w;
+    R.by -= CRAWL_CYCLE.lift * Math.max(0, Math.sin(psi)) * w;
+    R.lbx -= CRAWL_CYCLE.knee * c * w;
+    R.lfx += CRAWL_CYCLE.knee * c * w;
+  }
+  // Into the crouch, then from there into prone. The feet go in straight lines: on their arcs about the
+  // hip they would swing the long way round (through the floor, or flipping) between squatting and lying.
+  lowMix(CROUCH, Math.max(crouchK, proneK));
+  if (proneK > 0) lowMix(R, proneK);
+}
+const FEET_F = ['lbx', 'lby', 'lfx', 'lfy'];
+function lowMix(to, k) {
+  copy(A, L);
+  mixInto(L, A, to, k);
+  if (k > 0 && k < 1) for (const f of FEET_F) L[f] = A[f] + (to[f] - A[f]) * k;
+}
+
 // The run cycle, weighted in by speed: phase from x alone (stickman spec §4 "Run"), each foot on an
 // ellipse (back along the ground, then lifted forward), the back arm against the front leg.
 function run(s, rm, w) {
@@ -186,17 +219,20 @@ export function flipCut(act, actT, flipT) {
 }
 
 // Layers 2 and 3 into P (from L). Returns the turn about the pivot (radians), or 0.
-function act(name, actT, ground) {
+function act(name, actT, ground, proneK) {
   copy(P, L);
   const r = ACT_RIG[name];
   if (!r || actT >= r.end) return 0;
+  // Prone, a punch keeps the torso along the floor and a kick is drawn only as far as the figure is up.
+  const low = name === 'punch' || name === 'kick' ? proneK : 0;
   mixInto(A, r.wind, r.strike, r.at > r.in ? smooth((actT - r.in) / (r.at - r.in)) : 1, r.upper);
   if (r.air && !ground) {
     const k = smooth(actT / r.at);
     A.lbx += (r.air.lbx - A.lbx) * k;
     A.lby += (r.air.lby - A.lby) * k;
   }
-  mixInto(P, L, A, weight(actT, r.in, r.hold, r.end), r.upper);
+  if (r.upper && low) A.lean += (L.lean - A.lean) * low;
+  mixInto(P, L, A, weight(actT, r.in, r.hold, r.end) * (r.upper ? 1 : 1 - low), r.upper);
   if (!r.turns) return 0;
   const u = actT / r.end;
   return 2 * Math.PI * r.turns * (0.5 * u + 0.5 * smooth(u));
@@ -429,6 +465,10 @@ function drawPose(st, t, opts, out) {
 
   const breath = rm ? 0 : BREATH_U * (1 - Math.cos(2 * Math.PI * (tt / BREATH_PERIOD + phase))) / 2;
   locomotion(s, rm, breath);
+  // How low: the motion memory's eased crouchK and proneK, or straight from low without it.
+  const low = st.low === 2 ? 2 : st.low === 1 ? 1 : 0;
+  const crouchK = clamp01(fin(st.crouchK, low ? 1 : 0)), proneK = clamp01(fin(st.proneK, low === 2 ? 1 : 0));
+  lowPose(s, crouchK, proneK, rm);
 
   // The front arm aimed (shooting, aimed, or any aim): the hand at S + HAND_R along the aim, less the recoil.
   const shooting = name === 'shoot';
@@ -442,7 +482,7 @@ function drawPose(st, t, opts, out) {
     L.lean -= RECOIL_LEAN * k;
   }
 
-  const phi = act(name, actT, s.ground);
+  const phi = act(name, actT, s.ground, proneK);
   const rolling = ACT_RIG[name] && ACT_RIG[name].turns > 0 && actT < ACT_RIG[name].end;
   // The flip, while flipT is short of its end; a kick, a hurt or a roll takes over from it for good.
   const flipT = st.flipT >= 0 ? st.flipT : Infinity;
@@ -505,8 +545,10 @@ function airPuff(out, f, s, flipT, rm) {
 
 // createMotionMemory() → { fill(id, state, t) → state }: fills in landT and spawnT, which are never synced
 // (stickman spec §6). landT: seconds since ground went false → true (Infinity in the air or before
-// any landing). spawnT: seconds since first seen or since `dead` turned into anything else. An id not
-// seen for 5 s is forgotten.
+// any landing). spawnT: seconds since first seen or since `dead` turned into anything else. crouchK and
+// proneK (crouch addendum §5): how far into a crouch and into prone, easing toward low ≥ 1 and low 2 over
+// LOW_T each way (a first sighting starts there). An id not seen for 5 s is forgotten.
+const LOW_T = 0.15;
 export function createMotionMemory() {
   const FORGET = 5;
   const seen = new Map();
@@ -518,18 +560,24 @@ export function createMotionMemory() {
         swept = t;
       }
       const ground = state.ground !== false, isDead = state.act === 'dead';
+      const wantC = state.low >= 1 ? 1 : 0, wantP = state.low === 2 ? 1 : 0;
       let m = seen.get(id);
       if (m && t - m.last > FORGET) m = undefined;
       if (!m) {
-        m = { ground, dead: isDead, landAt: -Infinity, spawnAt: t, last: t };
+        m = { ground, dead: isDead, landAt: -Infinity, spawnAt: t, last: t, crouchK: wantC, proneK: wantP };
         seen.set(id, m);
       } else {
         if (ground && !m.ground) m.landAt = t;
         if (m.dead && !isDead) m.spawnAt = t;
+        const k = Math.max(0, t - m.last) / LOW_T;
+        m.crouchK += Math.max(-k, Math.min(k, wantC - m.crouchK));
+        m.proneK += Math.max(-k, Math.min(k, wantP - m.proneK));
         m.ground = ground;
         m.dead = isDead;
         m.last = t;
       }
+      state.crouchK = m.crouchK;
+      state.proneK = m.proneK;
       state.landT = ground ? Math.max(0, t - m.landAt) : Infinity;
       state.spawnT = Math.max(0, t - m.spawnAt);
       return state;
