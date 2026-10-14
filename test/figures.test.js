@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { figureGlyphs } from '../src/render/figures.js';
 import { createMotionMemory } from '../src/stick.js';
 import { createSpriteCache, SPRITE_CAP } from '../src/render/canvas.js';
+import { FIG_EXTRA } from '../src/render/gl.js';
+import fs from 'node:fs';
 
 const view = { left: 0, top: 0, cols: 150, rows: 40 };
 const body = (o = {}) => ({ id: 'b', state: { x: 50, y: 20, vx: 0, vy: 0, facing: 1, ground: true, act: 'idle', actT: 0, gun: 'deagle' }, color: [120, 200, 255], name: 'Ann', ...o });
@@ -29,6 +31,14 @@ test('chat sits above the name with a dark strip one cell wider each side; near 
   assert.ok(strips.every((x) => Math.abs(x.y - (20 - 3.3)) < 1e-9 && x.a === 0.6));
   const high = run([body({ say: 'hi', state: { ...body().state, y: 4 } })], { ceiling: 1 });
   assert.ok(high.filter((x) => !x.bold && !x.strip).every((x) => x.y > 4));
+});
+
+test('rot, len and flip pass through from the pose; labels and strips are upright, unstretched and unflipped', () => {
+  const g = run([body({ say: 'hi', state: { ...body().state, facing: -1, gun: 'rifle' } })]);
+  const fig = g.filter((x) => x.bold), labels = g.filter((x) => !x.bold);
+  assert.ok(fig.some((x) => x.rot !== 0) && fig.some((x) => x.len !== 1) && fig.some((x) => x.flip === true));
+  assert.ok(fig.every((x) => Number.isFinite(x.rot) && x.len > 0 && typeof x.flip === 'boolean'));
+  assert.ok(labels.length > 0 && labels.every((x) => x.rot === 0 && x.len === 1 && x.flip === false));
 });
 
 test('phones cut long names to 11 characters and …', () => {
@@ -68,4 +78,16 @@ test('the canvas sprite cache keeps what it made, and starts over once it reache
   assert.ok(cache.get('d'));
   for (let i = 0; i < 10000; i++) cache.set(`k${i}`, {});
   assert.ok(cache.size <= 3);
+});
+
+test('the GL figure atlas has every glyph the figure layer can be given (else WebGL draws it as ?)', () => {
+  // Every non-ASCII character in a string literal of the modules that feed world.figures.
+  for (const f of ['../src/stick.js', '../src/fx.js', '../src/fight.js', '../src/render/figures.js']) {
+    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+    for (const [, lit] of src.matchAll(/'([^'\n]*)'/g)) for (const ch of lit) {
+      if (ch.charCodeAt(0) < 127) continue;
+      assert.ok(FIG_EXTRA.includes(ch), `${f}: '${ch}' is not in the GL figure atlas`);
+    }
+  }
+  for (const ch of '♥★') assert.ok(FIG_EXTRA.includes(ch), `main.js's ${ch}`);
 });

@@ -11,8 +11,10 @@ import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
 const FLOATS = 10; // per glyph instance: x, y, glyph, fg rgb, bg rgba
-const FIG_FLOATS = 7; // per figure instance: x, y, glyph, r, g, b, a
-const FIG_EXTRA = '═╦╤°♥★…'; // figure and label glyphs beyond printable ASCII
+const FIG_FLOATS = 10; // per figure instance: x, y, glyph, r, g, b, a, rot, len, flip (1 or -1)
+// Figure-layer glyphs beyond printable ASCII: the guns, hearts and emotes, a cut name's …, and the fight's
+// hp bars (█ ░), deagle bullet heads (•) and sparks, empty pickups and aim lines (·).
+export const FIG_EXTRA = '═╦╤°♥★…█░•·';
 
 export function createGlRenderer() {
   let canvas, gl, map, m, dpr = 1, viewW = 0, viewH = 0, lost = false;
@@ -98,7 +100,7 @@ export function createGlRenderer() {
     figBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, figBuf);
     const fp = progs.figure.p;
-    for (const [name, size, offset] of [['i_cell', 3, 0], ['i_color', 4, 3]]) {
+    for (const [name, size, offset] of [['i_cell', 3, 0], ['i_color', 4, 3], ['i_xf', 3, 7]]) {
       const loc = gl.getAttribLocation(fp, name);
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, FIG_FLOATS * 4, offset * 4);
@@ -234,6 +236,9 @@ export function createGlRenderer() {
       figData[k++] = g.color[1] / 255;
       figData[k++] = g.color[2] / 255;
       figData[k++] = Math.min(1, g.a);
+      figData[k++] = g.rot || 0;
+      figData[k++] = g.len > 0 ? g.len : 1;
+      figData[k++] = g.flip ? -1 : 1;
     }
     if (!k) return;
     const pf = progs.figure;

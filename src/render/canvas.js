@@ -35,7 +35,7 @@ export function createCanvasRenderer() {
   const onLoad = new Set();
   let lightCv = null, glowCv = null;
   let bakedMode = null; // chunks are baked for one view: the arena's inside differs top-down and side-on
-  const sprites = createSpriteCache(); // the figure layer's glyphs: 'ch|r,g,b|bold' → a small canvas, outline baked in
+  const sprites = createSpriteCache(); // the figure layer's glyphs: 'ch|r,g,b|bold' (fill) or 'ch|outline|bold' → a small canvas
 
   function init(el, theMap) {
     canvas = el;
@@ -304,12 +304,14 @@ export function createCanvasRenderer() {
     drawFigures(world.figures || [], left, top);
   }
 
-  // The figure layer (side view): stick figures and their labels, over everything else. Each glyph is a
-  // cached sprite with its dark outline baked in, drawn at a device-pixel-snapped position; a chat strip is a
-  // rect. o is the outline's radius in device pixels.
+  // The figure layer (side view): stick figures and their labels, over everything else, in two passes like
+  // the GL renderer: every glyph's dark outline (and the chat strips) in list order, then every fill, so a
+  // bone's outline never cuts across the bone it joins. Each glyph is a cached sprite with its corner
+  // snapped to a device pixel; turned (rot), stretched (len) or flipped ones are drawn through a transform
+  // about its centre. o is the outline's radius in device pixels.
   const outlinePx = () => Math.max(2, Math.round(0.14 * m.cw * dpr));
   function sprite(glyph, color, bold) {
-    const key = `${glyph}|${color[0]},${color[1]},${color[2]}|${bold ? 1 : 0}`;
+    const key = color ? `${glyph}|${color[0]},${color[1]},${color[2]}|${bold ? 1 : 0}` : `${glyph}|outline|${bold ? 1 : 0}`;
     let cv = sprites.get(key);
     if (cv) return cv;
     const o = outlinePx(), w = Math.round(m.cw * dpr), h = Math.round(m.ch * dpr);
@@ -317,12 +319,18 @@ export function createCanvasRenderer() {
     const c = cv.getContext('2d');
     prepareText(c, `${bold ? 'bold ' : ''}${m.fontPx * dpr}px ${FONT_FAMILY}`);
     const x = o + w / 2, y = o + h / 2 + m.fontPx * dpr * 0.05;
-    c.lineJoin = 'round';
-    c.lineWidth = 2 * o;
-    c.strokeStyle = 'rgba(7,8,11,0.9)';
-    c.strokeText(glyph, x, y);
-    c.fillStyle = rgb(...color);
+    // Drawn in white, then tinted, as the GL atlas is: text's coverage depends on its colour, and a dark
+    // outline drawn as dark text comes out thinner than GL's.
+    c.fillStyle = c.strokeStyle = '#fff';
+    if (!color) {
+      c.lineJoin = 'round';
+      c.lineWidth = 2 * o;
+      c.strokeText(glyph, x, y);
+    }
     c.fillText(glyph, x, y);
+    c.globalCompositeOperation = 'source-in';
+    c.fillStyle = color ? rgb(...color) : 'rgb(7,8,11)'; // the outline is drawn at 0.9 opacity
+    c.fillRect(0, 0, cv.width, cv.height);
     return sprites.set(key, cv);
   }
 
@@ -330,17 +338,33 @@ export function createCanvasRenderer() {
     if (!list.length) return;
     const cw = m.cw * dpr, chp = m.ch * dpr, o = outlinePx();
     const sw = Math.round(cw) + 2 * o, sh = Math.round(chp) + 2 * o;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    for (const g of list) {
-      if (!(g.a > 0)) continue;
-      const px = (g.x - left) * cw, py = (g.y - top) * chp;
-      ctx.globalAlpha = Math.min(1, g.a);
-      if (g.strip) {
-        const x0 = Math.round(px - cw / 2), y0 = Math.round(py - chp / 2);
-        ctx.fillStyle = rgb(...g.color);
-        ctx.fillRect(x0, y0, Math.round(px + cw / 2) - x0, Math.round(py + chp / 2) - y0);
-      } else {
-        ctx.drawImage(sprite(g.ch, g.color, g.bold), Math.round(px - sw / 2), Math.round(py - sh / 2));
+    // Bilinear, like the GL atlas: 'high' would blur a squeezed bone's thin outline grey.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'low';
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      for (const g of list) {
+        if (!(g.a > 0)) continue;
+        const px = (g.x - left) * cw, py = (g.y - top) * chp;
+        ctx.globalAlpha = Math.min(1, g.a) * (pass || g.strip ? 1 : 0.9);
+        if (g.strip) {
+          if (pass) continue;
+          const x0 = Math.round(px - cw / 2), y0 = Math.round(py - chp / 2);
+          ctx.fillStyle = rgb(...g.color);
+          ctx.fillRect(x0, y0, Math.round(px + cw / 2) - x0, Math.round(py + chp / 2) - y0);
+          continue;
+        }
+        // The sprite's corner sits on a device pixel, so upright glyphs (and level bars) stay crisp.
+        const img = sprite(g.ch, pass ? g.color : null, g.bold), x0 = Math.round(px - sw / 2), y0 = Math.round(py - sh / 2);
+        const rot = g.rot || 0, len = g.len > 0 ? g.len : 1, fx = g.flip ? -1 : 1;
+        if (rot === 0 && len === 1 && fx === 1) {
+          ctx.drawImage(img, x0, y0);
+        } else {
+          const c = Math.cos(rot), s = Math.sin(rot);
+          ctx.setTransform(c * fx, s * fx, -s * len, c * len, x0 + sw / 2, y0 + sh / 2);
+          ctx.drawImage(img, -sw / 2, -sh / 2);
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
       }
     }
     ctx.globalAlpha = 1;

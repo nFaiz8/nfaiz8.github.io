@@ -158,11 +158,14 @@ void main() {
 
 // Pass 4: the figure layer (side view): stick figures and their labels as instanced quads from the figure
 // atlas, in two passes: every glyph's dark outline (and the chat strips), then every glyph's fill. Each
-// quad is snapped to device pixels and is exactly one atlas slot big, so LINEAR filtering stays crisp.
+// quad is one atlas slot with its corner snapped to a device pixel, so an upright glyph stays crisp under
+// LINEAR filtering; a turned, stretched or flipped one (a bone, a gun) is mirrored in x, stretched in y and
+// turned about its centre in pixel space (cells are twice as tall as wide, so turning in cells would shear).
 export const FIGURE_VS = `#version 300 es
 in vec2 a_pos;
 in vec3 i_cell;    // x, y: the glyph's centre in world cells; glyph index, or -1 for a chat strip
 in vec4 i_color;   // rgb, a
+in vec3 i_xf;      // rot (radians, clockwise on screen), len (a vertical stretch), flip (1, or -1 mirrored)
 uniform vec2 u_view;       // top-left world cell on screen
 uniform vec2 u_cellPx;     // a cell in device pixels
 uniform vec2 u_slotPx;     // an atlas slot in device pixels: the cell plus the outline on each side
@@ -176,7 +179,16 @@ void main() {
   v_strip = i_cell.z < 0.0 ? 1.0 : 0.0;
   vec2 c = (i_cell.xy - u_view) * u_cellPx;
   vec2 size = v_strip > 0.5 ? u_cellPx : u_slotPx;
-  vec2 px = mix(floor(c - size * 0.5 + 0.5), floor(c + size * 0.5 + 0.5), a_pos);
+  vec2 px;
+  if (v_strip > 0.5) {
+    px = mix(floor(c - size * 0.5 + 0.5), floor(c + size * 0.5 + 0.5), a_pos);
+  } else {
+    // The slot's corner on a device pixel (the slot is whole pixels), then the turn about its centre.
+    vec2 mid = floor(c - size * 0.5 + 0.5) + size * 0.5;
+    vec2 l = (a_pos - 0.5) * size * vec2(i_xf.z, i_xf.y);
+    float cr = cos(i_xf.x), sr = sin(i_xf.x);
+    px = mid + vec2(l.x * cr - l.y * sr, l.x * sr + l.y * cr);
+  }
   gl_Position = vec4(px.x / u_canvas.x * 2.0 - 1.0, 1.0 - px.y / u_canvas.y * 2.0, 0.0, 1.0);
   float g = max(i_cell.z, 0.0) + u_outlineAt;
   v_uv = vec2(mod(g, u_atlasCols), floor(g / u_atlasCols)) + a_pos;

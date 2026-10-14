@@ -1,4 +1,5 @@
-// The arena's stick figures: pose art and the gun constants the rules share. Pure: no DOM, no randomness.
+// The arena's stick figures: a jointed rig of glyph sprites, and the gun constants the rules share.
+// Pure: no DOM, no randomness. The rig: docs/specs/2026-10-14-arena-stickman-rig.md.
 
 export const SHOULDER = { dx: 0.15, dy: -0.3 };
 export const HAND_R = 1.3;
@@ -10,62 +11,59 @@ export const GUN_ART = {
   sniper: { glyphs: '═╦═°═══', hand: 1 },
 };
 
-// Facing left draws the facing-right art with dx negated and these characters swapped.
-export const MIRROR = { '/': '\\', '\\': '/', '<': '>', '>': '<', '(': ')', ')': '(' };
+// The skeleton, in screen units u (1 u = a cell width, a row = 2 u). bar: how tall a `|` drawn at len 1 is,
+// so a bone of length L is drawn with len L / bar (Menlo bold's bar is 1.50–1.56 u, not the full row).
+export const RIG = { torso: 2, upperArm: 0.95, foreArm: 0.95, thigh: 1, shin: 1, bar: 1.5 };
+const REACH = 0.999; // a target out of reach is pulled in to this much of the limb's full length
+const S_X = SHOULDER.dx, S_Y = 2 * SHOULDER.dy; // the shoulder standing, in u
+const NECK_TO_S = S_Y + RIG.torso - 1; // the shoulder sits this far below the neck (hip at +1)
+const HEAD_D = 0.55; // the head's centre above the neck, along the torso: the O sits on the neck
+const FEET = 2.9; // the feet line, in u below the body's centre
+const CARRY = (20 * Math.PI) / 180; // a carried gun points this far below level
 
-const PARTS = ['head', 'armB', 'torso', 'armF', 'legB', 'legF'];
+// Poses, facing right, in u from the body's centre: the hip (hx, hy), the torso's lean (radians from
+// upright, + forward) and its stretch st (the breath), an extra head offset (hdx, hdy), the hands (bx, by
+// back, fx, fy front) given where they'd be with the shoulder standing (they move with the shoulder), the
+// feet (lbx, lby back, lfx, lfy front) where they are, and the carried gun's angle ga (+ down).
+const FIELDS = ['hx', 'hy', 'lean', 'st', 'hdx', 'hdy', 'bx', 'by', 'fx', 'fy', 'lbx', 'lby', 'lfx', 'lfy', 'ga'];
+const UPPER = ['lean', 'hdx', 'hdy', 'bx', 'by', 'fx', 'fy', 'ga'];
+const pose = (o) => ({ hx: 0, hy: 1, lean: 0, st: 0, hdx: 0, hdy: 0, ga: CARRY, ...o });
 
-// Locomotion art, facing right (stickman spec §4): part → [ch, dx, dy]; null means not drawn.
-const IDLE = { head: ['O', 0, -1], armB: ['/', -0.7, 0], torso: ['|', 0, 0], armF: ['\\', 0.7, 0], legB: ['/', -0.4, 1], legF: ['\\', 0.4, 1] };
-const LAND_LEGS = { legB: ['/', -0.6, 1], legF: ['\\', 0.6, 1] };
-// The run frames R1–R4. The head and torso come from the lean.
-const RUN = [
-  { armB: ['-', -0.55, -0.1], armF: ['\\', 0.85, 0.05], legB: ['/', -0.55, 1], legF: ['\\', 0.6, 1] },
-  { armB: ['/', -0.45, 0.05], armF: null, legB: ['|', 0.05, 1], legF: ['>', 0.6, 0.9] },
-  { armB: ['/', -0.5, 0.05], armF: ['-', 0.95, -0.1], legB: ['/', -0.55, 1], legF: ['\\', 0.6, 1] },
-  { armB: null, armF: ['\\', 0.75, 0.05], legB: ['|', 0.05, 1], legF: ['>', 0.6, 0.9] },
-];
-const RISE = { head: ['O', 0.1, -1], armB: ['\\', -0.7, -1.1], torso: ['|', 0, 0], armF: ['/', 0.8, -1.1], legB: ['/', -0.3, 0.95], legF: ['>', 0.45, 0.85] };
-const APEX = { head: ['O', 0, -1], armB: ['-', -0.75, -0.1], torso: ['|', 0, 0], armF: ['-', 0.75, -0.1], legB: ['/', -0.3, 0.9], legF: ['>', 0.45, 0.85] };
-const FALL = { head: ['O', 0, -1], armB: ['\\', -0.75, -0.25], torso: ['|', 0, 0], armF: ['/', 0.75, -0.25], legB: ['/', -0.55, 1], legF: ['\\', 0.55, 1] };
+const IDLE = pose({ bx: -0.45, by: 0.45, fx: 0.65, fy: -0.3, lbx: -0.55, lby: FEET, lfx: 0.55, lfy: FEET });
+// The air: rise (one knee tucked, arms up), apex (arms out), fall (legs spread to brace, arms up and out).
+const RISE = pose({ lean: 0.08, bx: -0.5, by: -2.9, fx: 0.75, fy: -0.6, lbx: -0.35, lby: 2.75, lfx: 0.5, lfy: 1.6 });
+const APEX = pose({ bx: -1.6, by: -1.1, fx: 0.8, fy: -0.3, lbx: -0.35, lby: 2.6, lfx: 0.55, lfy: 2.2 });
+const FALL = pose({ lean: -0.05, bx: -1.2, by: -2.3, fx: 0.85, fy: -0.5, lbx: -0.8, lby: 2.75, lfx: 0.8, lfy: 2.75 });
+// Punch: the wind-up cocks the fist at the chest; the strike throws it out at shoulder height.
+const PUNCH_WIND = pose({ lean: -0.12, bx: 0.35, by: 0, fx: 0.3, fy: -0.75, ga: -0.15 });
+const PUNCH_STRIKE = pose({ lean: 0.25, bx: 0.2, by: 0.05, fx: 1.75, fy: S_Y, ga: 0 });
+// Kick: the wind-up chambers the front knee; the strike drives the foot out and leans back.
+const KICK_WIND = pose({ hx: -0.05, lean: -0.1, bx: -1.3, by: -1.0, fx: 1.0, fy: -0.7, lbx: -0.3, lby: FEET, lfx: 0.4, lfy: 1.2 });
+const KICK_STRIKE = pose({ hx: -0.2, hy: 1.05, lean: -0.35, bx: -1.4, by: -0.3, fx: 0.7, fy: -0.6, lbx: -0.35, lby: FEET, lfx: 1.9, lfy: 1.1 });
+const KICK_AIR_BACK = { lbx: -0.6, lby: 1.9 }; // a flying kick tucks the back knee
+// Hurt: the torso snaps back, the head goes back, the arms flail.
+const HURT = pose({ hx: -0.25, hy: 1.15, lean: -0.35, hdx: -0.15, hdy: 0.05, bx: -1.1, by: 0.2, fx: 0.6, fy: -0.9, lbx: -0.5, lby: FEET, lfx: 0.45, lfy: FEET, ga: -0.5 });
+// Roll: tucked into a ball around the pivot, which then turns once. The spine curls (st < 0), the head
+// tucks down past the neck, the knees come up to the chest and the hands hold the shins.
+const TUCK = pose({ hx: -0.7, hy: 2.1, lean: 0.76, st: -0.4, hdx: 0.12, hdy: 0.85, bx: 0.1, by: 0.25, fx: 0.22, fy: 0.2, lbx: -0.2, lby: 2.65, lfx: -0.05, lfy: 2.6, ga: 0 });
+const PIVOT_Y = 1.6; // the ball's centre, so it rolls on the floor (rig addendum said a row above the feet)
 
-// Timings and sizes (stickman spec §4 "Animation timing").
-const BREATH_PERIOD = 2.4, BREATH_H = 0.06;
-const STRIDE = 12, BOB_H = 0.12, RUN_VX = 1.5, SPRINT_VX = 36;
-const AIR_VY = 8;
-const LAND_T = 0.12, SQUASH = 0.25;
-const ARM_R = 0.7, RECOIL = 0.3, HEAD_RECOIL = 0.1, FLASH_T = 0.06;
-const STEEP = 35 * Math.PI / 180;
-const HIP = { dx: 0.45, dy: 0.3 };
+// Timings and sizes (stickman spec §4 "Animation timing", rig addendum §4).
+const BREATH_PERIOD = 2.4, BREATH_U = 0.12;
+const STRIDE = 12, RUN_VX = 1.5, RUN_FULL = 8, SPRINT_VX0 = 30, SPRINT_VX1 = 45;
+const RUN = { lean: 0.18, sprint: 0.26, drop: 0.3, bob: 0.24, step: 1.1, lift: 0.7, swing: 0.6, bx: -0.15, by: 0.15, raise: 0.3, pump: 0.08 };
+const AIR_VY = 14;
+const LAND_T = 0.12, LAND_DROP = 0.5, LAND_FEET = 0.7;
+const RECOIL = 0.3, RECOIL_LEAN = 0.06, FLASH_T = 0.06;
+const HURT_FLASH = 0.08;
+const WHOOSH_T0 = 0.06, WHOOSH_T1 = 0.11, WHOOSH_D = 0.6;
+const PUFF_T = 0.1, PUFF_V = 48;
 
-// Action art, facing right (stickman spec §4 "Punch", "Kick", "Hurt"): part → [ch, dx, dy].
-const PUNCH_WIND = { torso: ['\\', -0.1, 0], head: ['O', -0.2, -1], armF: ['>', 0.45, -0.15] };
-const PUNCH_STRIKE = { torso: ['/', 0.2, 0], head: ['O', 0.4, -1], armB: ['-', -0.6, -0.1], armF: ['-', 0.85, -0.2] };
-const PUNCH_FIST = ['-', 1.55, -0.2], PUNCH_WHOOSH = [')', 2.1, -0.2];
-const KICK_WIND = { armB: ['-', -0.75, -0.1], torso: IDLE.torso, armF: ['-', 0.75, -0.1], legB: ['|', -0.1, 1], legF: ['>', 0.45, 0.75] };
-// The strike's head is a shift of the head from where locomotion put it.
-const KICK_STRIKE = { armB: ['/', -0.8, 0.1], torso: ['\\', -0.15, 0], armF: ['-', 0.6, -0.15], legB: ['/', -0.35, 1], legF: ['-', 0.75, 0.55] };
-const KICK_HEAD_DX = -0.35, KICK_AIR_LEGB = ['/', -0.35, 0.85];
-const KICK_FOOT = ['-', 1.45, 0.55], KICK_WHOOSH = [')', 2.0, 0.55];
-// The parts each act sets (the rest come from locomotion).
-const PUNCH_PARTS = ['torso', 'head', 'armB', 'armF'], KICK_PARTS = ['armB', 'torso', 'armF', 'legB', 'legF'];
-const HURT = { head: ['O', -0.5, -0.9], armB: ['/', -0.85, 0.15], torso: ['\\', -0.2, 0], armF: ['-', 0.55, -0.25], legB: ['/', -0.4, 1], legF: ['\\', 0.4, 1] };
-
-// Action timings (stickman spec §4): wind-up end, strike end, the characters' switch back, done.
-const PUNCH_T = { wind: 0.06, strike: 0.16, swap: 0.21, end: 0.25 };
-const KICK_T = { wind: 0.06, strike: 0.26, swap: 0.33, end: 0.4 };
-const HURT_T = { flash: 0.08, strike: 0.2, swap: 0.28, end: 0.35 };
-const WHOOSH_T0 = 0.06, WHOOSH_T1 = 0.11;
-
-// Roll (stickman spec §4 "Roll"): 4 frames of 0.075 s, rows dy 0 and 1, columns at ROLL_X.
-const ROLL_T = 0.075, ROLL_END = 0.3, PUFF_T = 0.1, PUFF_V = 48;
-const ROLL_X = [-0.7, 0, 0.7];
-const ROLL = [['.o.', "'-'"], ['.-.', "'-o"], ['.-.', "'o'"], ['o-.', "'-'"]];
-
-// Death (stickman spec §4 "Death: pop and scatter").
+// Death (stickman spec §4 "Death"; rig addendum §4): the pieces fly from the hurt pose, spin, bounce once
+// and lie flat on the feet line.
 const POP_T = 0.08, SPARK_T = 0.25, SPARK_R0 = 0.5, SPARK_R1 = 1.5;
-const GRAV = 50, BOUNCE = 0.3, FLOOR = 1, TUMBLE_RATE = 12, FADE_T = 1.4, DEAD_END = 2.0;
-const TUMBLE = ['|', '/', '-', '\\'];
+const GRAV = 50, BOUNCE = 0.3, SPIN = 10, FADE_T = 1.4, DEAD_END = 2.0;
+const REST_BONE = FEET / 2, REST_HEAD = (3 - 0.5) / 2; // rows: a bar lies on the feet line, the O sits on it
 const SCATTER_V = { head: [-7, -14], torso: [-3, -9], armB: [-10, -11], armF: [4, -12], legB: [-5, -6], legF: [3, -7] };
 const SPARK_D = Math.SQRT1_2, SIGNS = [-1, 1];
 
@@ -75,95 +73,80 @@ const SAFE_MID = 0.575, SAFE_AMP = 0.225, SAFE_HZ = 3, SAFE_RM = 0.5;
 
 const ACTS = { idle: true, shoot: true, punch: true, kick: true, hurt: true, dead: true, roll: true };
 
-// Each piece's scatter, worked out once (closed form): flight 1 from its hurt-pose place to the feet
-// line, a bounce (vertical speed reversed at ×0.3, horizontal halved), flight 2 to the line, then rest.
-const SCATTER = {};
-for (const k of PARTS) {
-  const [, x0, y0] = HURT[k], [vx, vy] = SCATTER_V[k];
-  const t1 = (-vy + Math.sqrt(vy * vy + 2 * GRAV * (FLOOR - y0))) / GRAV;
-  const x1 = x0 + vx * t1, vy2 = -BOUNCE * (vy + GRAV * t1), vx2 = vx / 2;
-  const t2 = (-2 * vy2) / GRAV;
-  SCATTER[k] = { x0, y0, vx, vy, t1, x1, vx2, vy2, t2, x2: x1 + vx2 * t2 };
-}
-
-// Scratch poses, reused so a call allocates nothing beyond the glyphs it pushes.
-// Each part is { ch, dx, dy } facing right; ch null means not drawn.
-// P is the pose being built; B keeps the locomotion pose (with its arm) for the recover phases.
-const P = {}, B = {};
-for (const k of PARTS) { P[k] = { ch: null, dx: 0, dy: 0 }; B[k] = { ch: null, dx: 0, dy: 0 }; }
-// An extra glyph (the fist or the foot) and a whoosh; ch null means none.
-const X = { ch: null, dx: 0, dy: 0, part: 'armF' };
-const W = { ch: null, dx: 0, dy: 0 };
-// Where locomotion moved the torso: the aimed shoulder moves with it.
-let bodyDx = 0, bodyDy = 0;
-
 const fin = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const frac = (v) => v - Math.floor(v);
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const smooth = (v) => { const k = clamp01(v); return k * k * (3 - 2 * k); };
 
-function set(part, art, ox, oy) {
-  const p = P[part];
-  if (!art) { p.ch = null; return; }
-  p.ch = art[0];
-  p.dx = art[1] + ox;
-  p.dy = art[2] + oy;
+// Scratch poses, reused: L is locomotion, A an act's target, P what is drawn.
+const L = pose({}), A = pose({}), P = pose({});
+function copy(dst, src) { for (const k of FIELDS) dst[k] = src[k]; }
+// Blend pose a into b by k (0..1), into dst; upper: only the upper body. The hands swing on arcs about the
+// shoulder and the feet about the hip, so a hand passing the shoulder never flips the arm.
+const SCALARS = ['hx', 'hy', 'lean', 'st', 'hdx', 'hdy', 'ga'], UPPER_S = ['lean', 'hdx', 'hdy', 'ga'];
+function mixInto(dst, a, b, k, upper = false) {
+  if (k <= 0 || k >= 1) {
+    const src = k <= 0 ? a : b;
+    for (const f of upper ? UPPER : FIELDS) dst[f] = src[f];
+    return;
+  }
+  for (const f of upper ? UPPER_S : SCALARS) dst[f] = a[f] + (b[f] - a[f]) * k;
+  arc(dst, a, b, k, 'bx', 'by', S_X, S_Y, S_X, S_Y, S_X, S_Y);
+  arc(dst, a, b, k, 'fx', 'fy', S_X, S_Y, S_X, S_Y, S_X, S_Y);
+  if (upper) return;
+  arc(dst, a, b, k, 'lbx', 'lby', a.hx, a.hy, b.hx, b.hy, dst.hx, dst.hy);
+  arc(dst, a, b, k, 'lfx', 'lfy', a.hx, a.hy, b.hx, b.hy, dst.hx, dst.hy);
+}
+// One point of a pose, blended in polar form about its origin (a's, b's, and dst's).
+function arc(dst, a, b, k, kx, ky, ax, ay, bx, by, dx, dy) {
+  const ux = a[kx] - ax, uy = a[ky] - ay, vx = b[kx] - bx, vy = b[ky] - by;
+  const ra = Math.hypot(ux, uy), ta = Math.atan2(uy, ux);
+  let d = Math.atan2(vy, vx) - ta;
+  if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+  const r = ra + (Math.hypot(vx, vy) - ra) * k, t = ta + d * k;
+  dst[kx] = dx + r * Math.cos(t);
+  dst[ky] = dy + r * Math.sin(t);
 }
 
-function setPose(art, upper, legs) {
-  set('head', art.head, 0, upper);
-  set('armB', art.armB, 0, upper);
-  set('torso', art.torso, 0, upper);
-  set('armF', art.armF, 0, upper);
-  set('legB', art.legB, 0, legs);
-  set('legF', art.legF, 0, legs);
-}
-
-function setGlyph(g, art, ox, oy) {
-  g.ch = art[0];
-  g.dx = art[1] + ox;
-  g.dy = art[2] + oy;
-}
-
-// Layer 1: locomotion fills P and sets bodyDx/bodyDy (stickman spec §3 "Choosing the locomotion pose").
+// Layer 1, locomotion (stickman spec §3 "Choosing the locomotion pose"), into L; then the front arm aimed.
 function locomotion(s, rm, breath) {
-  bodyDx = 0;
   if (!s.ground) {
-    setPose(s.vy < -AIR_VY ? RISE : s.vy > AIR_VY ? FALL : APEX, 0, 0);
-    bodyDy = 0;
-  } else if (!rm && s.landT < LAND_T) {
-    // Land: the idle figure, upper rows squashed down, legs spread. Reduce Motion has no squash.
-    bodyDy = SQUASH * (1 - s.landT / LAND_T) - breath;
-    setPose(IDLE, bodyDy, 0);
-    set('legB', LAND_LEGS.legB, 0, 0);
-    set('legF', LAND_LEGS.legF, 0, 0);
-  } else if (Math.abs(s.vx) >= RUN_VX) {
-    const ph = frac((s.x * s.facing) / STRIDE);
-    const f = RUN[Math.min(3, Math.floor(ph * 4))];
-    const bob = rm ? 0 : -BOB_H * Math.sin(Math.PI * frac(ph * 2));
-    // Running backwards (facing disagrees with vx): no lean, torso upright.
-    const fwd = s.vx * s.facing > 0, sprint = Math.abs(s.vx) > SPRINT_VX;
-    const lean = fwd ? (sprint ? 0.3 : 0.2) : 0, headLean = fwd ? (sprint ? 0.45 : 0.35) : 0;
-    set('head', IDLE.head, headLean, bob);
-    set('torso', IDLE.torso, lean, bob);
-    if (fwd) P.torso.ch = '/';
-    set('armB', f.armB, 0, bob);
-    set('armF', f.armF, 0, bob);
-    set('legB', f.legB, 0, bob);
-    set('legF', f.legF, 0, bob);
-    bodyDx = lean;
-    bodyDy = bob;
-  } else {
-    bodyDy = -breath;
-    setPose(IDLE, bodyDy, 0);
+    // One smooth blend over vy: rise → apex → fall.
+    const k = smooth((s.vy + AIR_VY) / (2 * AIR_VY));
+    if (k < 0.5) mixInto(L, RISE, APEX, 2 * k); else mixInto(L, APEX, FALL, 2 * k - 1);
+    return;
+  }
+  copy(L, IDLE);
+  L.st = breath;
+  const w = Math.abs(s.vx) < RUN_VX ? 0 : smooth((Math.abs(s.vx) - RUN_VX) / (RUN_FULL - RUN_VX));
+  if (w > 0) run(s, rm, w);
+  // Land: the hip drops, bending the knees; the feet plant wide; the arms come down from the fall.
+  if (!rm && s.landT < LAND_T) {
+    const k = 1 - s.landT / LAND_T;
+    L.hy += LAND_DROP * k;
+    L.lbx += (-LAND_FEET - L.lbx) * k; L.lby += (FEET - L.lby) * k;
+    L.lfx += (LAND_FEET - L.lfx) * k; L.lfy += (FEET - L.lfy) * k;
+    L.bx += (FALL.bx - L.bx) * k; L.by += (FALL.by - L.by) * k;
   }
 }
 
-// The arm's glyph for an aim, facing right: 8 directions.
-function armGlyph(aim) {
-  const a = Math.abs(aim);
-  if (a <= Math.PI / 8) return '-';
-  if (a <= (3 * Math.PI) / 8) return aim < 0 ? '/' : '\\';
-  return '|';
+// The run cycle, weighted in by speed: phase from x alone (stickman spec §4 "Run"), each foot on an
+// ellipse (back along the ground, then lifted forward), the back arm against the front leg.
+function run(s, rm, w) {
+  const ph = frac((s.x * s.facing) / STRIDE), psi = 2 * Math.PI * ph;
+  const c = Math.cos(psi), sn = Math.sin(psi);
+  const fwd = s.vx * s.facing > 0, speed = Math.abs(s.vx);
+  const lean = fwd ? RUN.lean + (RUN.sprint - RUN.lean) * clamp01((speed - SPRINT_VX0) / (SPRINT_VX1 - SPRINT_VX0)) : 0;
+  const bob = rm ? 0 : RUN.bob * Math.sin(Math.PI * frac(ph * 2));
+  toward('lean', lean, w);
+  toward('st', 0, w);
+  toward('hy', 1 + RUN.drop - bob, w);
+  toward('lfx', RUN.step * c, w); toward('lfy', FEET - RUN.lift * Math.max(0, -sn), w);
+  toward('lbx', -RUN.step * c, w); toward('lby', FEET - RUN.lift * Math.max(0, sn), w);
+  toward('bx', RUN.bx - RUN.swing * c, w); toward('by', RUN.by + RUN.raise * c, w);
+  toward('fy', IDLE.fy - RUN.pump * Math.abs(sn), w);
 }
+function toward(k, v, w) { L[k] += (v - L[k]) * w; }
 
 // Recoil, 1 = fully back: full until 0.04 s, easing to 0 by 0.15. Reduce Motion: on for 0.08 s, no ease.
 function recoil(actT, rm) {
@@ -171,80 +154,131 @@ function recoil(actT, rm) {
   return actT < 0.04 ? 1 : Math.max(0, 1 - (actT - 0.04) / 0.11);
 }
 
-// Carried: the arm is '-' halfway from the shoulder to the hand at the hip, moving with the torso.
-function carryArm() {
-  P.armF.ch = '-';
-  P.armF.dx = (SHOULDER.dx + HIP.dx) / 2 + P.torso.dx;
-  P.armF.dy = (SHOULDER.dy + HIP.dy) / 2 + P.torso.dy;
+// An act's weight over time: in over [0, t0], held, out over [t1, t2].
+const weight = (t, t0, t1, t2) => (t < t0 ? smooth(t / t0) : t < t1 ? 1 : 1 - smooth((t - t1) / (t2 - t1)));
+
+// The acts (layers 2 and 3), one row each: the wind-up and strike keyposes, and when (seconds of actT) it is
+// blended in from locomotion (in), at the strike (at), held until (hold) and back in locomotion (end).
+// upper: only the upper body (the legs keep running or flying); air: the back foot in the air instead;
+// turns: whole forward turns about the pivot over the act, drawn with no gun; puff: a puff where it began.
+// A new whole-body act is a new row.
+const ACT_RIG = {
+  punch: { wind: PUNCH_WIND, strike: PUNCH_STRIKE, in: 0.04, at: 0.06, hold: 0.16, end: 0.25, upper: true },
+  kick: { wind: KICK_WIND, strike: KICK_STRIKE, in: 0.04, at: 0.06, hold: 0.26, end: 0.4, air: KICK_AIR_BACK },
+  hurt: { wind: HURT, strike: HURT, in: 0.02, at: 0.02, hold: 0.2, end: 0.35 },
+  roll: { wind: TUCK, strike: TUCK, in: 0.05, at: 0.05, hold: 0.25, end: 0.3, turns: 1, puff: true },
+};
+
+// Layers 2 and 3 into P (from L). Returns the turn about the pivot (radians), or 0.
+function act(name, actT, ground) {
+  copy(P, L);
+  const r = ACT_RIG[name];
+  if (!r || actT >= r.end) return 0;
+  mixInto(A, r.wind, r.strike, r.at > r.in ? smooth((actT - r.in) / (r.at - r.in)) : 1, r.upper);
+  if (r.air && !ground) {
+    const k = smooth(actT / r.at);
+    A.lbx += (r.air.lbx - A.lbx) * k;
+    A.lby += (r.air.lby - A.lby) * k;
+  }
+  mixInto(P, L, A, weight(actT, r.in, r.hold, r.end), r.upper);
+  if (!r.turns) return 0;
+  const u = actT / r.end;
+  return 2 * Math.PI * r.turns * (0.5 * u + 0.5 * smooth(u));
 }
 
-function copyPose(dst, src) {
-  for (const k of PARTS) {
-    dst[k].ch = src[k].ch;
-    dst[k].dx = src[k].dx;
-    dst[k].dy = src[k].dy;
+// The solved rig, facing right, in u: hip, neck, head, shoulder, and each limb's joint and end.
+const J = {
+  hx: 0, hy: 0, nx: 0, ny: 0, ox: 0, oy: 0, sx: 0, sy: 0,
+  ebx: 0, eby: 0, wbx: 0, wby: 0, efx: 0, efy: 0, wfx: 0, wfy: 0,
+  kbx: 0, kby: 0, abx: 0, aby: 0, kfx: 0, kfy: 0, afx: 0, afy: 0,
+};
+let jx = 0, jy = 0, tx = 0, ty = 0;
+
+// Two-bone IK: from the root (rx, ry) toward the target, bones a then b. bend +1 puts the joint back and
+// down (elbows), -1 forward (knees). Sets (jx, jy) the joint and (tx, ty) the end.
+function ik(rx, ry, px, py, a, b, bend) {
+  let dx = px - rx, dy = py - ry, d = Math.hypot(dx, dy);
+  if (d < 1e-9) { dx = 0; dy = 1; d = 1e-9; } else { dx /= d; dy /= d; }
+  d = Math.min(Math.max(d, Math.abs(a - b) + 1e-6), (a + b) * REACH);
+  const ca = Math.max(-1, Math.min(1, (a * a + d * d - b * b) / (2 * a * d)));
+  const sa = bend * Math.sqrt(1 - ca * ca);
+  jx = rx + a * (dx * ca - dy * sa);
+  jy = ry + a * (dx * sa + dy * ca);
+  tx = rx + d * dx;
+  ty = ry + d * dy;
+}
+
+function solve(p) {
+  const s = Math.sin(p.lean), c = Math.cos(p.lean), len = RIG.torso + p.st;
+  J.hx = p.hx; J.hy = p.hy;
+  J.nx = p.hx + len * s; J.ny = p.hy - len * c;
+  J.ox = J.nx + HEAD_D * s + p.hdx; J.oy = J.ny - HEAD_D * c + p.hdy;
+  // The shoulder: S_X ahead of the torso line, NECK_TO_S below the neck, turning with the lean.
+  J.sx = J.nx + S_X * c - NECK_TO_S * s; J.sy = J.ny + S_X * s + NECK_TO_S * c;
+  const ox = J.sx - S_X, oy = J.sy - S_Y; // the hands move with the shoulder
+  ik(J.sx, J.sy, p.bx + ox, p.by + oy, RIG.upperArm, RIG.foreArm, 1);
+  J.ebx = jx; J.eby = jy; J.wbx = tx; J.wby = ty;
+  ik(J.sx, J.sy, p.fx + ox, p.fy + oy, RIG.upperArm, RIG.foreArm, 1);
+  J.efx = jx; J.efy = jy; J.wfx = tx; J.wfy = ty;
+  ik(J.hx, J.hy, p.lbx, p.lby, RIG.thigh, RIG.shin, -1);
+  J.kbx = jx; J.kby = jy; J.abx = tx; J.aby = ty;
+  ik(J.hx, J.hy, p.lfx, p.lfy, RIG.thigh, RIG.shin, -1);
+  J.kfx = jx; J.kfy = jy; J.afx = tx; J.afy = ty;
+}
+
+// Turn the whole solved rig by phi about (0, PIVOT_Y): the roll.
+const XS = ['hx', 'nx', 'ox', 'sx', 'ebx', 'wbx', 'efx', 'wfx', 'kbx', 'abx', 'kfx', 'afx'];
+const YS = ['hy', 'ny', 'oy', 'sy', 'eby', 'wby', 'efy', 'wfy', 'kby', 'aby', 'kfy', 'afy'];
+function turn(phi) {
+  const c = Math.cos(phi), s = Math.sin(phi);
+  for (let i = 0; i < XS.length; i++) {
+    const x = J[XS[i]], y = J[YS[i]] - PIVOT_Y;
+    J[XS[i]] = x * c - y * s;
+    J[YS[i]] = x * s + y * c + PIVOT_Y;
   }
 }
 
-// Recover: every part slides from the action pose in P back to its locomotion place in B (u 0 → 1).
-// Once swapped, the characters are the locomotion ones and the extra glyph is gone.
-function recover(u, swapped) {
-  for (const k of PARTS) {
-    const p = P[k], b = B[k];
-    if (p.ch === null) { p.ch = b.ch; p.dx = b.dx; p.dy = b.dy; continue; }
-    if (b.ch !== null) {
-      p.dx += (b.dx - p.dx) * u;
-      p.dy += (b.dy - p.dy) * u;
-    }
-    if (swapped) p.ch = b.ch;
-  }
-  if (X.ch !== null) {
-    const b = B[X.part];
-    X.dx += (b.dx - X.dx) * u;
-    X.dy += (b.dy - X.dy) * u;
-    if (swapped) X.ch = null;
-  }
+// A bar's rotation, clockwise from upright, kept within (-π/2, π/2] (a bar is the same either way up).
+function barRot(dx, dy) {
+  let r = Math.atan2(dx, -dy);
+  if (r > Math.PI / 2) r -= Math.PI; else if (r <= -Math.PI / 2) r += Math.PI;
+  return r;
 }
 
-// Layer 2, punch: replaces armF (and the torso, head and back arm), moving up and down with the torso.
-function punch(actT) {
-  const oy = bodyDy;
-  if (actT < PUNCH_T.wind) {
-    set('torso', PUNCH_WIND.torso, 0, oy);
-    set('head', PUNCH_WIND.head, 0, oy);
-    set('armF', PUNCH_WIND.armF, 0, oy);
-    return;
+// Output, facing right in u → { dx, dy } in cells and rows, mirrored by f.
+function put(out, f, ch, x, y, part, tone, a, rot, len, flip) {
+  out.push({ dx: x * f + 0, dy: y / 2 + 0, ch, part, tone, a, rot: rot * f + 0, len, flip });
+}
+function bone(out, f, part, ax, ay, bx, by, tone, a) {
+  const dx = bx - ax, dy = by - ay;
+  put(out, f, '|', (ax + bx) / 2, (ay + by) / 2, part, tone, a, barRot(dx, dy), Math.hypot(dx, dy) / RIG.bar, false);
+}
+
+// The figure from J: the head, the torso, the back limbs, the front leg, the front arm.
+function figure(out, f, tone, a) {
+  put(out, f, 'O', J.ox, J.oy, 'head', tone, a, 0, 1, false);
+  bone(out, f, 'torso', J.hx, J.hy, J.nx, J.ny, tone, a);
+  bone(out, f, 'armB', J.sx, J.sy, J.ebx, J.eby, tone, a);
+  bone(out, f, 'armB', J.ebx, J.eby, J.wbx, J.wby, tone, a);
+  bone(out, f, 'legB', J.hx, J.hy, J.kbx, J.kby, tone, a);
+  bone(out, f, 'legB', J.kbx, J.kby, J.abx, J.aby, tone, a);
+  bone(out, f, 'legF', J.hx, J.hy, J.kfx, J.kfy, tone, a);
+  bone(out, f, 'legF', J.kfx, J.kfy, J.afx, J.afy, tone, a);
+  bone(out, f, 'armF', J.sx, J.sy, J.efx, J.efy, tone, a);
+  bone(out, f, 'armF', J.efx, J.efy, J.wfx, J.wfy, tone, a);
+}
+
+// The gun, from the front hand along angle ga: the hand glyph at the hand, the rest 1 u apart.
+// Returns nothing; sets (tx, ty) to the muzzle, half a glyph past the last glyph.
+function gunAt(out, f, gun, ga, tone, a) {
+  const art = GUN_ART[gun], c = Math.cos(ga), s = Math.sin(ga), g = art.glyphs;
+  for (let i = 0; i < g.length; i++) {
+    const r = i - art.hand;
+    put(out, f, g[i], J.wfx + r * c, J.wfy + r * s, 'gun', tone, a, ga, 1, f < 0);
   }
-  for (const k of PUNCH_PARTS) set(k, PUNCH_STRIKE[k], 0, oy);
-  X.part = 'armF';
-  setGlyph(X, PUNCH_FIST, 0, oy);
-  if (actT < WHOOSH_T1) setGlyph(W, PUNCH_WHOOSH, 0, oy);
-  if (actT >= PUNCH_T.strike) recover((actT - PUNCH_T.strike) / (PUNCH_T.end - PUNCH_T.strike), actT >= PUNCH_T.swap);
-}
-
-// Layer 3, kick: the whole body except the head, which stays where locomotion put it.
-function kick(actT, ground) {
-  if (actT < KICK_T.wind) {
-    for (const k of KICK_PARTS) set(k, KICK_WIND[k], 0, 0);
-    return;
-  }
-  for (const k of KICK_PARTS) set(k, KICK_STRIKE[k], 0, 0);
-  if (!ground) set('legB', KICK_AIR_LEGB, 0, 0);
-  P.head.dx += KICK_HEAD_DX;
-  X.part = 'legF';
-  setGlyph(X, KICK_FOOT, 0, 0);
-  if (actT < WHOOSH_T1) setGlyph(W, KICK_WHOOSH, 0, 0);
-  if (actT >= KICK_T.strike) recover((actT - KICK_T.strike) / (KICK_T.end - KICK_T.strike), actT >= KICK_T.swap);
-}
-
-// Layer 3, hurt: the recoil pose, then back to locomotion.
-function hurt(actT) {
-  for (const k of PARTS) set(k, HURT[k], 0, 0);
-  if (actT >= HURT_T.strike) recover((actT - HURT_T.strike) / (HURT_T.end - HURT_T.strike), actT >= HURT_T.swap);
-}
-
-function put(out, f, ch, dx, dy, part, tone, a) {
-  out.push({ dx: dx * f + 0, dy: dy + 0, ch: f < 0 ? MIRROR[ch] || ch : ch, part, tone, a });
+  const m = g.length - 1 - art.hand + 0.5;
+  tx = J.wfx + m * c;
+  ty = J.wfy + m * s;
 }
 
 // Out is the direction of (dx, dy) from the centre on screen, `d` screen units long, in cells and rows.
@@ -256,40 +290,64 @@ function outward(dx, dy, d) {
   outDy = (d * dy) / len;
 }
 
+// The dead body's pieces, worked out once from the hurt pose (closed form): flight 1 from its place to its
+// rest line, a bounce (vertical speed reversed at ×0.3, horizontal halved), flight 2, then rest. Each bar
+// spins at about SPIN rad/s, its rate trimmed so it lands flat.
+let PIECES = null;
+function pieces() {
+  if (PIECES) return PIECES;
+  copy(P, HURT);
+  solve(P);
+  const tmp = [];
+  figure(tmp, 1, 'body', 1);
+  PIECES = tmp.map((g, i) => {
+    const [vx, vy] = SCATTER_V[g.part], floor = g.part === 'head' ? REST_HEAD : REST_BONE;
+    const t1 = (-vy + Math.sqrt(vy * vy + 2 * GRAV * (floor - g.dy))) / GRAV;
+    const x1 = g.dx + vx * t1, vy2 = -BOUNCE * (vy + GRAV * t1), vx2 = vx / 2;
+    const t2 = (-2 * vy2) / GRAV, end = t1 + t2;
+    let spin = 0;
+    if (g.part !== 'head') {
+      const want = g.rot + (i % 2 ? SPIN : -SPIN) * end;
+      spin = (Math.PI / 2 + Math.PI * Math.round((want - Math.PI / 2) / Math.PI) - g.rot) / end;
+    }
+    return { ...g, vx, vy, floor, t1, x1, vx2, vy2, t2, end, x2: x1 + vx2 * t2, spin };
+  });
+  return PIECES;
+}
+
 // The dead body: the pop, the scatter, the rest and the fade. Pieces are relative to the body.
 function dead(out, f, actT, rm, sa) {
   if (actT >= DEAD_END) return out;
   const a = (actT <= FADE_T ? 1 : (DEAD_END - actT) / (DEAD_END - FADE_T)) * sa;
-  if (!rm && actT < POP_T) {
-    for (const k of PARTS) put(out, f, HURT[k][0], HURT[k][1], HURT[k][2], k, 'flash', a);
-  } else {
-    const tau = actT - POP_T;
-    for (const k of PARTS) {
-      const s = SCATTER[k];
-      let dx, dy, air = true;
-      if (rm || tau >= s.t1 + s.t2) {
-        dx = s.x2; dy = FLOOR; air = false;
-      } else if (tau < s.t1) {
-        dx = s.x0 + s.vx * tau;
-        dy = Math.min(FLOOR, s.y0 + s.vy * tau + (GRAV * tau * tau) / 2);
-      } else {
-        const u = tau - s.t1;
-        dx = s.x1 + s.vx2 * u;
-        dy = Math.min(FLOOR, FLOOR + s.vy2 * u + (GRAV * u * u) / 2);
-      }
-      const ch = k === 'head' ? 'O' : air ? TUMBLE[Math.floor(tau * TUMBLE_RATE) % 4] : '_';
-      put(out, f, ch, dx, dy, k, 'body', a);
+  const tau = actT - POP_T, pop = !rm && actT < POP_T;
+  for (const p of pieces()) {
+    let dx, dy, rot;
+    if (pop) {
+      dx = p.dx; dy = p.dy; rot = p.rot;
+    } else if (rm || tau >= p.end) {
+      dx = p.x2; dy = p.floor; rot = p.part === 'head' ? 0 : Math.PI / 2;
+    } else if (tau < p.t1) {
+      dx = p.dx + p.vx * tau;
+      dy = Math.min(p.floor, p.dy + p.vy * tau + (GRAV * tau * tau) / 2);
+      rot = p.rot + p.spin * tau;
+    } else {
+      const u = tau - p.t1;
+      dx = p.x1 + p.vx2 * u;
+      dy = Math.min(p.floor, p.floor + p.vy2 * u + (GRAV * u * u) / 2);
+      rot = p.rot + p.spin * tau;
     }
+    if (rot > Math.PI / 2 || rot <= -Math.PI / 2) rot -= Math.PI * Math.ceil((rot - Math.PI / 2) / Math.PI);
+    out.push({ dx: dx * f + 0, dy, ch: p.ch, part: p.part, tone: pop ? 'flash' : 'body', a, rot: rot * f + 0, len: p.len, flip: false });
   }
   // The pop's sparks: 4 '*' flying out diagonally, fading out by 0.25 s.
   if (!rm && actT < SPARK_T) {
     const k = actT / SPARK_T, r = SPARK_R0 + (SPARK_R1 - SPARK_R0) * k;
-    for (const sx of SIGNS) for (const sy of SIGNS) put(out, f, '*', sx * r * SPARK_D, (sy * r * SPARK_D) / 2, 'fx', 'fx', 1 - k);
+    for (const sx of SIGNS) for (const sy of SIGNS) put(out, f, '*', sx * r * SPARK_D, sy * r * SPARK_D, 'fx', 'fx', 1 - k, 0, 1, false);
   }
   return out;
 }
 
-// Respawn, over whatever pose was drawn from `start` on: each glyph flies in from 3 out along its own
+// Respawn, over whatever pose was drawn from `start` on: each sprite flies in from 3 out along its own
 // direction from the centre (the gun as one piece), easing out, while `a` goes 0 → 1; then a white
 // flash to 0.45 s. Reduce Motion: a 0.3 s fade-in in place.
 function spawnIn(out, start, spawnT, rm) {
@@ -320,8 +378,8 @@ function spawnIn(out, start, spawnT, rm) {
   return out;
 }
 
-// stickPose(state, t, opts, out) → out, with the body's glyphs { dx, dy, ch, part, tone, a } appended
-// (stickman spec §3). Pure: never mutates state, no randomness.
+// stickPose(state, t, opts, out) → out, with the body's sprites { dx, dy, ch, part, tone, a, rot, len, flip }
+// appended (stickman spec §3, rig addendum §3). Pure: never mutates state, no randomness.
 export function stickPose(state, t, opts = {}, out = []) {
   const st = state || {};
   const start = out.length;
@@ -340,7 +398,7 @@ function drawPose(st, t, opts, out) {
     ground: st.ground !== false,
     landT: st.landT >= 0 ? st.landT : Infinity,
   };
-  const act = ACTS[st.act] === true ? st.act : 'idle';
+  const name = ACTS[st.act] === true ? st.act : 'idle';
   const actT = fin(st.actT, 0) > 0 ? st.actT : 0;
   const aim = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, fin(st.aim, 0)));
   const gun = GUN_ART[st.gun] ? st.gun : 'deagle';
@@ -351,91 +409,45 @@ function drawPose(st, t, opts, out) {
   // Protection: the body's opacity pulses 3 times a second; Reduce Motion holds it at 0.5.
   const sa = st.safe === true ? (rm ? SAFE_RM : SAFE_MID + SAFE_AMP * Math.cos(2 * Math.PI * SAFE_HZ * tt)) : 1;
 
-  if (act === 'dead') return dead(out, f, actT, rm, sa);
+  if (name === 'dead') return dead(out, f, actT, rm, sa);
 
-  const breath = rm ? 0 : BREATH_H * (1 - Math.cos(2 * Math.PI * (tt / BREATH_PERIOD + phase))) / 2;
-  const art = GUN_ART[gun];
-  let tone = 'body', a = sa;
-
-  // Roll (layer 3): a ball on the lower two rows, turning once; no gun.
-  if (act === 'roll' && actT < ROLL_END) {
-    const fr = ROLL[Math.min(3, Math.floor(actT / ROLL_T))];
-    for (let r = 0; r < 2; r++) {
-      for (let c = 0; c < 3; c++) {
-        const ch = fr[r][c];
-        put(out, f, ch, ROLL_X[c], r, ch === 'o' ? 'head' : 'torso', 'body', a);
-      }
-    }
-    // The puff where the roll started: behind the body by the distance rolled.
-    if (!rm && actT < PUFF_T) put(out, f, '~', -actT * PUFF_V, 1, 'fx', 'fx', 1);
-    return out;
-  }
-
-  // Layer 1: locomotion, with the front arm carried or aimed. B keeps it for the recover phases.
+  const breath = rm ? 0 : BREATH_U * (1 - Math.cos(2 * Math.PI * (tt / BREATH_PERIOD + phase))) / 2;
   locomotion(s, rm, breath);
-  const shooting = act === 'shoot';
+
+  // The front arm aimed (shooting, aimed, or any aim): the hand at S + HAND_R along the aim, less the recoil.
+  const shooting = name === 'shoot';
   const aimed = shooting || st.aimed === true || aim !== 0;
   const k = shooting ? recoil(actT, rm) : 0;
   if (aimed) {
-    const c = Math.cos(aim), sn = Math.sin(aim) / 2, sx = SHOULDER.dx, sy = SHOULDER.dy + bodyDy;
-    const r = ARM_R - RECOIL * k;
-    P.armF.ch = armGlyph(aim);
-    P.armF.dx = sx + r * c;
-    P.armF.dy = sy + r * sn;
-    P.head.dx -= HEAD_RECOIL * k;
-  } else {
-    carryArm();
+    const r = HAND_R - RECOIL * k;
+    L.fx = S_X + r * Math.cos(aim);
+    L.fy = S_Y + r * Math.sin(aim);
+    L.ga = aim;
+    L.lean -= RECOIL_LEAN * k;
   }
 
-  // Layers 2 and 3: punch overlays the upper body; kick and hurt replace the body. While a punch holds
-  // its pose the gun is carried at the hip; a kick or a hurt draws no gun. Once the characters switch
-  // back, the gun is drawn as before.
-  X.ch = null;
-  W.ch = null;
-  let carried = !aimed, gunOn = true;
-  if (act === 'punch' && actT < PUNCH_T.end) {
-    copyPose(B, P);
-    punch(actT);
-    if (actT < PUNCH_T.swap) carried = true;
-  } else if (act === 'kick' && actT < KICK_T.end) {
-    copyPose(B, P);
-    kick(actT, s.ground);
-    if (actT < KICK_T.swap) gunOn = false;
-  } else if (act === 'hurt' && actT < HURT_T.end) {
-    copyPose(B, P);
-    hurt(actT);
-    if (actT < HURT_T.swap) gunOn = false;
-    if (!rm && actT < HURT_T.flash) tone = 'flash';
+  const phi = act(name, actT, s.ground);
+  solve(P);
+  const rolling = ACT_RIG[name] && ACT_RIG[name].turns > 0 && actT < ACT_RIG[name].end;
+  let tone = 'body';
+  if (name === 'hurt' && actT < HURT_FLASH && !rm) tone = 'flash';
+
+  if (rolling) {
+    turn(phi);
+    figure(out, f, tone, sa);
+    // The puff where the roll started: behind the body by the distance rolled.
+    if (!rm && ACT_RIG[name].puff && actT < PUFF_T) put(out, f, '~', -actT * PUFF_V, 2, 'fx', 'fx', 1, 0, 1, false);
+    return out;
   }
 
-  for (const name of PARTS) {
-    const p = P[name];
-    if (p.ch !== null) put(out, f, p.ch, p.dx, p.dy, name, tone, a);
+  figure(out, f, tone, sa);
+  gunAt(out, f, gun, P.ga, tone, sa);
+  if (shooting && actT < FLASH_T) put(out, f, '*', tx, ty, 'fx', 'fx', 1, 0, 1, false);
+  // The whoosh: 0.05 s at the end of a strike, just past the fist or the foot.
+  if (actT >= WHOOSH_T0 && actT < WHOOSH_T1 && (name === 'punch' || name === 'kick')) {
+    const ex = name === 'punch' ? J.wfx : J.afx, ey = name === 'punch' ? J.wfy : J.afy;
+    put(out, f, f < 0 ? '(' : ')', ex + WHOOSH_D, ey, 'fx', 'fx', 1, 0, 1, false);
   }
-  if (X.ch !== null) put(out, f, X.ch, X.dx, X.dy, X.part, tone, a);
-
-  // The gun: along the aim ray from the hand, or level at the hip when carried.
-  const glyphs = art.glyphs;
-  if (!gunOn) {
-    // No gun over a kick or a hurt.
-  } else if (!carried) {
-    const c = Math.cos(aim), sn = Math.sin(aim) / 2, sx = SHOULDER.dx, sy = SHOULDER.dy + bodyDy;
-    const steep = Math.abs(aim) > STEEP, armCh = armGlyph(aim), back = RECOIL * k;
-    for (let i = 0; i < glyphs.length; i++) {
-      const r = HAND_R + i - art.hand - back;
-      const ch = steep && glyphs[i] !== '°' ? armCh : glyphs[i];
-      put(out, f, ch, sx + r * c, sy + r * sn, 'gun', tone, a);
-    }
-    if (shooting && actT < FLASH_T) {
-      const r = MUZZLE_R[gun] - back;
-      put(out, f, '*', sx + r * c, sy + r * sn, 'fx', 'fx', 1);
-    }
-  } else {
-    const hx = HIP.dx + P.torso.dx, hy = HIP.dy + P.torso.dy;
-    for (let i = 0; i < glyphs.length; i++) put(out, f, glyphs[i], hx + i - art.hand, hy, 'gun', tone, a);
-  }
-  // The whoosh: 0.05 s at the end of a strike.
-  if (W.ch !== null && actT >= WHOOSH_T0) put(out, f, W.ch, W.dx, W.dy, 'fx', 'fx', 1);
   return out;
 }
 

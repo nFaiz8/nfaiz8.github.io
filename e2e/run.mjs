@@ -511,6 +511,8 @@ await withBrowser(async ({ page, url, errors }) => {
     ['shoot +45', { act: 'shoot', actT: 0.1, aim: Math.PI / 4 }], ['shoot -90', { act: 'shoot', actT: 0.1, aim: -Math.PI / 2 }],
     ['punch', { act: 'punch', actT: 0.1 }], ['kick', { act: 'kick', actT: 0.15 }], ['hurt', { act: 'hurt', actT: 0.05 }],
     ['dead 0.3', { act: 'dead', actT: 0.3 }], ['dead 1.5', { act: 'dead', actT: 1.5 }], ['respawn 0.2', { act: 'idle', spawnT: 0.2 }],
+    // The rig (rig addendum): a carried rifle at the chest, a landing squat, a kick's wind-up, the roll's tumble.
+    ['rifle', { gun: 'rifle' }], ['land', { landT: 0.03 }], ['kick 0.03', { act: 'kick', actT: 0.03 }], ['roll 0.12', { act: 'roll', actT: 0.12 }],
   ];
   const isAmber = (R, G, B) => R >= 120 && G >= 0.68 * R && G <= 0.92 * R && B >= 0.25 * R && B <= 0.6 * R;
   const isWhite = (R, G, B) => Math.min(R, G, B) >= 225;
@@ -596,6 +598,9 @@ await withBrowser(async ({ page, url, errors }) => {
           .composite(tiles.map((input, i) => ({ input, left: (i % cols) * tw, top: Math.floor(i / cols) * th }))).png().toFile(`${SHOTS}/stick-${r}-${size}.png`);
         await page.evaluate((s) => window.__ascii.pose(s), pin);
         await sleep(150);
+        // The carried gun is in the hand at the chest (rig addendum §5): its grip above the hip, pointing down.
+        const grip = await page.evaluate((p) => window.__ascii.world.figures.find((g) => g.bold && g.ch === '╦' && g.color[1] === 206 && Math.abs(g.x - p.x) < 3 && Math.abs(g.y - p.y) < 3), pin);
+        assert.ok(grip && grip.y - pin.y < 0.1 && grip.rot > 0.3 && grip.rot < 0.4, `the carried grip at the chest, pointing 20° down (${grip && [grip.x - pin.x, grip.y - pin.y, grip.rot].map((v) => v.toFixed(2))})`);
         await page.screenshot({ path: `${SHOTS}/stick-${r}-${size}-view.png` });
         await page.evaluate(() => window.__ascii.pose(null));
         for (const st of stats) {

@@ -27,7 +27,7 @@ function pushFigure(out, b, t, rm) {
   stickPose(s, t, { reducedMotion: rm, phase: phaseOf(b.id) }, pose);
   for (const g of pose) {
     const color = g.tone === 'flash' ? WHITE : g.tone === 'fx' ? FX : b.color;
-    out.push({ x: s.x + g.dx, y: s.y + g.dy, ch: g.ch, color, a: g.a * alpha, bold: true, strip: false });
+    out.push({ x: s.x + g.dx, y: s.y + g.dy, ch: g.ch, color, a: g.a * alpha, bold: true, strip: false, rot: g.rot, len: g.len, flip: g.flip });
   }
 }
 
@@ -35,7 +35,7 @@ function pushFigure(out, b, t, rm) {
 function pushRow(out, text, x, y, color, a) {
   const chars = Array.from(text);
   const x0 = x - chars.length / 2 + 0.5;
-  for (let i = 0; i < chars.length; i++) if (chars[i] !== ' ') out.push({ x: x0 + i, y, ch: chars[i], color, a, bold: false, strip: false });
+  for (let i = 0; i < chars.length; i++) if (chars[i] !== ' ') out.push({ x: x0 + i, y, ch: chars[i], color, a, bold: false, strip: false, rot: 0, len: 1, flip: false });
 }
 
 // The label stack of one body. Strips (pass 0) all go before any label text (pass 1).
@@ -52,7 +52,7 @@ function pushLabels(out, b, opts, pass) {
   if (pass === 0) {
     if (!say) return;
     const n = Array.from(say).length, x0 = s.x - n / 2 - 1 + 0.5, y = s.y + dir * SAY_DY;
-    for (let j = 0; j < n + 2; j++) out.push({ x: x0 + j, y, ch: ' ', color: STRIP, a: STRIP_A * alpha, bold: false, strip: true });
+    for (let j = 0; j < n + 2; j++) out.push({ x: x0 + j, y, ch: ' ', color: STRIP, a: STRIP_A * alpha, bold: false, strip: true, rot: 0, len: 1, flip: false });
     return;
   }
   if (name) {
@@ -64,8 +64,10 @@ function pushLabels(out, b, opts, pass) {
   if (emote) pushRow(out, emote, s.x, s.y + dir * ((say ? EMOTE_DY : SAY_DY) + lift), b.color, alpha);
 }
 
-// figureGlyphs(bodies, opts, out) → out with { x, y, ch, color, a, bold, strip } appended; (x, y) is the
-// glyph's centre in map cells. bodies: [{ id, state, color, name, say, emote, emoteAge, alpha, me, label }].
+// figureGlyphs(bodies, opts, out) → out with { x, y, ch, color, a, bold, strip, rot, len, flip } appended; (x, y)
+// is the glyph's centre in map cells; rot (radians, clockwise), len (a vertical stretch) and flip (mirrored
+// before turning) come from the pose, and labels are upright (0, 1, false).
+// bodies: [{ id, state, color, name, say, emote, emoteAge, alpha, me, label }].
 // opts: { t, reducedMotion, phone, view: { left, top, cols, rows }, ceiling, memory }.
 export function figureGlyphs(bodies, opts = {}, out = []) {
   const { t = 0, reducedMotion = false, view = null, memory = null } = opts;
