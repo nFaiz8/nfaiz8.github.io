@@ -403,14 +403,15 @@ test('a roll still dodges a bullet at the head row', () => {
   assert.equal(at(0.3), true);
 });
 
-// Final review, Important 2: the roll rate. A roll opens a dodge window only once a roll's length plus its
-// cooldown (less a little jitter) has passed since the last roll that opened one.
+// Final review, Important 2: the roll rate. A roll opens a dodge window only once the cooldown (less a
+// little jitter) has passed since the last open roll ended: its bit going off, or its length, if sooner.
 const rollState = (i) => ({ x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i, a: 0 });
-const dodgeShare = (pattern, seconds = 10, dt = 1 / 60) => {
+const dodgeShare = (pattern, seconds = 10, dt = 1 / 60, back = 0) => {
   const R = ref(), A = F('a', 60.5);
   let inside = 0, n = 0;
   for (let t = 1; t < 1 + seconds; t += dt, n++) {
-    R.state(A, rollState(pattern(t - 1) ? 32 : 0), t, t);
+    const on = pattern(t - 1);
+    R.state(A, rollState(on ? 32 : 0), t, on ? t : t - back); // back: the bit going off claimed as sent earlier
     if (A.rollAt != null && t - A.rollAt >= 0.04 && t - A.rollAt <= 0.26) inside++;
   }
   return inside / n;
@@ -421,7 +422,7 @@ test('a roll started too soon after the last one opens no dodge window', () => {
   R.state(A, rollState(32), 1, 1);
   assert.equal(A.rollAt, 1);
   R.state(A, rollState(0), 1.3, 1.3);
-  R.state(A, rollState(32), 1.4, 1.4); // 0.4 s after the last roll began
+  R.state(A, rollState(32), 1.4, 1.4); // 0.1 s after the last roll ended
   assert.equal(A.rollAt, null, 'too soon: no roll opened');
   R.state(A, rollState(32), 1.5, 1.5);
   assert.equal(A.rollAt, null, 'the same early roll, still held: still none');
@@ -430,15 +431,17 @@ test('a roll started too soon after the last one opens no dodge window', () => {
   shoot(R, S, 1.45, [S, A]);
   assert.ok(run(R, 1.45, 1.7, [S, A]).some((m) => m.t === 'h' && m.id === 'a'));
   R.state(A, rollState(0), 1.7, 1.7);
-  R.state(A, rollState(32), 1.75, 1.75); // 0.75 s on: a roll's length plus its cooldown, less jitter
+  R.state(A, rollState(32), 1.75, 1.75); // 0.45 s after the last roll that dodged ended (1.3)
   assert.equal(A.rollAt, 1.75);
 });
 
 test('toggling the roll bit (0.25 s on, a frame off) dodges no more of the time than honest rolling', () => {
-  const cheat = dodgeShare((t) => t % (0.25 + 1 / 60) < 0.25);
+  const toggle = (t) => t % (0.25 + 1 / 60) < 0.25;
+  const cheat = dodgeShare(toggle), backdated = dodgeShare(toggle, 10, 1 / 60, 0.15);
   const honest = dodgeShare((t) => t % 0.8 < 0.3); // rolls back to back at the real cooldown
   assert.ok(honest > 0.25, `honest ${honest}`);
-  assert.ok(cheat <= 0.33, `cheat ${cheat}`);
+  assert.ok(cheat <= 0.3 / 0.7, `cheat ${cheat}`);
+  assert.ok(backdated <= 0.3 / 0.7, `backdated ${backdated}`);
 });
 
 test('rolling back to back at the real cooldown opens every roll\'s dodge window, at 60 and 30 fps and with jittery arrival', () => {
@@ -460,4 +463,27 @@ test('rolling back to back at the real cooldown opens every roll\'s dodge window
     assert.ok(rolls >= 9, `rolls ${rolls}`);
     assert.equal(opened, rolls, `dt ${dt}, jitter ${jitter}`);
   }
+});
+
+test('a roll ended by a jump after 0.1 s, then a new roll 0.5 s after that end, gets its dodge window', () => {
+  const R = ref(), A = F('a', 60.5);
+  R.state(A, rollState(32), 1, 1);
+  assert.equal(A.rollAt, 1);
+  R.state(A, { ...rollState(0), g: 0, vy: -40 }, 1.1, 1.1); // the jump out of the roll ends it
+  for (let t = 1.2; t < 1.55; t += 0.1) R.state(A, { ...rollState(0), g: 0 }, t, t); // in the air
+  R.state(A, rollState(0), 1.55, 1.55); // landed
+  R.state(A, rollState(32), 1.6, 1.6);
+  assert.equal(A.rollAt, 1.6, 'opened at its start');
+  const S = F('s', 50.5);
+  shoot(R, S, 1.6, [S, A]); // reaches A about 0.08 s into the roll: dodged
+  assert.ok(!run(R, 1.6, 1.85, [S, A]).some((m) => m.t === 'h'));
+});
+
+test('a roll held past its length ends there: the next may open 0.4 s after that, not after the bit goes off', () => {
+  const R = ref(), A = F('a', 60.5);
+  R.state(A, rollState(32), 1, 1);
+  R.state(A, rollState(32), 1.5, 1.5); // held on long after the 0.3 s roll
+  R.state(A, rollState(0), 1.6, 1.6);
+  R.state(A, rollState(32), 1.7, 1.7); // 0.4 s after 1.3, its end
+  assert.equal(A.rollAt, 1.7);
 });

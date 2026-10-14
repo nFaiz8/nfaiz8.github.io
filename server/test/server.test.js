@@ -439,6 +439,24 @@ test('a roll started 0.4 s after the last one began opens no dodge window: the s
   a.close(); b.close();
 });
 
+test('a roll cut short by a jump, then another 0.5 s after it ended, still dodges', async () => {
+  const r = room();
+  const a = await fighter(r, 'A'), b = await fighter(r, 'B');
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
+  await sleepMs(1600);
+  at(a, 20.5, FLOOR); at(b, 30.5, FLOOR);
+  await sleepMs(150);
+  at(b, 30.5, FLOOR, { i: 32 });
+  await sleepMs(100);
+  at(b, 30.5, FLOOR, { g: 0 }); // the jump out of the roll ends it
+  await sleepMs(500);
+  at(b, 30.5, FLOOR, { i: 32 }); // landed and rolling again, 0.5 s after the first roll ended
+  await sleepMs(60);
+  fire(a, 20.5);
+  await assert.rejects(b.next('h', 500));
+  a.close(); b.close();
+});
+
 // Fix round 1: entry, pauses, backdated stamps and the dead.
 test('a backdated state does not open the speed clamp', async () => {
   const r = room();
