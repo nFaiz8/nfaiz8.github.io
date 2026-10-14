@@ -109,3 +109,9 @@ test('loadData asks the server for a fresh photos.json instead of using a cached
 test('indexData passes on the manifest generated time (the multiplayer instance key)', () => {
   assert.equal(indexData({ photos: [], generated: 'g' }).generated, 'g');
 });
+
+test('a photo excluded for the arena is off the colour-room walls but still findable by id', () => {
+  const d = indexData(real, ['IMG_1003']);
+  assert.ok(!d.rooms.some((r) => r.photos.some((p) => p.id === 'IMG_1003')));
+  assert.equal(d.byId.get('IMG_1003').id, 'IMG_1003');
+});

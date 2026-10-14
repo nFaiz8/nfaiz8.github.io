@@ -90,7 +90,7 @@ function planRoom(room, darkroom) {
   return { W, H, frames, doorY, hTop, hBot, darkroom };
 }
 
-export function buildLayout(data, site) {
+export function buildLayout(data, site, { arena = null } = {}) {
   const rects = []; // everything in world coordinates; normalized at the end
   const rooms = [];
 
@@ -112,6 +112,13 @@ export function buildLayout(data, site) {
   const dark = data.rooms.find((r) => r.wing === 'east');
   const darkPlan = dark ? planRoom(dark, true) : null;
   const darkBox = darkPlan && { x: lobby.x + lobby.w - 1 + DARK_CORRIDOR, y: cy - 2 - darkPlan.doorY, w: darkPlan.W + 2, h: darkPlan.H + 2 };
+  // West: the arena, a corridor's length past the lobby's west wall. Its door is the bottom 3 rows of its
+  // east wall, level with the corridor, so you walk in along its floor. It rises far above the lobby, so
+  // the north wing's west-side rooms start beyond it.
+  const arenaBox = arena && {
+    x: lobby.x - DARK_CORRIDOR - (arena.level.cols + 2) + 1, y: cy - arena.level.rows + 1,
+    w: arena.level.cols + 2, h: arena.level.rows + 2,
+  };
 
   // North / south wings
   for (const [wing, dir] of [['north', -1], ['south', 1]]) {
@@ -121,6 +128,7 @@ export function buildLayout(data, site) {
     // cursor = the next room's edge row nearest the lobby (one void row away from the last thing placed)
     const cursor = { west: dir < 0 ? lobby.y - 2 : lobby.y + lobby.h + 1, east: dir < 0 ? lobby.y - 2 : lobby.y + lobby.h + 1 };
     if (darkBox) cursor.east = dir < 0 ? Math.min(cursor.east, darkBox.y - 2) : Math.max(cursor.east, darkBox.y + darkBox.h + 1);
+    if (arenaBox) cursor.west = dir < 0 ? Math.min(cursor.west, arenaBox.y - 2) : Math.max(cursor.west, arenaBox.y + arenaBox.h + 1);
     let far = cursor.west;
     list.forEach((room, i) => {
       const side = i % 2 === 0 ? 'west' : 'east';
@@ -159,6 +167,20 @@ export function buildLayout(data, site) {
       entry: { x: x + 2, y: cy } });
     const sign = 'DARKROOM →';
     labels.push({ x: lobby.x + lobby.w - 3 - sign.length, y: cy - 3, text: sign, role: 'sign' });
+  }
+
+  // West: a short corridor to the arena
+  if (arena) {
+    const { x, y, w, h } = arenaBox;
+    const east = x + w - 1;
+    corridors.push({ x: east, y: cy - 2, w: lobby.x - east + 1, h: 5 });
+    for (let k = -1; k <= 1; k++) {
+      doors.push({ x: lobby.x, y: cy + k });
+      doors.push({ x: east, y: cy + k });
+    }
+    rooms.push({ id: 'arena', name: 'Arena', subtitle: '', hue: null, wing: 'west', x, y, w, h, side: 'west', arena: true, frames: [],
+      entry: { x: east - 1, y: cy + 1 } });
+    labels.push({ x: lobby.x + 2, y: cy - 3, text: '← ARENA', role: 'sign' });
   }
 
   // Normalize to a grid with padding
@@ -216,6 +238,28 @@ export function buildLayout(data, site) {
     if (r.subtitle) labels.push({ x: ox + Math.floor((r.plan.W - r.subtitle.length) / 2), y: ly + 1, text: r.subtitle, role: 'subtitle' });
   });
 
+  // The arena's photo is its whole back wall: one big frame, drawn only in the side view. Its cells stay
+  // floor (not props) so you can walk and jump in front of it.
+  let arenaInfo = null;
+  const ar = rooms.find((r) => r.arena);
+  if (ar) {
+    const index = rooms.indexOf(ar);
+    const { cols, rows } = arena.level;
+    if (arena.photo) {
+      const f = {
+        id: arena.photo.id, photo: arena.photo, room: ar.id, roomIndex: index, cols, rows,
+        x: ar.x, y: ar.y, w: ar.w, h: ar.h, wall: 'n', darkroom: false, backdrop: true,
+        plaque: { x: ar.x + 1, y: ar.y + ar.h, text: '' }, stand: { ...ar.entry }, sway: 0,
+      };
+      ar.frames = [f];
+      frames.push(f);
+    }
+    arenaInfo = {
+      index, x: ar.x, y: ar.y, w: ar.w, h: ar.h, cols, rows, level: arena.level, backdrop: ar.frames[0] || null,
+      entry: ar.entry, door: { x: ar.x + ar.w - 1, y: ar.entry.y - 2 }, floorY: ar.y + ar.h - 1,
+    };
+  }
+
   // Darkroom clotheslines and bench
   const darkroom = rooms.find((r) => r.plan && r.plan.darkroom);
   const lines = [];
@@ -268,7 +312,7 @@ export function buildLayout(data, site) {
 
   // You start just below the desk, facing it.
   const spawn = { x: lobby.x + cx + 0.5, y: Math.min(lobby.y + lobby.h - 3, Math.max(lobby.y + lobby.h - 6, kiosk.stand.y + 3)) + 0.5 };
-  return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk };
+  return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk, arena: arenaInfo };
 }
 
 function wrap(text, width) {

@@ -8,3 +8,7 @@ export const SITE = {
 
 // Real visitors seeing each other (server/ is the Cloudflare Worker). An empty url turns it off.
 export const MULTIPLAYER = { enabled: true, url: 'wss://faiz-live.faiz-live.workers.dev' };
+
+// The arena, west of the lobby: one photo as its back wall (a photo id from photos.json). Change the id and
+// push to change it; enabled: false removes the room.
+export const ARENA = { enabled: true, photo: 'img-4927' };

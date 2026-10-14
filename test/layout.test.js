@@ -84,3 +84,74 @@ test('the lobby has an "all photos" kiosk you can walk up to', () => {
   for (const l of map.labels.filter((l) => l.role === 'about' || l.role === 'name' || l.role === 'tagline'))
     assert.ok(l.y < k.y || l.y >= k.y + k.h || l.x + l.text.length <= k.x || l.x >= k.x + k.w, `doesn't cover "${l.text}"`);
 });
+
+import { parseLevel } from '../src/arena.js';
+
+const json = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
+const level = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
+const withArena = (photoId = 'IMG_1003') => {
+  const d = indexData(json, [photoId]);
+  return buildLayout(d, SITE, { arena: { photo: d.byId.get(photoId) || null, level } });
+};
+
+test('the arena is west of the lobby: 240 × 50 inside, its door in line with a 10-cell corridor', () => {
+  const map = withArena();
+  const a = map.arena, lobby = map.rooms[0], room = map.rooms.at(-1);
+  assert.equal(room.id, 'arena');
+  assert.equal(a.index, map.rooms.length - 1);
+  assert.equal(a.w - 2, 240);
+  assert.equal(a.h - 2, 50);
+  assert.equal(lobby.x - a.door.x, 10, 'corridor length');
+  assert.ok(a.x + a.w <= lobby.x, 'west of the lobby');
+  // Door: the bottom 3 interior rows of the east wall, and the matching cells of the lobby's west wall.
+  for (let k = 0; k < 3; k++) {
+    assert.equal(map.tiles[(a.door.y + k) * map.W + a.door.x], T.DOOR);
+    assert.equal(map.tiles[(a.door.y + k) * map.W + lobby.x], T.DOOR);
+  }
+  assert.equal(a.door.y + 2, a.y + a.h - 2, 'door ends on the bottom interior row');
+  assert.equal(a.floorY, a.y + a.h - 1);
+  assert.deepEqual(a.entry, { x: a.door.x - 1, y: a.floorY - 1 });
+  for (let x = a.door.x + 1; x < lobby.x; x++) assert.ok(isWalkable(map, x, a.door.y + 1), `corridor ${x}`);
+  assert.ok(map.labels.some((l) => l.text === '← ARENA' && l.x > lobby.x && l.x < lobby.x + 12), 'sign inside the lobby by the door');
+});
+
+test('the arena is reachable from spawn, its inside is plain floor, and no room overlaps it', () => {
+  const map = withArena();
+  const a = map.arena;
+  const pass = (x, y) => isWalkable(map, x, y);
+  assert.ok(findPath(map.W, map.H, pass, Math.floor(map.spawn.x), Math.floor(map.spawn.y), a.entry.x, a.entry.y), 'reachable');
+  for (let y = a.y + 1; y < a.y + a.h - 1; y++) for (let x = a.x + 1; x < a.x + a.w - 1; x++) {
+    assert.equal(map.tiles[y * map.W + x], T.FLOOR);
+    assert.equal(map.roomOf[y * map.W + x], a.index);
+  }
+  const { rooms } = map;
+  for (let i = 0; i < rooms.length; i++) for (let j = i + 1; j < rooms.length; j++) {
+    const p = rooms[i], q = rooms[j];
+    const overlap = p.x + 1 < q.x + q.w - 1 && q.x + 1 < p.x + p.w - 1 && p.y + 1 < q.y + q.h - 1 && q.y + 1 < p.y + p.h - 1;
+    assert.ok(!overlap, `${p.id} overlaps ${q.id}`);
+  }
+});
+
+test('the arena photo is one backdrop frame over the whole room, last in the frame order', () => {
+  const map = withArena();
+  const a = map.arena, f = map.frames.at(-1);
+  assert.equal(f, a.backdrop);
+  assert.equal(f.id, 'IMG_1003');
+  assert.equal(f.backdrop, true);
+  assert.deepEqual([f.x, f.y, f.w, f.h, f.cols, f.rows], [a.x, a.y, a.w, a.h, 240, 50]);
+  assert.equal(map.frames.filter((x) => x.id === 'IMG_1003').length, 1, 'not also on a colour-room wall');
+  assert.deepEqual(map.rooms[a.index].frames, [f]);
+});
+
+test('a missing arena photo leaves the room with no backdrop; no arena option is exactly today', () => {
+  const missing = withArena('not-a-photo');
+  assert.ok(missing.arena);
+  assert.equal(missing.arena.backdrop, null);
+  assert.deepEqual(missing.rooms[missing.arena.index].frames, []);
+  const plain = buildLayout(indexData(json), SITE);
+  const old = buildLayout(real, SITE);
+  assert.equal(plain.arena, null);
+  assert.ok(!plain.rooms.some((r) => r.id === 'arena'));
+  assert.ok(!plain.labels.some((l) => l.text === '← ARENA'));
+  assert.deepEqual([...plain.tiles], [...old.tiles]);
+});
