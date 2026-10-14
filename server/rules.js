@@ -120,12 +120,19 @@ export function clampMove(prev, next, gapMs) {
 
 // A sender's ms clock mapped onto the server's. The offset follows the fastest delivery seen in each
 // 5 s window, and a clock running ahead can claim at most 300 ms.
-export const senderClock = () => ({ base: null, lo: Infinity, loAt: 0 });
+export const senderClock = () => ({ base: null, lo: Infinity, raw: Infinity, loAt: 0 });
 export function sentAt(clock, ts, nowMs) {
   const off = nowMs - ts;
   if (clock.base === null) { clock.base = off; clock.loAt = nowMs; }
+  clock.raw = Math.min(clock.raw, off);
   if (off >= clock.base - 300) clock.lo = Math.min(clock.lo, off); // a stamp from the far future says nothing about the network
-  if (nowMs - clock.loAt >= 5000) { clock.base = clock.lo; clock.lo = Infinity; clock.loAt = nowMs; }
+  if (nowMs - clock.loAt >= 5000) {
+    if (Number.isFinite(clock.lo)) clock.base = clock.lo;
+    else clock.base += Math.max(-300, Math.min(300, clock.raw - clock.base)); // a whole window refused: follow the offset, 300 ms at a time
+    clock.lo = Infinity;
+    clock.raw = Infinity;
+    clock.loAt = nowMs;
+  }
   return Math.min(clock.base + ts, nowMs + 300);
 }
 

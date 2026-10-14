@@ -168,3 +168,27 @@ test('a sender clock running ahead is held to 300 ms', () => {
   for (let t = 1200; t < 8000; t += 67) sentAt(clk, t - 1000 + 20, t); // the network gets 20 ms faster
   assert.ok(Math.abs(sentAt(clk, 7000, 8020) - 8000) <= 21);
 });
+
+test('a sender clock that jumps ahead and stays there is followed again', () => {
+  const clk = senderClock();
+  for (let t = 1000; t < 1500; t += 67) sentAt(clk, t - 1000, t);
+  let last;
+  for (let t = 1500; t <= 31500; t += 67) last = sentAt(clk, t, t) - t; // offset is now 1000 ms ahead
+  assert.ok(Math.abs(last) <= 1, `settled at ${last}`);
+});
+
+test('a client clock running 8% fast does not stick at +300', () => {
+  const clk = senderClock();
+  let last;
+  for (let t = 1000; t <= 41000; t += 67) last = sentAt(clk, Math.round((t - 1000) * 1.08), t) - t;
+  assert.ok(last <= 300 && last >= -1000, `got ${last}`);
+  assert.notEqual(clk.base, Infinity);
+});
+
+test('a quiet window does not break the sender clock', () => {
+  const clk = senderClock();
+  sentAt(clk, 0, 1000);
+  assert.equal(sentAt(clk, 20000, 21000), 21000, 'first sample after a long quiet gap');
+  for (let t = 21067; t < 30000; t += 67) sentAt(clk, t - 1000, t);
+  assert.ok(Math.abs(sentAt(clk, 30000, 31000) - 31000) <= 1);
+});
