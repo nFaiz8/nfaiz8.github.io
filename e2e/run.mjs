@@ -10,7 +10,7 @@ const check = async (name, fn) => {
 };
 
 await withBrowser(async ({ page, url, errors }) => {
-  for (const r of ['canvas', 'gl']) {
+  for (const r of ['museum', 'canvas', 'gl']) {
     await page.goto(`${url}?r=${r}`);
     await ready(page);
     await check(`${r}: starts with the requested renderer`, async () => {
@@ -53,7 +53,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(after.r, 'gl');
     assert.ok(Math.abs(after.x - before.x) < 0.01 && Math.abs(after.y - before.y) < 0.01, 'position kept');
   });
-  for (const r of ['canvas', 'gl']) {
+  for (const r of ['museum', 'canvas', 'gl']) {
     await check(`${r}: opening a photo resolves into the full-size image and closing returns to the room`, async () => {
       await page.goto(`${url}?r=${r}`);
       await ready(page);
@@ -283,7 +283,7 @@ await withBrowser(async ({ page, url, errors }) => {
     return { x: (x0 - left) * m.cw, y: (y0 - top) * m.ch, width: w * m.cw, height: h * m.ch };
   }, x0, y0, w, h);
   // The train level (train level addendum): the side view is two subway cars in a tunnel, drawn as glyphs.
-  for (const r of ['canvas', 'gl']) {
+  for (const r of ['museum', 'canvas', 'gl']) {
     await check(`${r}: the arena is the train, seen from outside too; inside, the floor you stand on is warm white over the lit car; no photo drawn`, async () => {
       // The train held at one moment, a station lamp over the floor strip measured below: the passing lamps
       // move the light along the floor (its 95th percentile went from 164 to 239 across the cycle), so an
@@ -374,7 +374,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'L does nothing');
   });
   for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
-    for (const r of ['canvas', 'gl']) {
+    for (const r of ['museum', 'canvas', 'gl']) {
       await check(`${r} on a ${size}: the train with the deagle and the sniper (screenshots), no ? glyphs`, async () => {
         await page.setViewport(vp);
         await page.goto('about:blank');
@@ -393,7 +393,7 @@ await withBrowser(async ({ page, url, errors }) => {
   }
   // Phone framing (fix round 1 ruling): the sniper shows the whole room, its spare rows above it, so a figure on a
   // roof is clear of the top HUD; mid-room nothing pushes the view up for the pad, which only has clusters at the ends.
-  for (const r of ['canvas', 'gl']) {
+  for (const r of ['museum', 'canvas', 'gl']) {
     await check(`${r} on a phone with the sniper: a figure on a roof is clear of the top HUD; mid-floor, of the pad`, async () => {
       await page.setViewport({ width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true });
       await page.goto('about:blank');
@@ -516,7 +516,7 @@ await withBrowser(async ({ page, url, errors }) => {
     }
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   });
-  for (const r of ['canvas', 'gl']) {
+  for (const r of ['museum', 'canvas', 'gl']) {
     await check(`${r}: the arena photo's large image is never fetched to draw the arena (E opens it, and loads it then)`, async () => {
       const hits = [];
       const onReq = (q) => { if (/\/hi\//.test(q.url())) hits.push(q.url()); };
@@ -1052,7 +1052,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.deepEqual(errors, [], 'no page errors');
   });
   for (const [size, vp] of [['computer', DESKTOP], ['phone', PHONE]]) {
-    for (const r of ['canvas', 'gl']) {
+    for (const r of ['museum', 'canvas', 'gl']) {
       await check(`${r} on a ${size}: the fight with the dummy, mid-fire and holding the sniper (screenshots), no ? glyphs`, async () => {
         const s = await enterFight(r, vp);
         await place(s.dummy.x - 10, s.floor, 1);
@@ -1110,7 +1110,7 @@ await withBrowser(async ({ page, url, errors }) => {
     return best;
   };
   for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
-    for (const r of ['canvas', 'gl']) {
+    for (const r of ['museum', 'canvas', 'gl']) {
       await check(`${r} on a ${size}: my stick figure in every pose, amber with a dark outline over the brightest part of the train`, async () => {
         await page.setViewport(vp);
         await page.goto('about:blank');
@@ -1207,7 +1207,7 @@ await withBrowser(async ({ page, url, errors }) => {
     }
   }
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
-  for (const r of ['canvas', 'gl']) {
+  for (const r of ['museum', 'canvas', 'gl']) {
     await check(`${r}: running, the figure glides (it moves one way, mostly by fractions of a cell); top-down I'm still @`, async () => {
       await page.goto('about:blank');
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);

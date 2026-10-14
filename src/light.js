@@ -54,6 +54,22 @@ function hueColor(h) {
   return [0, 8, 4].map((n) => 0.88 + 0.12 * f(n));
 }
 
+// A ceiling lamp at the middle of a room can land inside a wall face or an island (layout.js), which
+// don't block light, so it would shine out of the wall. It moves out over the open floor of the nearest
+// aisle, a few rows from the wall; a lamp already over open floor stays where it is.
+function openRow(map, lx, ly) {
+  const x = Math.floor(lx), y = Math.floor(ly);
+  const open = (yy) => yy >= 0 && yy < map.H && (map.tiles[yy * map.W + x] === T.FLOOR || map.tiles[yy * map.W + x] === T.DOOR);
+  if (x < 0 || x >= map.W || open(y)) return ly;
+  for (let d = 1; d < map.H; d++) for (const dir of [-1, 1]) {
+    if (!open(y + dir * d)) continue;
+    let ny = y + dir * d;
+    for (let k = 0; k < 3 && open(ny + dir); k++) ny += dir;
+    return ny + 0.5;
+  }
+  return ly;
+}
+
 // The fixed lights of the building, derived from the layout (deterministic).
 export function staticLights(map) {
   const lights = [];
@@ -69,7 +85,8 @@ export function staticLights(map) {
     const tint = i > 0 && r.hue != null ? hueColor(r.hue) : [1.0, 0.9, 0.72];
     const n = Math.max(1, Math.round(r.w / 48));
     for (let k = 0; k < n; k++) {
-      lights.push({ x: r.x + (r.w * (k + 0.5)) / n, y: cy, radius: Math.max(30, r.h * 1.4), color: tint, intensity: 0.42 });
+      const x = r.x + (r.w * (k + 0.5)) / n;
+      lights.push({ x, y: openRow(map, x, cy), radius: Math.max(30, r.h * 1.4), color: tint, intensity: 0.42 });
     }
   });
   // Corridor lamps: a regular grid over floor that isn't inside any room.

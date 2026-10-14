@@ -1,3 +1,12 @@
+// The building, in the 3/4 view: a wall that runs east-west shows its face, a band you look at, and the
+// prints hang upright on it. A colour room has its north wall's face and, with 4+ photos, an island (a
+// freestanding wall) whose face looks back at you: half the prints on each. The lobby's north wall shows a
+// short face too. Digital photos fill the north wing and film the south, both split into colour rooms;
+// black & white from both hangs in the darkroom.
+//
+// For comparing, in the address: ?wings=color (warm north, cool south, film in the darkroom), ?view=flat
+// (the plan view: prints on north and south walls, islands hung on both faces; ?islands=0 drops them).
+//
 // Rooms → a tile map. Deterministic: the same data always gives the same building.
 //
 //            north wing (Medium Format)
@@ -11,6 +20,36 @@
 
 import { blockText } from './blockfont.js';
 import { plaqueText } from './data.js';
+import { groupByColor } from './colors.js';
+
+const PARAMS = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+export const VIEW = PARAMS.get('view') === 'flat' ? 'flat' : 'face';
+const ISLANDS = PARAMS.get('islands') !== '0';
+export const WINGS = PARAMS.get('wings') === 'color' ? 'color' : 'format';
+
+// Digital north, film south, both by colour. groupByColor always sends film to the darkroom, so the film
+// is grouped as if it weren't (then given back as itself).
+function byFormat(data) {
+  const all = data.rooms.flatMap((r) => r.photos);
+  const digital = all.filter((p) => p.category !== 'film'), film = all.filter((p) => p.category === 'film');
+  // black & white from both (each group's 'silver' room) hangs together in the darkroom
+  const bw = [];
+  const rooms = [];
+  for (const r of groupByColor(digital)) if (r.id === 'silver') bw.push(...r.photos); else rooms.push({ ...r, wing: 'north' });
+  const own = new Map(film.map((p) => [p.id, p]));
+  for (const r of groupByColor(film.map((p) => ({ ...p, category: 'film-as-colour' })))) {
+    const photos = r.photos.map((p) => own.get(p.id));
+    if (r.id === 'silver') { bw.push(...photos); continue; }
+    rooms.push({ ...r, id: `film-${r.id}`, name: `${r.name} Film`, wing: 'south', photos,
+      subtitle: `${photos.length} film print${photos.length === 1 ? '' : 's'}` });
+  }
+  rooms.push({ id: 'darkroom', name: 'Darkroom', subtitle: `${bw.length} black & white prints · safelight on`, wing: 'east', hue: 0, photos: bw });
+  return { ...data, rooms };
+}
+const FWALK = 8; // rows of open floor in front of a face
+const SHORT = 3; // the lobby's north wall face
+const IWALK = 7; // rows of open floor in each aisle of a room with an island
+const IEND = 5; // open floor at each end of an island, so you can walk round it
 
 export const T = { VOID: 0, FLOOR: 1, WALL: 2, DOOR: 3, PROP: 4 };
 export const CELL_ASPECT = 2; // cell height / width
@@ -48,6 +87,8 @@ function planRoom(room, darkroom) {
     const { cols, rows } = frameSize(p);
     return { photo: p, cols, rows, w: cols + 2, h: rows + 3 }; // box + plaque
   });
+  if (VIEW === 'face' && !darkroom) return planFaceRoom(room, items);
+  if (ISLANDS && !darkroom && items.length >= 4) return planIslandRoom(room, items);
   const walls = [[], []];
   const width = [0, 0];
   for (const it of items) {
@@ -90,7 +131,97 @@ function planRoom(room, darkroom) {
   return { W, H, frames, doorY, hTop, hBot, darkroom };
 }
 
+// The 3/4 view: the north wall's face (a band: a lamp row, the prints, their plaques, a skirting), floor
+// in front of it, then (4+ photos) an island: its top seen from above (a wall row) over its face, and more
+// floor. Prints split between the two faces by width; each face is as tall as its tallest print needs.
+function planFaceRoom(room, items) {
+  const split = items.length >= 4;
+  const lists = split ? [[], []] : [[]], width = lists.map(() => 0);
+  items.map((it, k) => ({ it, k })).sort((a, b) => b.it.w - a.it.w).forEach(({ it, k }) => {
+    const i = width.indexOf(Math.min(...width));
+    lists[i].push({ ...it, k });
+    width[i] += it.w + GAP;
+  });
+  lists.forEach((l) => l.sort((a, b) => a.k - b.k));
+  const span = (i) => Math.max(0, width[i] - GAP);
+  const islandW = split ? span(1) + 4 : 0;
+  const titleW = Math.max(room.name.length, (room.subtitle || '').length) + 10;
+  const W = Math.max(36, titleW, span(0) + 2 * MARGIN, split ? islandW + 2 * IEND : 0);
+  const tallest = (l) => Math.max(...l.map((it) => it.rows + 2));
+  const faceH = (l) => tallest(l) + 4; // lamp row, print, plaque, skirting
+  const frames = [], faces = [], caps = [];
+  const hang = (list, faceY, faceX, faceW) => {
+    const total = list.reduce((s, i) => s + i.w, 0) + GAP * Math.max(0, list.length - 1);
+    let x = faceX + Math.floor((faceW - total) / 2);
+    const fh = faceH(list);
+    for (const it of list) {
+      const top = faceY + 1 + Math.floor((tallest(list) - (it.rows + 2)) / 2);
+      frames.push({
+        photo: it.photo, cols: it.cols, rows: it.rows, x, y: top, w: it.w, h: it.rows + 2,
+        plaque: { x: x + 1, y: top + it.rows + 2, text: fitPlaque(it.photo, it.cols) },
+        stand: { x: x + Math.floor(it.w / 2), y: faceY + fh + 1 }, wall: 'n',
+      });
+      x += it.w + GAP;
+    }
+    return fh;
+  };
+  const hA = hang(lists[0], 0, 0, W);
+  faces.push({ x: 0, y: 0, w: W, h: hA, kind: 'wall' });
+  let H = hA + FWALK + 2;
+  if (split) {
+    const capY = hA + FWALK, ix = Math.floor((W - islandW) / 2);
+    const hB = hang(lists[1], capY + 1, ix, islandW);
+    caps.push({ x: ix, y: capY, w: islandW, h: 1 });
+    faces.push({ x: ix, y: capY + 1, w: islandW, h: hB, kind: 'island' });
+    H = capY + 1 + hB + FWALK;
+  }
+  return { W, H, frames, doorY: hA + Math.floor(FWALK / 2) - 1, hTop: hA, hBot: 0, darkroom: false, faces, caps };
+}
+
+// Four rows of prints, top to bottom: the north wall; the island's north face; its south face; the south
+// wall. The island is a 2-row wall, so a lamp can sit over each face's prints.
+function planIslandRoom(room, items) {
+  const lists = [[], [], [], []], width = [0, 0, 0, 0];
+  items.map((it, k) => ({ it, k })).sort((a, b) => b.it.w - a.it.w).forEach(({ it, k }) => {
+    const i = width.indexOf(Math.min(...width));
+    lists[i].push({ ...it, k });
+    width[i] += it.w + GAP;
+  });
+  lists.forEach((l) => l.sort((a, b) => a.k - b.k)); // keep the photos' order within a row
+  const span = (i) => Math.max(0, width[i] - GAP);
+  const islandW = Math.max(span(1), span(2)) + 4;
+  const titleW = Math.max(room.name.length, (room.subtitle || '').length) + 10;
+  const W = Math.max(36, titleW, span(0) + 2 * MARGIN, span(3) + 2 * MARGIN, islandW + 2 * IEND);
+  const hgt = (i) => Math.max(0, ...lists[i].map((it) => it.h));
+  const hN = hgt(0), hIN = hgt(1), hIS = hgt(2), hS = hgt(3);
+  const spineY = hN + IWALK + hIN;
+  const yS = spineY + 2 + hIS + IWALK;
+  const H = yS + hS;
+  const frames = [];
+  lists.forEach((list, li) => {
+    const total = list.reduce((s, i) => s + i.w, 0) + GAP * Math.max(0, list.length - 1);
+    let x = Math.floor((W - total) / 2);
+    for (const it of list) {
+      // rows 0 and 2 hang below a wall (plaque under the print); rows 1 and 3 hang above one (plaque over it)
+      const top = li === 0 ? 0 : li === 1 ? spineY - (it.rows + 2) : li === 2 ? spineY + 2 : H - (it.rows + 2);
+      const below = li === 0 || li === 2;
+      const standY = li === 0 ? hN + 1 : li === 1 ? hN + IWALK - 2 : li === 2 ? spineY + 2 + hIS + 1 : yS - 2;
+      frames.push({
+        photo: it.photo, cols: it.cols, rows: it.rows, x, y: top, w: it.w, h: it.rows + 2,
+        plaque: { x: x + 1, y: below ? top + it.rows + 2 : top - 1, text: fitPlaque(it.photo, it.cols) },
+        stand: { x: x + Math.floor(it.w / 2), y: standY },
+        wall: below ? 'n' : 's', island: li === 1 || li === 2,
+      });
+      x += it.w + GAP;
+    }
+  });
+  const doorY = hN + Math.floor(IWALK / 2) - 1;
+  const islands = [{ x: Math.floor((W - islandW) / 2), y: spineY, w: islandW, h: 2 }];
+  return { W, H, frames, doorY, hTop: hN, hBot: hS, darkroom: false, islands };
+}
+
 export function buildLayout(data, site, { arena = null } = {}) {
+  if (WINGS === 'format') data = byFormat(data);
   const rects = []; // everything in world coordinates; normalized at the end
   const rooms = [];
 
@@ -150,7 +281,7 @@ export function buildLayout(data, site, { arena = null } = {}) {
     const wallY = dir < 0 ? lobby.y : lobby.y + lobby.h - 1;
     for (let k = 1; k <= CORRIDOR; k++) doors.push({ x: cor.x + k, y: wallY });
     const signY = dir < 0 ? lobby.y + 2 : lobby.y + lobby.h - 3;
-    const sign = dir < 0 ? '↑   warm   ↑' : '↓   cool   ↓';
+    const sign = WINGS === 'format' ? (dir < 0 ? '↑  digital  ↑' : '↓   film   ↓') : dir < 0 ? '↑   warm   ↑' : '↓   cool   ↓';
     labels.push({ x: cx - Math.floor(sign.length / 2), y: signY, text: sign, role: 'sign' });
   }
 
@@ -213,6 +344,30 @@ export function buildLayout(data, site, { arena = null } = {}) {
   corridors.forEach((c) => fillRect(c, -1));
   rooms.forEach((r, i) => fillRect(r, i));
   doors.forEach((d) => { tiles[at(d.x, d.y)] = T.DOOR; });
+  const faces = []; // the 3/4 view's wall faces, in world cells: { x, y, w, h, kind, room }
+  rooms.forEach((r, ri) => {
+    if (!r.plan) return;
+    for (const c of r.plan.caps || []) for (let x = c.x; x < c.x + c.w; x++) { const i = at(r.x + 1 + x, r.y + 1 + c.y); tiles[i] = T.WALL; roomOf[i] = -1; }
+    for (const f of r.plan.faces || []) {
+      faces.push({ x: r.x + 1 + f.x, y: r.y + 1 + f.y, w: f.w, h: f.h, kind: f.kind, room: ri });
+      for (let y = f.y; y < f.y + f.h; y++) for (let x = f.x; x < f.x + f.w; x++) tiles[at(r.x + 1 + x, r.y + 1 + y)] = T.PROP;
+    }
+  });
+  if (VIEW === 'face') {
+    // the lobby's north wall: a short face wherever it is wall (the corridor's opening stays open)
+    let run = null;
+    const flush = () => { if (run) { faces.push(run); run = null; } };
+    for (let x = lobby.x + 1; x < lobby.x + lobby.w - 1; x++) {
+      if (tiles[at(x, lobby.y)] === T.WALL) {
+        for (let y = lobby.y + 1; y <= lobby.y + SHORT; y++) tiles[at(x, y)] = T.PROP;
+        if (run) run.w++; else run = { x, y: lobby.y + 1, w: 1, h: SHORT, kind: 'short', room: 0 };
+      } else flush();
+    }
+    flush();
+  }
+  rooms.forEach((r) => (r.plan && r.plan.islands || []).forEach((is) => {
+    for (let y = is.y; y < is.y + is.h; y++) for (let x = is.x; x < is.x + is.w; x++) { const i = at(r.x + 1 + x, r.y + 1 + y); tiles[i] = T.WALL; roomOf[i] = -1; }
+  }));
 
   // Frames → world coordinates
   const frames = [];
@@ -222,7 +377,7 @@ export function buildLayout(data, site, { arena = null } = {}) {
     r.frames = r.plan.frames.map((f) => {
       const frame = {
         id: f.photo.id, photo: f.photo, room: r.id, roomIndex: ri, cols: f.cols, rows: f.rows,
-        x: f.x + ox, y: f.y + oy, w: f.w, h: f.h, wall: f.wall, darkroom: r.plan.darkroom,
+        x: f.x + ox, y: f.y + oy, w: f.w, h: f.h, wall: f.wall, island: !!f.island, darkroom: r.plan.darkroom,
         plaque: { ...f.plaque, x: f.plaque.x + ox, y: f.plaque.y + oy },
         stand: { x: f.stand.x + ox, y: f.stand.y + oy },
         sway: ((frames.length * 2654435761) % 1000) / 1000, // stable per-frame phase
@@ -313,7 +468,7 @@ export function buildLayout(data, site, { arena = null } = {}) {
 
   // You start just below the desk, facing it.
   const spawn = { x: lobby.x + cx + 0.5, y: Math.min(lobby.y + lobby.h - 3, Math.max(lobby.y + lobby.h - 6, kiosk.stand.y + 3)) + 0.5 };
-  return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk, arena: arenaInfo };
+  return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk, arena: arenaInfo, faces, view: VIEW };
 }
 
 function wrap(text, width) {

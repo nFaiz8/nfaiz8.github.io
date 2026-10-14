@@ -14,6 +14,7 @@ import { createWorld, step, walkTo, frameAtCell, teleport, roomAt, enterSide, ex
 import { createInput } from './input.js';
 import { createCanvasRenderer } from './render/canvas.js';
 import { createGlRenderer } from './render/gl.js';
+import { createMuseumRenderer } from './render/museum.js';
 import { C } from './render/palette.js';
 import { figureGlyphs } from './render/figures.js';
 import { createMotionMemory } from './stick.js';
@@ -41,7 +42,8 @@ const debug = new URLSearchParams(location.search).has('debug');
 const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 // ?bots=30 (localhost only): that many local stickmen in the arena, cycling through every act.
 const botCount = onLocalhost ? Math.min(100, Math.max(0, parseInt(new URLSearchParams(location.search).get('bots'), 10) || 0)) : 0;
-const RENDERERS = { canvas: createCanvasRenderer, gl: createGlRenderer };
+const RENDERERS = { museum: createMuseumRenderer, canvas: createCanvasRenderer, gl: createGlRenderer };
+const RENDERER_KEY = 'ascii-renderer-2'; // new key: everyone starts in the museum look, whatever they picked before
 
 let map, world, renderer, input, viewer, mapView, grid, pvp = null, fightHud = null;
 
@@ -89,7 +91,7 @@ function setRenderer(name) {
   long.className = 'long';
   long.textContent = ` ${renderer.name}`;
   rendererBtn.replaceChildren('[R]', long);
-  try { localStorage.setItem('ascii-renderer', name); } catch {}
+  try { localStorage.setItem(RENDERER_KEY, name); } catch {}
 }
 
 function resize() {
@@ -697,8 +699,8 @@ async function boot() {
     },
   });
   let pick = new URLSearchParams(location.search).get('r');
-  if (!RENDERERS[pick]) { try { pick = localStorage.getItem('ascii-renderer'); } catch {} }
-  setRenderer(RENDERERS[pick] ? pick : 'gl'); // WebGL by default; falls back to canvas if unavailable
+  if (!RENDERERS[pick]) { try { pick = localStorage.getItem(RENDERER_KEY); } catch {} }
+  setRenderer(RENDERERS[pick] ? pick : 'museum'); // the museum look by default; R cycles to the canvas and WebGL renderers
   addEventListener('resize', resize);
   rendererBtn.addEventListener('click', () => onKey({ code: 'KeyR' }));
   mapView = createMap(map, {

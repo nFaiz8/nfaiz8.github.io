@@ -66,15 +66,16 @@ test('movement accelerates and glides to a stop instead of starting and stopping
 });
 
 test('walking into the edge of a doorway slides you through it', () => {
+  // the lobby's south door, or its north one when there is no south wing (a wing with no rooms has no door)
   const lobby = map.rooms[0];
-  const y = lobby.y + lobby.h - 1;
-  let left = -1;
-  for (let x = lobby.x; x < lobby.x + lobby.w; x++) if (isWalkable(map, x, y)) { left = x; break; }
-  assert.ok(left > 0, 'the lobby has a south door');
+  const doorIn = (y) => { for (let x = lobby.x; x < lobby.x + lobby.w; x++) if (isWalkable(map, x, y)) return x; return -1; };
+  const south = doorIn(lobby.y + lobby.h - 1) > 0, dir = south ? 1 : -1, y = south ? lobby.y + lobby.h - 1 : lobby.y;
+  const left = doorIn(y);
+  assert.ok(left > 0, 'the lobby has a door to a wing');
   const w = createWorld(map);
-  teleport(w, left - 0.05, y - 3.5); // the player's box overlaps the door frame by a third of a cell
-  run(w, 2, { x: 0, y: 1 });
-  assert.ok(w.player.y > y + 1, 'went through the door instead of snagging on its edge');
+  teleport(w, left - 0.05, y - dir * 3.5 + (south ? 0 : 1)); // the player's box overlaps the door frame by a third of a cell
+  run(w, 2, { x: 0, y: dir });
+  assert.ok(south ? w.player.y > y + 1 : w.player.y < y - 1, 'went through the door instead of snagging on its edge');
 });
 
 test('click paths are pulled straight: few legs, each one walkable', () => {
