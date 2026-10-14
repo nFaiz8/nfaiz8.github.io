@@ -38,7 +38,7 @@ export function createCanvasRenderer() {
     viewW = w; viewH = h; dpr = ratio;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    m = cellMetrics(w);
+    m = cellMetrics(w, h);
     chunks.clear();
     return m;
   }

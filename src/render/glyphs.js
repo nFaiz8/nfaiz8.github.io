@@ -3,9 +3,11 @@
 
 export const FONT_FAMILY = 'Menlo, "SF Mono", Consolas, "DejaVu Sans Mono", monospace';
 
-export function cellMetrics(viewW) {
+const MIN_ROWS = 30; // so a short screen (a phone on its side) isn't a close-up of a few rows
+
+export function cellMetrics(viewW, viewH) {
   const targetCols = viewW >= 900 ? 150 : 52;
-  const cw = Math.max(6, Math.floor(viewW / targetCols));
+  const cw = Math.max(6, Math.floor(Math.min(viewW / targetCols, viewH ? viewH / (2 * MIN_ROWS) : Infinity)));
   const ch = cw * 2;
   const fontPx = Math.floor(Math.min(ch * 0.8, cw / 0.6));
   return { cw, ch, fontPx, font: `${fontPx}px ${FONT_FAMILY}` };

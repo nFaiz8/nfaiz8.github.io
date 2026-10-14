@@ -193,7 +193,7 @@ export function createGlRenderer() {
     viewW = w; viewH = h; dpr = ratio;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    m = cellMetrics(w);
+    m = cellMetrics(w, h);
     buildAtlas();
     buildStaticGlyphs();
     // Scene covers the view plus a cell of margin on each side
