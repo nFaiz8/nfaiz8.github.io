@@ -159,9 +159,10 @@ body { font: 13px/1.4 var(--mono); }
 .pad .pad-jump { min-width: 96px; }
 .pad .pad-drop, .pad .pad-hit { min-width: 56px; min-height: 56px; }
 body.pad-on .chat-log { bottom: 100px; }
-/* On a phone in the arena the camera keeps the floor at the bottom, where the caption would cover me (and
-   there's no E to press): the pad's screen goes without it. */
-body.pad-on .caption { display: none; }
+/* On a phone in the arena the floor is at the bottom, where the caption would cover the fight: it moves up
+   to the top left, under the HUD bar (its ♥ still tappable), clear of the fight HUD; notes go below it. */
+body.pad-on .caption { left: max(16px, env(safe-area-inset-left)); top: 44px; bottom: auto; transform: none; max-width: calc(100vw - 240px); }
+body.pad-on .note { top: 84px; }
 
 /* In the arena's side view the top bar's muted text sits over the sky: give it a dark scrim. */
 body.side .hud { background: linear-gradient(#07080bcc, transparent); }

@@ -187,11 +187,34 @@ try {
       let top = y0;
       for (let i = 0; i < 15; i++) { top = Math.min(top, await yOf()); await sleep(60); }
       assert.ok(top < y0 - 2, `the jump is seen (${y0} → ${top})`);
+      // B runs away from where B came in, then B's connection drops: on A's screen B fades where B was,
+      // never back at where B's last position message (from before the fight) put them.
+      await b.keyboard.down('ArrowLeft'); await sleep(700); await b.keyboard.up('ArrowLeft');
+      await sleep(1000);
+      const bx = (await bodyOf(bId)).x;
+      const xs = a.evaluate((id) => new Promise((resolve) => {
+        const out = [], t0 = performance.now();
+        const tick = () => {
+          const body = (window.__ascii.world.bodies || []).find((x) => x.id === id);
+          if (body) out.push(body.state.x);
+          if (performance.now() - t0 < 2000) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }), bId);
+      await sleep(100);
+      await b.evaluate(() => window.__ascii.live().net.pause());
+      const drawnAt = await xs;
+      assert.ok(Math.abs(bx - (entry.x - 10 + 0.5)) > 4, `B ran away from the entry spot (${bx})`);
+      assert.ok(drawnAt.every((x) => Math.abs(x - bx) < 1), `B is drawn only where B was (${bx.toFixed(1)}): ${[...new Set(drawnAt.map((x) => x.toFixed(1)))].join(' ')}`);
+      await b.evaluate(() => window.__ascii.live().net.resume());
+      await a.waitForFunction(() => window.__ascii.live().peers.count() === 1, { timeout: 10000 });
+      // From outside, nobody inside is drawn: B inside isn't an @, B outside is.
+      const atsAre = (n) => a.waitForFunction((n) => window.__ascii.world.entities.filter((e) => e.glyph === '@').length === n, { timeout: 5000 }, n);
       await a.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
       await sleep(300);
-      assert.equal(await ats(a), 1, 'only my own @ outside');
+      await atsAre(1);
       await b.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x + 4, window.__ascii.map.spawn.y));
-      await a.waitForFunction(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length === 2, { timeout: 5000 });
+      await atsAre(2);
     });
     await check('stopping the server leaves both galleries walkable', async () => {
       dev.kill();

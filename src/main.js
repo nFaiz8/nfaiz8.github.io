@@ -25,6 +25,7 @@ import { createGrid } from './grid.js';
 const stage = document.getElementById('stage');
 const captionEl = document.getElementById('caption');
 const noteEl = document.getElementById('note');
+const fightSr = document.getElementById('fight-sr');
 const rendererBtn = document.getElementById('renderer-btn');
 const debugEl = document.getElementById('debug');
 document.getElementById('hud-name').textContent = SITE.name;
@@ -240,9 +241,11 @@ function controls(t) {
   const s = input.state();
   if (!pvp || world.mode !== 'side') return s;
   const m = input.mouse;
-  return pvp.control({ ...s, strikes: input.takeStrikes(), roll: input.takeRoll(), aimUp: s.jump, aimDown: s.down,
+  // W/↑ tilt the shot up (and still jump); Space only jumps. On the pad, FIRE with JUMP held shoots up.
+  return pvp.control({ ...s, strikes: input.takeStrikes(), roll: input.takeRoll(), aimUp: s.y < 0 || padJump, aimDown: s.down,
     mouse: m.on ? { on: true, ...renderer.pointAt(world, m.px, m.py) } : null }, t);
 }
+let padJump = false; // the pad's JUMP is held
 // In the fight while the side view is up and nothing covers it (PvP spec §8). The tilt out, a photo, the map,
 // the grid or a hidden tab take me out (al); coming back puts me in again (ae, with fresh health).
 let keysNoted = false, linkUp = false; // linkUp: this connection's welcome came (so fightOk is its own)
@@ -283,7 +286,7 @@ function loop(now) {
   if (padEl.hidden === showPad) {
     padEl.hidden = !showPad;
     document.body.classList.toggle('pad-on', showPad);
-    if (!showPad) input.clear();
+    if (!showPad) { input.clear(); padJump = false; }
   }
   world.people = [];
   const att = map.kiosk.attendant;
@@ -303,7 +306,12 @@ function loop(now) {
   // others get their name, chat and emote from live.
   const fight = side && pvp && pvp.entered ? pvp.bodies(t) : [];
   const list = live ? live.peers.list(t) : [];
-  for (const b of fight) if (!b.me && !b.dummy) bodies.push(fighterBody(b, list.find((p) => p.id === b.id)));
+  for (const b of fight) {
+    if (b.me || b.dummy) continue;
+    bodies.push(fighterBody(b, list.find((p) => p.id === b.id)));
+    const last = live && live.peers.get(b.id);
+    wasFighting.set(b.id, { state: b.state, at: t, pAt: last ? last.track.at(-1).t : -Infinity });
+  }
   // Hearts: top-down they're entities; in the side view they're labels, drawn over every figure.
   const hearts = side ? [] : world.entities;
   if (live) {
@@ -327,7 +335,19 @@ function loop(now) {
     if (side) {
       // Anyone else inside (an old page, or no fight with the server) from their positions alone.
       const fighting = new Set(bodies.map((b) => b.id));
-      for (const p of shown) if (!fighting.has(p.id)) bodies.push(peerBody(p));
+      for (const p of list) {
+        if (fighting.has(p.id)) continue;
+        // Someone who just stopped fighting (left, closed the tab, or the connection went) has no position
+        // newer than before the fight: they stay where they last fought, and fade there.
+        const was = wasFighting.get(p.id);
+        if (was && !caughtUp(p, was)) {
+          if ((p.alpha < 1 || t - was.at < WAS_FIGHTING_MS) && was.state.act !== 'dead') bodies.push(stillBody(p, was.state));
+          continue;
+        }
+        if (was) wasFighting.delete(p.id);
+        if (inside(p)) bodies.push(peerBody(p));
+      }
+      for (const id of wasFighting.keys()) if (!list.some((p) => p.id === id)) wasFighting.delete(id);
       const at = new Map(bodies.map((b) => [b.id, b.state]));
       posOf = (id) => at.get(id) || null;
     } else world.entities.push(...peerEntities(shown, { reducedMotion, muted }));
@@ -468,6 +488,17 @@ function fighterBody(b, p) {
   return { id: b.id, state: b.state, color: peerColor(b.id), name: (p && p.name) || '', say: p && p.say && !muted.has(b.id) ? p.say : null,
     emote: p ? p.emote : null, emoteAge: p ? p.emoteAge : 0, alpha: 1 };
 }
+// Ex-fighters: id → { state, at, pAt }, their last fighting state, when, and their newest p then.
+const wasFighting = new Map();
+const WAS_FIGHTING_MS = 1500; // how long one with no newer p is still drawn (an al, until their p comes)
+// A p newer than the fight has come, and the smoothing (which lags) has reached it.
+function caughtUp(p, was) {
+  const q = live.peers.get(p.id), last = q && q.track.at(-1);
+  return !!last && last.t > was.pAt && Math.hypot(p.x - last.x, p.y - last.y) < 0.01;
+}
+function stillBody(p, s) {
+  return { ...peerBody(p), state: { ...s, vx: 0, vy: 0, act: 'idle', actT: 0, safe: false } };
+}
 // Someone inside who isn't fighting (an old page, or no fight with the server), from their positions alone.
 function peerBody(p) {
   return { id: p.id, state: { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: p.ground, act: 'idle' },
@@ -523,8 +554,9 @@ async function boot() {
       onNote: (text) => note(text, 3000),
       onFeed: (text) => {
         fightHud.line(text);
-        captionEl.setAttribute('aria-live', 'polite');
-        note(text);
+        // For screen readers, politely (the box is aria-hidden); cleared first so a repeat is read again.
+        fightSr.textContent = '';
+        setTimeout(() => { fightSr.textContent = text; }, 50);
       },
     });
     fightHud = createFightHud({
@@ -541,7 +573,11 @@ async function boot() {
     for (const b of padEl.querySelectorAll('.pad-fire, .pad-hit')) b.hidden = true;
   }
   for (const b of padEl.querySelectorAll('button')) {
-    const set = (on) => { input.press(b.dataset.code, on); b.classList.toggle('on', on); };
+    const set = (on) => {
+      input.press(b.dataset.code, on);
+      b.classList.toggle('on', on);
+      if (b.dataset.code === 'Jump') padJump = on;
+    };
     b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); set(true); });
     for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(t, () => set(false));
     b.addEventListener('contextmenu', (e) => e.preventDefault());

@@ -376,6 +376,15 @@ await withBrowser(async ({ page, url, errors }) => {
     const y0 = await page.evaluate(() => window.__ascii.world.player.y);
     const ys = await hold('Jump', 500, () => window.__ascii.world.player.y);
     assert.ok(Math.min(...ys) < y0 - 3, 'JUMP jumps');
+    // Holding JUMP tilts the gun 45° up, so FIRE with JUMP held shoots up.
+    await sleep(600);
+    const aims = await hold('Jump', 300, () => window.__ascii.pvp().bodies(performance.now()).find((b) => b.me).state.aim);
+    assert.ok(aims.some((a) => Math.abs(a + Math.PI / 4) < 0.01), `JUMP held aims up (${aims.map((a) => a.toFixed(2)).join(' ')})`);
+    // The caption moves up out of the floor band (the pad and the fight are down there), its ♥ still tappable.
+    const cap = await page.$eval('#caption', (e) => { const r = e.getBoundingClientRect(); return { on: e.classList.contains('on') && r.width > 0 && getComputedStyle(e).display !== 'none', top: r.top, bottom: r.bottom, left: r.left, right: r.right }; });
+    assert.ok(cap.on && cap.top < 80 && cap.bottom < 393 * 0.4 && cap.left < 40, `the caption at the top left (${JSON.stringify(cap)})`);
+    const hp = await page.$eval('#fight', (e) => e.getBoundingClientRect().left);
+    assert.ok(cap.right <= hp, `the caption clear of the fight HUD (${cap.right} vs ${hp})`);
     await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
     await sleep(100);
     assert.equal(await page.$eval('#pad', (e) => e.hidden), true, 'hidden again outside');
@@ -502,6 +511,34 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => { document.getElementById('note').textContent = ''; const e = window.__ascii.map.arena.entry; window.__ascii.teleport(e.x + 0.5, e.y + 0.5); });
     await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
     assert.equal(await page.$eval('#note', (e) => e.textContent), '', 'the note once a visit');
+  });
+  await check('arena PvP: Space jumps with the gun level, W/↑ tilt it 45° up; a kill is read to screen readers, not shown in the note', async () => {
+    await page.goto('about:blank');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
+    await page.focus('#stage');
+    const aimWhile = async (key) => {
+      await page.keyboard.down(key);
+      const seen = [];
+      for (let i = 0; i < 6; i++) { await sleep(40); seen.push(await page.evaluate(() => window.__ascii.pvp().bodies(performance.now()).find((b) => b.me).state.aim)); }
+      await page.keyboard.up(key);
+      await sleep(700); // land
+      return seen;
+    };
+    const space = await aimWhile('Space'), up = await aimWhile('ArrowUp'), w = await aimWhile('KeyW');
+    assert.ok(space.every((a) => a === 0), `Space aims level (${space.join(' ')})`);
+    assert.ok(up.every((a) => Math.abs(a + Math.PI / 4) < 0.01) && w.every((a) => Math.abs(a + Math.PI / 4) < 0.01), `↑ and W aim up (${up.join(' ')} / ${w.join(' ')})`);
+    // A kill: in the feed box, and in the polite screen-reader region; the note keeps the key hint.
+    const hint = await page.$eval('#note', (e) => e.textContent);
+    await page.evaluate(() => {
+      const p = window.__ascii.pvp(), now = performance.now();
+      p.onMessage({ t: 'aw', you: {}, fighters: [{ id: 'x1', x: 60.5, y: 32.5, kills: 0 }] }, now);
+      p.onMessage({ t: 'k', id: 'x1', by: p.me.id, kills: 1 }, now);
+    });
+    await page.waitForFunction(() => document.getElementById('fight-sr').textContent === 'you popped someone', { timeout: 2000 });
+    assert.equal(await page.$eval('#fight-feed', (e) => e.textContent), 'you popped someone');
+    assert.equal(await page.$eval('#fight-sr', (e) => e.getAttribute('role')), 'status');
+    assert.equal(await page.$eval('#note', (e) => e.textContent), hint, 'the note changed');
   });
   // The stickman (stickman spec §8): my figure in every pose, pinned with __ascii.pose, with each renderer,
   // on a computer and on a landscape phone, over the brightest part of the arena photo.
@@ -679,12 +716,27 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
     await page.waitForFunction(() => window.__ascii.mode() === 'top', { timeout: 3000 });
     await sleep(500);
-    await page.evaluate((e) => window.__ascii.teleport(e.x + 0.5, e.y + 0.5), entry);
-    await page.waitForFunction(() => window.__ascii.mode() === 'side' && window.__ascii.world.figures.some((g) => g.bold), { timeout: 3000 });
-    assert.ok(await page.evaluate(() => window.__ascii.world.figures.some((g) => g.bold && g.a < 1)), 'flying in');
-    // Past the fly-in (0.45 s) and the 1.5 s of protection on entering, whose pulse dims the figure too.
-    await sleep(1800);
-    assert.ok(await page.evaluate(() => window.__ascii.world.figures.filter((g) => g.bold).every((g) => g.a === 1)), 'in place after 0.45 s');
+    // Protection's pulse dims the figure too: pinned off, only the fly-in can.
+    await page.evaluate(() => window.__ascii.pose({ safe: false }));
+    try {
+      // My sprites (amber, or white in the flash): how far they spread from my centre, and how faint.
+      const mine = () => {
+        const w = window.__ascii.world, me = (w.bodies || []).find((b) => b.me);
+        const gs = (w.figures || []).filter((g) => g.bold && me && (g.color === me.color || g.color.every((c) => c === 255)));
+        if (!me || !gs.length) return null;
+        return { n: gs.length, spread: Math.max(...gs.map((g) => Math.hypot(g.x - me.state.x, (g.y - me.state.y) * 2))),
+          faint: gs.some((g) => g.a < 1), white: gs.some((g) => g.color.every((c) => c === 255)), solid: gs.every((g) => g.a === 1) };
+      };
+      await page.evaluate((e) => window.__ascii.teleport(e.x + 0.5, e.y + 0.5), entry);
+      const early = await (await page.waitForFunction(`window.__ascii.mode() === 'side' && (${mine})()`, { timeout: 3000 })).jsonValue();
+      await sleep(700);
+      const late = await page.evaluate(`(${mine})()`);
+      console.log(`  fly-in: first frame ${JSON.stringify(early)}; after 0.7 s ${JSON.stringify(late)}`);
+      assert.ok(early.faint && early.spread > late.spread + 0.5, 'flying in: faint, and spread out from where it lands');
+      assert.ok(late.solid && !late.white, 'in place after 0.45 s: solid, the flash over');
+    } finally {
+      await page.evaluate(() => window.__ascii.pose(null));
+    }
   });
   await check('side view: hearts are labels over every figure, not entities under them', async () => {
     await page.goto('about:blank');
