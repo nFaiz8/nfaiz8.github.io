@@ -3,7 +3,7 @@
 // their own screen. A new state is run forward to the present; the difference from where they were
 // drawn glides out over ~80 ms, or snaps when it is large. Pure: no DOM, no clocks; times in ms.
 import { newBody, stepBody, knock, rolling, ROLL } from './arena.js';
-import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME } from './fight.js';
+import { stunOf, regenHp, GUN_BY_CODE, ACT_TIME, MAX_HP, SAFE_TIME, REGEN_AFTER } from './fight.js';
 
 const SILENT = 300; // ms since the last state was sent before their input counts as released
 const CORR_TAU = 0.08, AIM_TAU = 0.06; // seconds
@@ -33,9 +33,11 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
   }
 
   function add(p, now) {
+    const hp = num(p.hp) ? p.hp : MAX_HP;
     const F = {
       id: p.id, kills: num(p.kills) ? p.kills : 0, alive: p.alive !== 0 && p.alive !== false,
-      hp: num(p.hp) ? p.hp : MAX_HP, hurtAt: -1e9, safeUntil: p.safe ? now + SAFE_TIME * 1000 : 0,
+      // Hurt: regeneration carries on from this hp at once (its delay already passed, as far as we know).
+      hp, hurtAt: hp < MAX_HP ? now - REGEN_AFTER * 1000 : -1e9, safeUntil: p.safe ? now + SAFE_TIME * 1000 : 0,
       gun: GUN_BY_CODE[p.w] || 'deagle', ammo: num(p.ammo) ? p.ammo : -1,
       body: null, bits: 0, input: NONE, lastAt: now, corr: { x: 0, y: 0 }, facing: 1, aim: 0, aimTo: 0,
       act: 'idle', actAt: now, actFor: 0, seen: [], ts: null, rollTs: null,
@@ -99,7 +101,9 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       if (Array.isArray(m.fighters)) for (const p of m.fighters) if (p && p.id != null) add(p, now);
       return;
     }
-    if (m.t === 'aj') { if (m.id != null && !all.has(m.id)) add({ ...m, safe: 1 }, now); return; }
+    // Entering, also again while still listed (back from away, or out of being popped): always a fresh start,
+    // since the sender's ts restarts too.
+    if (m.t === 'aj') { if (m.id != null) { all.delete(m.id); add({ ...m, safe: 1 }, now); } return; }
     const F = all.get(m.id);
     if (m.t === 'k' && m.by != null && all.has(m.by) && num(m.kills)) all.get(m.by).kills = m.kills;
     if (!F) return;

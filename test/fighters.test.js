@@ -303,3 +303,35 @@ test('aim is smoothed over 60 ms', () => {
   for (let ms = 616; ms < 1200; ms += 16) F.step(0.016, ms);
   assert.equal(F.list(1200)[0].state.aimed, false, 'not aimed once the wire aim is back to 0');
 });
+
+test('a re-entry aj for a known id starts fresh: its restarted ts is not dropped as old', () => {
+  const F = createFighters({ kindAt: kinds });
+  one(F, 0);
+  for (let ts = 0; ts <= 60000; ts += 10000) F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts }, ts + 50);
+  F.apply({ t: 'aj', id: 'b', hp: 100, kills: 2 }, 61000);
+  F.apply({ t: 'a', id: 'b', x: 20.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 50 }, 61050);
+  const r = F.list(61050)[0];
+  assert.equal(r.state.x, 20.5);
+  assert.equal(r.kills, 2);
+  assert.equal(r.state.safe, true);
+});
+
+test('a popped fighter that re-enters (aj) is alive again', () => {
+  const F = createFighters({ kindAt: kinds });
+  one(F, 0);
+  F.apply({ t: 'k', id: 'b', by: 'a', kills: 1 }, 100);
+  F.apply({ t: 'aj', id: 'b', hp: 100, kills: 0 }, 200);
+  F.apply({ t: 'a', id: 'b', x: 30.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 5 }, 250);
+  const r = F.list(250)[0];
+  assert.equal(r.alive, true);
+  assert.notEqual(r.state.act, 'dead');
+  assert.equal(r.state.hp, 100);
+  assert.equal(r.state.x, 30.5);
+});
+
+test('a hurt fighter from aw keeps its hp and regenerates from it', () => {
+  const F = createFighters({ kindAt: kinds });
+  one(F, 0, { hp: 40 });
+  assert.equal(F.list(0)[0].state.hp, 40);
+  assert.equal(F.list(1000)[0].state.hp, 60);
+});
