@@ -261,3 +261,35 @@ test('roll: the puff trails behind while actT < 0.1, not with Reduce Motion', ()
   assert.equal(part(pose({ act: 'roll', actT: 0.12 }), 'fx').length, 0);
   assert.equal(part(pose({ act: 'roll', actT: 0.05 }, 0, { reducedMotion: true }), 'fx').length, 0);
 });
+
+test('no gun over a kick or a hurt until the characters switch back; a punch keeps it at the hip', () => {
+  assert.equal(part(pose({ act: 'kick', actT: 0.1, gun: 'sniper' }), 'gun').length, 0);
+  assert.equal(part(pose({ act: 'kick', actT: 0.03, gun: 'rifle' }), 'gun').length, 0);
+  assert.equal(part(pose({ act: 'hurt', actT: 0.1, gun: 'sniper' }), 'gun').length, 0);
+  assert.equal(part(pose({ act: 'kick', actT: 0.35, gun: 'sniper' }), 'gun').length, GUN_ART.sniper.glyphs.length);
+  assert.equal(part(pose({ act: 'hurt', actT: 0.3, gun: 'sniper' }), 'gun').length, GUN_ART.sniper.glyphs.length);
+  assert.equal(part(pose({ act: 'punch', actT: 0.1, gun: 'rifle' }), 'gun').length, GUN_ART.rifle.glyphs.length);
+});
+
+test('respawn: the fly-in goes over whatever the act or locomotion draws', () => {
+  const states = [{ act: 'shoot', actT: 0.02, aim: 0.3, gun: 'rifle' }, { act: 'punch', actT: 0.1 }, { act: 'roll', actT: 0.1 }, { vx: 30, x: 14 }];
+  for (const s of states) {
+    const flying = pose({ ...s, spawnT: 0.2 }), plain = pose(s);
+    assert.deepEqual(flying.map((g) => [g.part, g.ch]), plain.map((g) => [g.part, g.ch]), JSON.stringify(s));
+    assert.ok(flying.some((g, i) => Math.abs(g.dx - plain[i].dx) + Math.abs(g.dy - plain[i].dy) > 0.1), 'still flying in');
+    assert.ok(flying.every((g) => g.a > 0 && g.a < 1));
+  }
+  const shot = pose({ act: 'shoot', actT: 0.02, aim: 0.3, gun: 'rifle', spawnT: 0.2 });
+  assert.equal(part(shot, 'gun').length, GUN_ART.rifle.glyphs.length);
+  assert.equal(part(shot, 'fx')[0].ch, '*');
+  assert.ok(part(pose({ act: 'punch', actT: 0.1, spawnT: 0.2 }), 'armF').some((g) => g.dx >= 1.5));
+  assert.ok(pose({ act: 'roll', actT: 0.1, spawnT: 0.2 }).some((g) => g.part === 'head' && g.ch === 'o'));
+  // The gun flies in as one piece.
+  const gun = part(shot, 'gun'), still = part(pose({ act: 'shoot', actT: 0.02, aim: 0.3, gun: 'rifle' }), 'gun');
+  const shift = gun.map((g, i) => [+(g.dx - still[i].dx).toFixed(9), +(g.dy - still[i].dy).toFixed(9)]);
+  assert.ok(shift.every((d) => d[0] === shift[0][0] && d[1] === shift[0][1]));
+  // Reduce Motion: the current pose, fading in place.
+  const rm = pose({ vx: 30, x: 14, spawnT: 0.15 }, 0, { reducedMotion: true });
+  assert.deepEqual(rm.map((g) => [g.ch, g.dx, g.dy]), pose({ vx: 30, x: 14 }, 0, { reducedMotion: true }).map((g) => [g.ch, g.dx, g.dy]));
+  assert.ok(rm.every((g) => Math.abs(g.a - 0.5) < 1e-9));
+});

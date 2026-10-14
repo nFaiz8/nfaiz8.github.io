@@ -289,10 +289,50 @@ function dead(out, f, actT, rm, sa) {
   return out;
 }
 
+// Respawn, over whatever pose was drawn from `start` on: each glyph flies in from 3 out along its own
+// direction from the centre (the gun as one piece), easing out, while `a` goes 0 → 1; then a white
+// flash to 0.45 s. Reduce Motion: a 0.3 s fade-in in place.
+function spawnIn(out, start, spawnT, rm) {
+  if (rm) {
+    const a = Math.min(1, spawnT / SPAWN_RM);
+    for (let i = start; i < out.length; i++) out[i].a *= a;
+    return out;
+  }
+  if (spawnT >= SPAWN_FLY) {
+    for (let i = start; i < out.length; i++) if (out[i].tone !== 'fx') out[i].tone = 'flash';
+    return out;
+  }
+  const k = spawnT / SPAWN_FLY, d = SPAWN_R * (1 - k) ** 3;
+  let gunDx = 0, gunDy = 0, gunSet = false;
+  for (let i = start; i < out.length; i++) {
+    const g = out[i];
+    if (g.part === 'gun') {
+      if (!gunSet) { outward(g.dx, g.dy, d); gunDx = outDx; gunDy = outDy; gunSet = true; }
+      g.dx += gunDx;
+      g.dy += gunDy;
+    } else {
+      outward(g.dx, g.dy, d);
+      g.dx += outDx;
+      g.dy += outDy;
+    }
+    g.a *= k;
+  }
+  return out;
+}
+
 // stickPose(state, t, opts, out) → out, with the body's glyphs { dx, dy, ch, part, tone, a } appended
 // (stickman spec §3). Pure: never mutates state, no randomness.
 export function stickPose(state, t, opts = {}, out = []) {
   const st = state || {};
+  const start = out.length;
+  drawPose(st, t, opts, out);
+  // The respawn goes over the pose; dead replaces everything, the respawn included.
+  const spawnT = st.spawnT >= 0 ? st.spawnT : Infinity;
+  if (spawnT < SPAWN_END && st.act !== 'dead') spawnIn(out, start, spawnT, !!(opts && opts.reducedMotion));
+  return out;
+}
+
+function drawPose(st, t, opts, out) {
   const vx = fin(st.vx, 0);
   const s = {
     x: fin(st.x, 0), vx, vy: fin(st.vy, 0),
@@ -302,7 +342,6 @@ export function stickPose(state, t, opts = {}, out = []) {
   };
   const act = ACTS[st.act] === true ? st.act : 'idle';
   const actT = fin(st.actT, 0) > 0 ? st.actT : 0;
-  const spawnT = st.spawnT >= 0 ? st.spawnT : Infinity;
   const aim = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, fin(st.aim, 0)));
   const gun = GUN_ART[st.gun] ? st.gun : 'deagle';
   const rm = !!(opts && opts.reducedMotion);
@@ -312,34 +351,11 @@ export function stickPose(state, t, opts = {}, out = []) {
   // Protection: the body's opacity pulses 3 times a second; Reduce Motion holds it at 0.5.
   const sa = st.safe === true ? (rm ? SAFE_RM : SAFE_MID + SAFE_AMP * Math.cos(2 * Math.PI * SAFE_HZ * tt)) : 1;
 
-  // Dead replaces everything, the respawn included.
   if (act === 'dead') return dead(out, f, actT, rm, sa);
 
   const breath = rm ? 0 : BREATH_H * (1 - Math.cos(2 * Math.PI * (tt / BREATH_PERIOD + phase))) / 2;
   const art = GUN_ART[gun];
   let tone = 'body', a = sa;
-
-  // Respawn (layer 3): the idle figure flies in, then flashes; Reduce Motion fades it in in place.
-  if (spawnT < SPAWN_END) {
-    setPose(IDLE, -breath, 0);
-    carryArm();
-    let d = 0;
-    if (rm) a *= Math.min(1, spawnT / SPAWN_RM);
-    else if (spawnT < SPAWN_FLY) {
-      const k = spawnT / SPAWN_FLY;
-      d = SPAWN_R * (1 - k) ** 3;
-      a *= k;
-    } else tone = 'flash';
-    for (const name of PARTS) {
-      const p = P[name];
-      outward(p.dx, p.dy, d);
-      put(out, f, p.ch, p.dx + outDx, p.dy + outDy, name, tone, a);
-    }
-    const hx = HIP.dx + P.torso.dx, hy = HIP.dy + P.torso.dy;
-    outward(hx, hy, d);
-    for (let i = 0; i < art.glyphs.length; i++) put(out, f, art.glyphs[i], hx + i - art.hand + outDx, hy + outDy, 'gun', tone, a);
-    return out;
-  }
 
   // Roll (layer 3): a ball on the lower two rows, turning once; no gun.
   if (act === 'roll' && actT < ROLL_END) {
@@ -371,11 +387,12 @@ export function stickPose(state, t, opts = {}, out = []) {
     carryArm();
   }
 
-  // Layers 2 and 3: punch overlays the upper body; kick and hurt replace the body. While they hold
-  // the pose, the gun is carried at the hip; once the characters switch back, it is drawn as before.
+  // Layers 2 and 3: punch overlays the upper body; kick and hurt replace the body. While a punch holds
+  // its pose the gun is carried at the hip; a kick or a hurt draws no gun. Once the characters switch
+  // back, the gun is drawn as before.
   X.ch = null;
   W.ch = null;
-  let carried = !aimed;
+  let carried = !aimed, gunOn = true;
   if (act === 'punch' && actT < PUNCH_T.end) {
     copyPose(B, P);
     punch(actT);
@@ -383,11 +400,11 @@ export function stickPose(state, t, opts = {}, out = []) {
   } else if (act === 'kick' && actT < KICK_T.end) {
     copyPose(B, P);
     kick(actT, s.ground);
-    if (actT < KICK_T.swap) carried = true;
+    if (actT < KICK_T.swap) gunOn = false;
   } else if (act === 'hurt' && actT < HURT_T.end) {
     copyPose(B, P);
     hurt(actT);
-    if (actT < HURT_T.swap) carried = true;
+    if (actT < HURT_T.swap) gunOn = false;
     if (!rm && actT < HURT_T.flash) tone = 'flash';
   }
 
@@ -399,7 +416,9 @@ export function stickPose(state, t, opts = {}, out = []) {
 
   // The gun: along the aim ray from the hand, or level at the hip when carried.
   const glyphs = art.glyphs;
-  if (!carried) {
+  if (!gunOn) {
+    // No gun over a kick or a hurt.
+  } else if (!carried) {
     const c = Math.cos(aim), sn = Math.sin(aim) / 2, sx = SHOULDER.dx, sy = SHOULDER.dy + bodyDy;
     const steep = Math.abs(aim) > STEEP, armCh = armGlyph(aim), back = RECOIL * k;
     for (let i = 0; i < glyphs.length; i++) {
