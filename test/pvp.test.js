@@ -14,9 +14,12 @@ const level = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta
 const data = indexData(fixture, ['IMG_1003']);
 const map = buildLayout(data, { name: 'X' }, { arena: { photo: data.byId.get('IMG_1003'), level } });
 const A = map.arena, off = { x: A.x + 1, y: A.y + 1 };
+// The floor line (where the door is) and the dummy's spot, from the level: car A's floor at column 50.
+const FLOOR = level.door.y;
+const floorUnder = (c) => { let r = level.rows - 1; while (!level.cells[r * level.cols + c]) r--; while (level.cells[(r - 1) * level.cols + c]) r--; return r - 1.5; };
 const IN = { x: 0, y: 0, run: false, jump: false, down: false, fire: false, strikes: 0, roll: 0, aimUp: false, aimDown: false, mouse: null };
 
-function setup({ online = false, at = { x: 70.5, y: 27.5 } } = {}) {
+function setup({ online = false, at = { x: 40.5, y: FLOOR } } = {}) {
   const world = createWorld(map);
   teleport(world, off.x + at.x, off.y + at.y);
   const sent = [], notes = [], feed = [];
@@ -27,22 +30,23 @@ function setup({ online = false, at = { x: 70.5, y: 27.5 } } = {}) {
   return { world, pvp, sent, notes, feed, frames, get now() { return now; } };
 }
 
-test('offline: the dummy stands at column 80 on the yellow line, facing the door', () => {
+test('offline: the dummy stands on car A\'s floor at column 50 (from the level), facing the door', () => {
   const { pvp } = setup();
   const d = pvp.bodies(0).find((b) => b.dummy);
-  assert.equal(d.state.x, off.x + 80.5);
-  assert.equal(d.state.y, off.y + 27.5);
+  assert.equal(floorUnder(50), 24.5);
+  assert.equal(d.state.x, off.x + 50.5);
+  assert.equal(d.state.y, off.y + floorUnder(50));
   assert.equal(d.state.facing, 1);
 });
 
-test('offline: shooting the dummy (J held) costs it 25 a hit, knocks it back, pops it, and it comes back 2 s later', () => {
+test('offline: a level deagle shot from the floor 10 cells away hits the dummy (J held): 25 a hit, knocks it back, pops it, and it comes back 2 s later', () => {
   const s = setup();
   s.frames(15);
   s.frames(1, { fire: true });
   s.frames(30);
   const d1 = s.pvp.bodies(s.now).find((b) => b.dummy);
   assert.equal(d1.state.hp, 75);
-  assert.ok(d1.state.x > off.x + 80.5, 'knocked back');
+  assert.ok(d1.state.x > off.x + 50.5, 'knocked back');
   for (let k = 0; k < 6 && s.pvp.bodies(s.now).find((b) => b.dummy).state.act !== 'dead'; k++) { s.frames(1, { fire: true }); s.frames(30); }
   assert.equal(s.pvp.bodies(s.now).find((b) => b.dummy).state.act, 'dead');
   s.frames(130);
@@ -87,7 +91,7 @@ test('online: enter sends ae; moving sends a (arena-local); J sends f from the m
   assert.deepEqual(s.sent[0], { t: 'ae' });
   s.frames(20, { x: 1 });
   const a = s.sent.find((m) => m.t === 'a');
-  assert.ok(a && a.x > 60 && a.x < 90 && a.y > 20 && a.y < 30, JSON.stringify(a));
+  assert.ok(a && a.x > 40 && a.x < 60 && Math.abs(a.y - FLOOR) < 0.01, JSON.stringify(a)); // from 40.5 on car A's floor
   s.frames(1, { fire: true });
   assert.equal(s.sent.filter((m) => m.t === 'f').length, 1);
   s.frames(1, { strikes: 1 });
@@ -96,7 +100,7 @@ test('online: enter sends ae; moving sends a (arena-local); J sends f from the m
 
 test('online: h for me lowers hp and knocks me back; k pops me with a note; rs after 2 s; sp puts me at the spawn', () => {
   const s = setup({ online: true });
-  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 }] }, s.now);
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 60.5, y: FLOOR, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 }] }, s.now);
   s.frames(5);
   s.pvp.onMessage({ t: 'h', id: 'me', by: 'b', w: 'k', n: -1, d: 22, hp: 78, kx: 45, ky: -22 }, s.now);
   assert.equal(s.pvp.me.hp, 78);
@@ -120,7 +124,7 @@ test('when a real fighter enters, the dummy pops quietly; alone again, it comes 
   s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [] }, s.now);
   assert.ok(s.pvp.bodies(s.now).some((b) => b.dummy));
   s.pvp.onMessage({ t: 'aj', id: 'b', hp: 100, kills: 0 }, s.now);
-  s.pvp.onMessage({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 }, s.now);
+  s.pvp.onMessage({ t: 'a', id: 'b', x: 60.5, y: FLOOR, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 }, s.now);
   assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
   assert.equal(s.feed.length, 0);
   s.pvp.onMessage({ t: 'ax', id: 'b' }, s.now);
@@ -185,7 +189,7 @@ test('the mouse turns you to face the cursor and aims at it', () => {
 const named = { a: 'Ann', b: 'Bo' };
 function setupNamed({ online = true, reducedMotion = false } = {}) {
   const world = createWorld(map, { reducedMotion });
-  teleport(world, off.x + 70.5, off.y + 27.5);
+  teleport(world, off.x + 40.5, off.y + FLOOR);
   const sent = [], notes = [], feed = [];
   const pvp = createPvp({ world, map, level, send: (m) => { sent.push(m); return true; }, onNote: (t) => notes.push(t), onFeed: (t) => feed.push(t), rand: () => 0.5, myId: () => 'me', nameOf: (id) => named[id] || '', reducedMotion });
   let now = 0;
@@ -193,7 +197,7 @@ function setupNamed({ online = true, reducedMotion = false } = {}) {
   const frames = (n, inp = {}) => { for (let k = 0; k < n; k++) { now += 1000 / 60; step(world, 1 / 60, pvp.control({ ...IN, ...inp }, now)); pvp.frame(1 / 60, now); } };
   return { world, pvp, sent, notes, feed, frames, get now() { return now; } };
 }
-const fighter = (id, x, kills = 0) => ({ id, hp: 100, kills, alive: 1, safe: 0, w: 'd', ammo: -1, x, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 });
+const fighter = (id, x, kills = 0) => ({ id, hp: 100, kills, alive: 1, safe: 0, w: 'd', ammo: -1, x, y: FLOOR, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 });
 
 test('the kill feed names people: "Ann popped Bo", "Bo fled from Ann", "you popped Bo"; my kills come from the server', () => {
   const s = setupNamed();
@@ -330,7 +334,7 @@ test('the connection drops: bullets in flight are cleared; offline, a dead me re
 
 test('an aw rebuilds the fighters and sets the pickups; mine is never a remote fighter', () => {
   const s = setupNamed();
-  s.pvp.onMessage({ t: 'sp', id: 'b', x: 10.5, y: 27.5 }, s.now);
+  s.pvp.onMessage({ t: 'sp', id: 'b', x: 10.5, y: FLOOR }, s.now);
   s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 90, kills: 0, w: 'd', ammo: -1 }, pk: [{ n: 0, at: 5000 }, { n: 1, at: 0 }], fighters: [fighter('me', 70.5), fighter('b', 20.5)] }, s.now);
   assert.deepEqual(s.pvp.fighters.ids(), ['b']);
   const g = s.pvp.glyphs(s.now, []);
@@ -386,7 +390,7 @@ function serverSim(gun, ammo) {
 
 test('online, shooting the dummy never frees my in-flight cap or spends ammo the server does not see', () => {
   for (const [gun, code, ammo] of [['rifle', 'r', 40], ['deagle', 'd', -1]]) {
-    const s = setup({ online: true, at: { x: 48.5, y: 27.5 } }); // 82 clear cells east, through the dummy
+    const s = setup({ online: true, at: { x: 18.5, y: FLOOR } }); // clear cells east, through the dummy
     s.pvp.onMessage(emptyAw(code, ammo), s.now);
     const srv = serverSim(gun, ammo);
     let now = s.now, hit = false;
@@ -410,18 +414,18 @@ test('online, shooting the dummy never frees my in-flight cap or spends ammo the
 });
 
 test('reconnecting inside the arena enters at the door, like walking in: the first a carries the door point', () => {
-  const s = setup({ online: false, at: { x: 50.5, y: 27.5 } });
+  const s = setup({ online: false, at: { x: 20.5, y: FLOOR } });
   s.frames(5);
   s.pvp.setOnline(true, s.now);
   assert.equal(s.world.player.x, A.entry.x + 0.5);
   assert.equal(s.world.player.y, A.floorY - 1.5);
-  assert.equal(s.world.player.x - off.x, 159.5);
-  assert.equal(s.world.player.y - off.y, 32.5);
+  assert.equal(s.world.player.x - off.x, level.door.x);
+  assert.equal(s.world.player.y - off.y, level.door.y);
   const n = s.sent.findIndex((m) => m.t === 'ae');
   assert.ok(n >= 0);
   s.frames(5);
   const a = s.sent.slice(n).find((m) => m.t === 'a');
-  assert.ok(a && a.x === 159.5 && a.y === 32.5, JSON.stringify(a));
+  assert.ok(a && a.x === level.door.x && a.y === level.door.y, JSON.stringify(a));
 });
 
 test('online, the dummy waits for the arena welcome: no grey flash in a busy arena', () => {
@@ -429,7 +433,7 @@ test('online, the dummy waits for the arena welcome: no grey flash in a busy are
   assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
   s.frames(5);
   assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
-  s.pvp.onMessage({ ...emptyAw(), fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 20.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 }] }, s.now);
+  s.pvp.onMessage({ ...emptyAw(), fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 20.5, y: FLOOR, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 }] }, s.now);
   s.frames(5);
   assert.ok(!s.pvp.bodies(s.now).some((b) => b.dummy));
   const o = setup({ online: false });
@@ -514,8 +518,8 @@ test('offline: shooting the dummy from mid-jump hits its head row: 50 damage, -5
   const s = setup();
   s.frames(15);
   s.frames(1, { jump: true });
-  const y = s.world.player.y - off.y; // the shot leaves 0.3 rows above this: the head row is 26..27
-  assert.ok(y > 26.3 && y < 27.3, `high enough for the head row, low enough to hit: ${y}`);
+  const y = s.world.player.y - off.y; // the shot leaves 0.3 rows above this: the head row is a row over the dummy's centre
+  assert.ok(y > FLOOR - 1.2 && y < FLOOR - 0.2, `high enough for the head row, low enough to hit: ${y}`);
   s.frames(1, { jump: true, fire: true });
   let shook = false, white = '';
   for (let k = 0; k < 10; k++) {
@@ -574,4 +578,19 @@ test('an air kick, then my air jump within its 0.4 s: no flip, during the kick o
   assert.equal(s.world.player.airJumps, 0, 'the air jump was taken');
   for (let k = 0; k < 24; k++) { s.frames(1); assert.equal(me().flipT, Infinity, `frame ${k}: ${me().act}`); }
   assert.notEqual(me().act, 'kick', 'the kick is over');
+});
+
+test('flashes: a shot lights the train for a moment at its muzzle (arena-local), then is gone', () => {
+  const s = setup();
+  s.frames(15);
+  assert.deepEqual(s.pvp.flashes(s.now), []);
+  s.frames(1, { fire: true });
+  const f = s.pvp.flashes(s.now);
+  assert.equal(f.length, 1);
+  const me = s.pvp.bodies(s.now).find((b) => b.me).state;
+  const mz = muzzleOf(me.x - off.x, me.y - off.y, me.facing, me.aim, 'deagle');
+  assert.ok(Math.abs(f[0].x - mz.x) < 1.5 && Math.abs(f[0].y - mz.y) < 1.5, `${f[0].x},${f[0].y} vs ${mz.x},${mz.y}`);
+  assert.ok(f[0].k > 0 && f[0].k <= 2);
+  s.frames(12);
+  assert.deepEqual(s.pvp.flashes(s.now), []);
 });

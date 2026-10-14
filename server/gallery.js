@@ -19,14 +19,16 @@ const kindAt = levelKind(LEVEL);
 const TICK_MS = 33;
 const KICK_GAP = 0.5; // s: after a kick, the next strike waits this long (the 0.55 s cooldown less jitter)
 const GAP_MAX = 300; // ms: a pause banks no more speed than this
-// The door is the bottom 3 rows of the east wall (src/layout.js); a body standing in it is centred here.
-// Every honest entrance (walking in, an arena link, a teleport) puts you there.
-const DOOR = { x: LEVEL.cols - 0.5, y: LEVEL.rows - 1.5 };
+// The door is the level's D: the 3 rows of the east wall ending on its row (src/layout.js lines the corridor
+// up with it); a body standing in it is centred there. Every honest entrance (walking in, an arena link, a
+// teleport) puts you there.
+const DOOR_AT = LEVEL.door || { r: LEVEL.rows - 1, x: LEVEL.cols - 0.5, y: LEVEL.rows - 1.5 };
+const DOOR = { x: DOOR_AT.x, y: DOOR_AT.y };
 
 // A body's centre inside a wall: a ▓, or anywhere outside the grid but the door.
 function inWall(x, y) {
   const c = Math.floor(x), r = Math.floor(y);
-  if (c >= LEVEL.cols && r >= LEVEL.rows - 3 && r < LEVEL.rows) return false;
+  if (c >= LEVEL.cols && r >= DOOR_AT.r - 2 && r <= DOOR_AT.r) return false;
   return kindAt(c, r) === SOLID;
 }
 const far = (p, q) => Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y));

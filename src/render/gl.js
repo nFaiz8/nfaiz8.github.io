@@ -1,12 +1,14 @@
 // Renderer C: draw a plain top-down scene into an offscreen buffer, then turn every cell of it into a
 // character in a shader. Labels, plaques, frame borders and people are drawn on top as exact glyphs.
-import { cellMetrics, drawGlyph, prepareText, FONT_FAMILY } from './glyphs.js';
+// The arena is the train (src/train.js): its cells are exact glyphs too, each with its own colour and an
+// opaque background, and its glow is added on top. The side view has its own cell size (the zoom).
+import { cellMetrics, sideMetrics, drawGlyph, prepareText, FONT_FAMILY } from './glyphs.js';
 import { C, LABEL_COLOR, roomTint } from './palette.js';
 import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, rangeOf } from '../photos.js';
 import { lightWindow } from '../light.js';
-import { coverCrop, nearArena, blockGlyph } from '../arena.js';
+import { paintWindow, halation, TRAIN_GLYPHS } from '../train.js';
 import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
@@ -16,11 +18,31 @@ const FIG_FLOATS = 10; // per figure instance: x, y, glyph, r, g, b, a, rot, len
 // hp bars (█ ░), deagle bullet heads (•) and sparks, empty pickups and aim lines (·).
 export const FIG_EXTRA = '═╦╤°♥★…█░•·';
 
+// Every glyph the main atlas holds: the ramp, the gallery's own, printable ASCII (visitors' names), the
+// emotes, the map's labels, plaques and props, and every glyph the train can draw in either look.
+export function atlasChars(map) {
+  const chars = new Set(RAMP);
+  const add = (s) => { for (const c of s) chars.add(c); };
+  add('@☺☻&·?…─│┌┐└┘╥═║░▒▓█');
+  for (let c = 32; c < 127; c++) chars.add(String.fromCharCode(c));
+  add('♥★');
+  map.labels.forEach((l) => add(l.text));
+  map.frames.forEach((f) => add(f.plaque.text));
+  map.glyphs.forEach((g) => add(g.ch));
+  add(TRAIN_GLYPHS);
+  return [...chars];
+}
+
 export function createGlRenderer() {
   let canvas, gl, map, m, dpr = 1, viewW = 0, viewH = 0, lost = false;
+  // M: the metrics in use (the gallery's m, or the side view's by its zoom); atlasM: the ones the atlases
+  // were drawn at (while the zoom eases they are drawn scaled, and redrawn crisp once it settles).
+  let M = null, atlasM = null, zoom = null;
   let progs, quadVao, glyphVao, instBuf, tilesTex, atlasTex, atlas, sceneTex, sceneFbo, sceneSize = [0, 0];
   let staticGlyphs = new Float32Array(0), dynamic = [];
-  let arenaGlyphs = new Float32Array(0); // the arena's platforms, drawn only in its side view
+  let trainWin = null, trainData = new Float32Array(0), trainTex = null;
+  const halo = { a: new Float32Array(0), b: new Float32Array(0) };
+  const missing = new Set(); // glyphs asked for that the atlas doesn't have (drawn as ?)
   const photoTex = new Map(); // id → { tex, range, uv }
   const requested = new Set();
   const onLoad = new Set();
@@ -57,7 +79,6 @@ export function createGlRenderer() {
       ascii: compile(S.ASCII_VS, S.ASCII_FS),
       glyph: compile(S.GLYPH_VS, S.GLYPH_FS),
       light: compile(S.ASCII_VS, S.LIGHT_FS),
-      backdrop: compile(S.BACKDROP_VS, S.BACKDROP_FS),
       figure: compile(S.FIGURE_VS, S.FIGURE_FS),
     };
 
@@ -111,6 +132,7 @@ export function createGlRenderer() {
     buildTiles();
     lightTex = gl.createTexture();
     glowTex = gl.createTexture();
+    trainTex = gl.createTexture();
   }
 
   // One texel per world cell: rgb = colour, a = brightness used to pick the glyph.
@@ -151,18 +173,9 @@ export function createGlRenderer() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
-  // Every glyph we will ever draw, rendered white at device resolution.
-  function buildAtlas() {
-    const chars = new Set(RAMP);
-    const add = (s) => { for (const c of s) chars.add(c); };
-    add('@☺☻&·?…─│┌┐└┘╥═║░▒▓█');
-    // Names and emotes of real visitors: any printable ASCII, plus the emote symbols.
-    for (let c = 32; c < 127; c++) chars.add(String.fromCharCode(c));
-    add('♥★');
-    map.labels.forEach((l) => add(l.text));
-    map.frames.forEach((f) => add(f.plaque.text));
-    map.glyphs.forEach((g) => add(g.ch));
-    const list = [...chars];
+  // Every glyph we will ever draw, rendered white at device resolution, at metrics m.
+  function buildAtlas(m) {
+    const list = atlasChars(map);
     const cols = 32, rows = Math.ceil(list.length / cols);
     const gw = Math.round(m.cw * dpr), gh = Math.round(m.ch * dpr);
     const cv = new OffscreenCanvas(cols * gw, rows * gh);
@@ -180,12 +193,17 @@ export function createGlRenderer() {
     atlas = { index: new Map(list.map((ch, i) => [ch, i])), cols, rows };
   }
 
-  const gi = (ch) => atlas.index.get(ch) ?? atlas.index.get('?');
+  const gi = (ch) => {
+    const i = atlas.index.get(ch);
+    if (i !== undefined) return i;
+    missing.add(ch);
+    return atlas.index.get('?');
+  };
 
   // The figure atlas: printable ASCII plus the gun and label extras, bold (figures) and regular (labels),
   // each as its fill and as its outline (the glyph dilated by the outline radius o). A slot is a cell plus
-  // o on every side, at device resolution. LINEAR, unlike the main atlas.
-  function buildFigureAtlas() {
+  // o on every side, at device resolution (o grows with the zoom). LINEAR, unlike the main atlas.
+  function buildFigureAtlas(m) {
     const list = [];
     for (let c = 32; c < 127; c++) list.push(String.fromCharCode(c));
     list.push(...FIG_EXTRA);
@@ -252,8 +270,10 @@ export function createGlRenderer() {
     gl.bindTexture(gl.TEXTURE_2D, figAtlasTex);
     gl.uniform1i(pf.u.u_atlas, 1);
     gl.uniform2f(pf.u.u_view, vx, vy);
-    gl.uniform2f(pf.u.u_cellPx, m.cw * dpr, m.ch * dpr);
-    gl.uniform2f(pf.u.u_slotPx, figAtlas.slot[0], figAtlas.slot[1]);
+    // While the zoom eases the atlas is the last crisp one, drawn scaled to the cells of the moment.
+    const zk = M.cw / atlasM.cw;
+    gl.uniform2f(pf.u.u_cellPx, M.cw * dpr, M.ch * dpr);
+    gl.uniform2f(pf.u.u_slotPx, figAtlas.slot[0] * zk, figAtlas.slot[1] * zk);
     gl.uniform2f(pf.u.u_canvas, canvas.width, canvas.height);
     gl.uniform1f(pf.u.u_atlasCols, figAtlas.cols);
     gl.uniform2f(pf.u.u_atlasGlyphs, figAtlas.cols, figAtlas.rows);
@@ -294,18 +314,22 @@ export function createGlRenderer() {
       [...f.plaque.text].forEach((ch, k) => ch !== ' ' && pushGlyph(out, f.plaque.x + k, f.plaque.y, ch, f.darkroom ? C.dFrame : C.plaque));
     }
     staticGlyphs = new Float32Array(out);
-    const a = map.arena, plat = [];
-    if (a) for (let k = 0; k < a.cols * a.rows; k++) {
-      const kind = a.level.cells[k];
-      if (!kind) continue;
-      // No background, so the photo shows through; a dark copy just below reads on a white wall too.
-      const x = a.x + 1 + (k % a.cols), y = a.y + 1 + Math.floor(k / a.cols);
-      const g = kind === 1 ? '═' : blockGlyph(a.level, k % a.cols, Math.floor(k / a.cols));
-      if (!g) continue;
-      pushGlyph(plat, x, y + 0.09, g, C.platformShadow);
-      pushGlyph(plat, x, y, g, C.platform);
-    }
-    arenaGlyphs = new Float32Array(plat);
+  }
+
+  // The atlases at metrics k (the gallery's, or the side view's once its zoom has settled).
+  function useAtlas(k) {
+    if (atlasM && atlasM.cw === k.cw && atlasM.fontPx === k.fontPx) return;
+    atlasM = k;
+    buildAtlas(k);
+    buildFigureAtlas(k);
+  }
+
+  // The side view's zoom: { rows, settled } (main.js eases it by the gun in hand), or null top-down.
+  function setView(z) {
+    zoom = z ? { rows: z.rows, settled: !!z.settled } : null;
+    if (!m) return;
+    M = zoom ? sideMetrics(viewH, dpr, zoom.rows, zoom.settled) : m;
+    if (!zoom || zoom.settled) useAtlas(M);
   }
 
   function resize(w, h, ratio) {
@@ -313,9 +337,10 @@ export function createGlRenderer() {
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     m = cellMetrics(w, h);
-    buildAtlas();
-    buildFigureAtlas();
+    atlasM = null;
+    useAtlas(m);
     buildStaticGlyphs();
+    setView(zoom);
     // Scene covers the view plus a cell of margin on each side
     const cells = [Math.ceil(w / m.cw) + 3, Math.ceil(h / m.ch) + 3];
     if (cells[0] !== sceneSize[0] || cells[1] !== sceneSize[1]) {
@@ -337,7 +362,7 @@ export function createGlRenderer() {
   function request(f) {
     if (requested.has(f.id)) return;
     requested.add(f.id);
-    loadImage(f.photo, f.backdrop ? 'hi' : 'low').then((bmp) => {
+    loadImage(f.photo, 'low').then((bmp) => {
       if (!gl || lost) return;
       const tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -345,87 +370,78 @@ export function createGlRenderer() {
       gl.generateMipmap(gl.TEXTURE_2D);
       setFilter(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR);
       const r = rangeOf(f.photo, bmp);
-      const crop = f.backdrop ? coverCrop(bmp.width, bmp.height, f.cols, f.rows) : null;
-      const uv = crop ? [crop.sx / bmp.width, crop.sy / bmp.height, crop.sw / bmp.width, crop.sh / bmp.height] : [0, 0, 1, 1];
-      photoTex.set(f.id, { tex, range: [r.lo, r.hi], uv });
+      photoTex.set(f.id, { tex, range: [r.lo, r.hi] });
       onLoad.forEach((cb) => cb(f));
     }, () => {});
   }
 
   const swayOf = (world, f) => (world.reducedMotion || !f.darkroom ? 0 : Math.sin(world.t * (2 * Math.PI) / (4 + 3 * f.sway) + f.sway * 6.28) * 0.3);
 
+  // The train (world.train: { T, F, look, glows }) over the level's box, from map cell (ox, oy). Side-on it
+  // fills the view (the tunnel runs on past the room's ends); top-down it is clipped to the room. Each cell
+  // is an exact glyph with an opaque background, then its halation is added over it.
+  function drawTrain(world, left, top, cols, rows, vx, vy, drawGlyphs, clip) {
+    const tr = world.train, a = map.arena;
+    if (!tr || !a) return;
+    const ox = a.x + 1, oy = a.y + 1;
+    let x0 = Math.floor(left) - ox - 1, y0 = Math.floor(top) - oy - 1;
+    let x1 = x0 + Math.ceil(cols) + 3, y1 = y0 + Math.ceil(rows) + 3;
+    if (clip) { x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(a.cols, x1); y1 = Math.min(a.rows, y1); }
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+    trainWin = paintWindow(tr.T, tr.F, tr.look, x0, y0, w, h, trainWin);
+    const n = w * h;
+    if (trainData.length < n * FLOATS) trainData = new Float32Array(n * FLOATS * 1.5);
+    const { ch, fg, bg } = trainWin;
+    let k = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x, j = i * 4;
+      trainData[k++] = ox + x0 + x;
+      trainData[k++] = oy + y0 + y;
+      trainData[k++] = gi(ch[i]);
+      trainData[k++] = fg[j] / 255; trainData[k++] = fg[j + 1] / 255; trainData[k++] = fg[j + 2] / 255;
+      trainData[k++] = bg[j] / 255; trainData[k++] = bg[j + 1] / 255; trainData[k++] = bg[j + 2] / 255; trainData[k++] = 1;
+    }
+    drawGlyphs(trainData.subarray(0, k));
+    // Halation: emissive cells, tracers and muzzle flashes, blurred and added (only over the train).
+    const extra = (tr.glows || []).map((g) => ({ x: g.x - x0, y: g.y - y0, c: g.c }));
+    const glow = halation(trainWin.glow, w, h, extra, undefined, halo);
+    const pl = progs.light;
+    gl.useProgram(pl.p);
+    gl.bindVertexArray(quadVao);
+    gl.uniform2f(pl.u.u_view, vx, vy);
+    gl.uniform2f(pl.u.u_cellPx, M.cw * dpr, M.ch * dpr);
+    gl.uniform2f(pl.u.u_lorigin, ox + x0, oy + y0);
+    gl.uniform2f(pl.u.u_lsize, w, h);
+    gl.uniform1f(pl.u.u_canvasH, canvas.height);
+    gl.uniform1i(pl.u.u_light, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, trainTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, glow);
+    setFilter(gl.LINEAR, gl.LINEAR);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    // Only over the window: past it the texture's edge would smear across the screen.
+    const px = (cx) => Math.round((cx - vx) * M.cw * dpr), py = (cy) => Math.round((cy - vy) * M.ch * dpr);
+    const sx0 = px(ox + x0), sx1 = px(ox + x1), sy0 = py(oy + y0), sy1 = py(oy + y1);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(sx0, canvas.height - sy1, sx1 - sx0, sy1 - sy0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.SCISSOR_TEST);
+  }
+
   function draw(world) {
     if (!gl || lost || !m) return;
-    const cols = viewW / m.cw, rows = viewH / m.ch;
+    if (!M) M = m;
+    const side = world.mode === 'side' && !!map.arena;
+    const cols = viewW / M.cw, rows = viewH / M.ch;
     const left = world.cam.x - cols / 2, top = world.cam.y - rows / 2;
     // Snap the view to device pixels so glyphs stay sharp while scrolling
-    const vx = Math.round(left * m.cw * dpr) / (m.cw * dpr), vy = Math.round(top * m.ch * dpr) / (m.ch * dpr);
+    const vx = Math.round(left * M.cw * dpr) / (M.cw * dpr), vy = Math.round(top * M.ch * dpr) / (M.ch * dpr);
     const origin = [Math.floor(vx) - 1, Math.floor(vy) - 1];
 
-    // The arena's backdrop is a large image: only once you're near it.
-    const arenaNear = world.mode === 'side' || !!world.want || nearArena(map, world.player);
-    for (const f of map.frames) {
-      if (f.backdrop && !arenaNear) continue;
-      if (f.x < left + cols * 2 && f.x + f.w > left - cols && f.y < top + rows * 2 && f.y + f.h > top - rows) request(f);
-    }
-
-    // Pass 1: scene
-    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
-    gl.viewport(0, 0, sceneSize[0] * SX, sceneSize[1] * SY);
-    gl.disable(gl.BLEND);
-    gl.bindVertexArray(quadVao);
-    const pt = progs.tiles;
-    gl.useProgram(pt.p);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, tilesTex);
-    gl.uniform1i(pt.u.u_tiles, 0);
-    gl.uniform2f(pt.u.u_origin, origin[0], origin[1]);
-    gl.uniform2f(pt.u.u_cells, sceneSize[0], sceneSize[1]);
-    gl.uniform2f(pt.u.u_mapSize, map.W, map.H);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    gl.bindVertexArray(glyphVao);
-    const pp = progs.photo;
-    gl.useProgram(pp.p);
-    gl.uniform2f(pp.u.u_origin, origin[0], origin[1]);
-    gl.uniform2f(pp.u.u_cells, sceneSize[0], sceneSize[1]);
-    gl.uniform1i(pp.u.u_img, 0);
-    for (const f of map.frames) {
-      const t = photoTex.get(f.id);
-      if (!t || f.backdrop) continue; // the arena's photo is drawn as itself, after the ASCII pass
-      if (f.x > origin[0] + sceneSize[0] || f.x + f.w < origin[0] || f.y > origin[1] + sceneSize[1] || f.y + f.h < origin[1]) continue;
-      gl.bindTexture(gl.TEXTURE_2D, t.tex);
-      gl.uniform4f(pp.u.u_rect, f.x + 1 + swayOf(world, f), f.y + 1, f.cols, f.rows);
-      gl.uniform2f(pp.u.u_range, t.range[0], t.range[1]);
-      gl.uniform1f(pp.u.u_mono, f.darkroom ? 1 : 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
-    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
-    gl.generateMipmap(gl.TEXTURE_2D);
-
-    // Pass 2: ASCII
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.bindVertexArray(quadVao);
-    const pa = progs.ascii;
-    gl.useProgram(pa.p);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
-    gl.uniform1i(pa.u.u_scene, 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, atlasTex);
-    gl.uniform1i(pa.u.u_atlas, 1);
-    gl.uniform2f(pa.u.u_view, vx, vy);
-    gl.uniform2f(pa.u.u_cellPx, m.cw * dpr, m.ch * dpr);
-    gl.uniform2f(pa.u.u_origin, origin[0], origin[1]);
-    gl.uniform1f(pa.u.u_canvasH, canvas.height);
-    gl.uniform1f(pa.u.u_atlasCols, atlas.cols);
-    gl.uniform2f(pa.u.u_atlasGlyphs, atlas.cols, atlas.rows);
-    gl.uniform1fv(pa.u.u_ramp, [...RAMP].map(gi));
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    // Pass 3: exact glyphs. Labels and plaques are lit with the room; the focus border and the people
-    // are drawn after the lighting so they stay crisp and readable.
+    // Exact glyphs (labels, plaques, borders, people, the train) as instanced quads.
     const pg = progs.glyph;
     const drawGlyphs = (data) => {
       if (!data.length) return;
@@ -439,56 +455,114 @@ export function createGlRenderer() {
       gl.bindTexture(gl.TEXTURE_2D, atlasTex);
       gl.uniform1i(pg.u.u_atlas, 1);
       gl.uniform2f(pg.u.u_view, vx, vy);
-      gl.uniform2f(pg.u.u_viewCells, canvas.width / (m.cw * dpr), canvas.height / (m.ch * dpr));
+      gl.uniform2f(pg.u.u_viewCells, canvas.width / (M.cw * dpr), canvas.height / (M.ch * dpr));
       gl.uniform1f(pg.u.u_atlasCols, atlas.cols);
       gl.uniform2f(pg.u.u_atlasGlyphs, atlas.cols, atlas.rows);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, data.length / FLOATS);
     };
-    // Side view: the arena's photo over its back wall, then its platforms (both lit with the room below).
-    const bd = world.mode === 'side' && map.arena && map.arena.backdrop;
-    const bt = bd && photoTex.get(bd.id);
-    if (bt) {
-      const pb = progs.backdrop;
-      gl.disable(gl.BLEND);
-      gl.useProgram(pb.p);
-      gl.bindVertexArray(glyphVao);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, bt.tex);
-      gl.uniform1i(pb.u.u_img, 0);
-      gl.uniform4f(pb.u.u_rect, bd.x + 1, bd.y + 1, bd.cols, bd.rows);
-      gl.uniform4f(pb.u.u_uv, bt.uv[0], bt.uv[1], bt.uv[2], bt.uv[3]);
-      gl.uniform2f(pb.u.u_view, vx, vy);
-      gl.uniform2f(pb.u.u_viewCells, canvas.width / (m.cw * dpr), canvas.height / (m.ch * dpr));
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
-    drawGlyphs(staticGlyphs);
-    const people = [];
-    for (const e of world.people || []) pushGlyph(people, e.x - 0.5, e.y - 0.5, e.glyph, e.color);
-    drawGlyphs(new Float32Array(people));
 
-    if (world.lighting) {
-      const wx = Math.floor(left) - 1, wy = Math.floor(top) - 1;
-      const ww = Math.ceil(cols) + 3, wh = Math.ceil(rows) + 3;
-      const { rgba, glow } = lightWindow(world.lighting, wx, wy, ww, wh, world.player, world.t, !world.reducedMotion);
-      const pl = progs.light;
-      gl.useProgram(pl.p);
-      gl.bindVertexArray(quadVao);
-      gl.uniform2f(pl.u.u_view, vx, vy);
-      gl.uniform2f(pl.u.u_cellPx, m.cw * dpr, m.ch * dpr);
-      gl.uniform2f(pl.u.u_lorigin, wx, wy);
-      gl.uniform2f(pl.u.u_lsize, ww, wh);
-      gl.uniform1f(pl.u.u_canvasH, canvas.height);
-      gl.uniform1i(pl.u.u_light, 0);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.enable(gl.BLEND);
-      for (const [tex, data, src, dst] of [[lightTex, rgba, gl.DST_COLOR, gl.ZERO], [glowTex, glow, gl.ONE, gl.ONE]]) {
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, ww, wh, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-        setFilter(gl.LINEAR, gl.LINEAR);
-        gl.blendFunc(src, dst);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (side) {
+      // Side-on the train is the whole view: nothing of the gallery shows.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(C.bg[0] / 255, C.bg[1] / 255, C.bg[2] / 255, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      drawTrain(world, left, top, cols, rows, vx, vy, drawGlyphs, false);
+    } else {
+      // Photos within about a screen of the view (never the arena's: it is opened by E, and loads then).
+      for (const f of map.frames) {
+        if (f.backdrop) continue;
+        if (f.x < left + cols * 2 && f.x + f.w > left - cols && f.y < top + rows * 2 && f.y + f.h > top - rows) request(f);
       }
+
+      // Pass 1: scene
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
+      gl.viewport(0, 0, sceneSize[0] * SX, sceneSize[1] * SY);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(quadVao);
+      const pt = progs.tiles;
+      gl.useProgram(pt.p);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tilesTex);
+      gl.uniform1i(pt.u.u_tiles, 0);
+      gl.uniform2f(pt.u.u_origin, origin[0], origin[1]);
+      gl.uniform2f(pt.u.u_cells, sceneSize[0], sceneSize[1]);
+      gl.uniform2f(pt.u.u_mapSize, map.W, map.H);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      gl.bindVertexArray(glyphVao);
+      const pp = progs.photo;
+      gl.useProgram(pp.p);
+      gl.uniform2f(pp.u.u_origin, origin[0], origin[1]);
+      gl.uniform2f(pp.u.u_cells, sceneSize[0], sceneSize[1]);
+      gl.uniform1i(pp.u.u_img, 0);
+      for (const f of map.frames) {
+        const t = photoTex.get(f.id);
+        if (!t || f.backdrop) continue;
+        if (f.x > origin[0] + sceneSize[0] || f.x + f.w < origin[0] || f.y > origin[1] + sceneSize[1] || f.y + f.h < origin[1]) continue;
+        gl.bindTexture(gl.TEXTURE_2D, t.tex);
+        gl.uniform4f(pp.u.u_rect, f.x + 1 + swayOf(world, f), f.y + 1, f.cols, f.rows);
+        gl.uniform2f(pp.u.u_range, t.range[0], t.range[1]);
+        gl.uniform1f(pp.u.u_mono, f.darkroom ? 1 : 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+      gl.generateMipmap(gl.TEXTURE_2D);
+
+      // Pass 2: ASCII
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.bindVertexArray(quadVao);
+      const pa = progs.ascii;
+      gl.useProgram(pa.p);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+      gl.uniform1i(pa.u.u_scene, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+      gl.uniform1i(pa.u.u_atlas, 1);
+      gl.uniform2f(pa.u.u_view, vx, vy);
+      gl.uniform2f(pa.u.u_cellPx, M.cw * dpr, M.ch * dpr);
+      gl.uniform2f(pa.u.u_origin, origin[0], origin[1]);
+      gl.uniform1f(pa.u.u_canvasH, canvas.height);
+      gl.uniform1f(pa.u.u_atlasCols, atlas.cols);
+      gl.uniform2f(pa.u.u_atlasGlyphs, atlas.cols, atlas.rows);
+      gl.uniform1fv(pa.u.u_ramp, [...RAMP].map(gi));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // Pass 3: exact glyphs. Labels and plaques are lit with the room; the focus border and the people
+      // are drawn after the lighting so they stay crisp and readable.
+      drawGlyphs(staticGlyphs);
+      const people = [];
+      for (const e of world.people || []) pushGlyph(people, e.x - 0.5, e.y - 0.5, e.glyph, e.color);
+      drawGlyphs(new Float32Array(people));
+
+      if (world.lighting) {
+        const wx = Math.floor(left) - 1, wy = Math.floor(top) - 1;
+        const ww = Math.ceil(cols) + 3, wh = Math.ceil(rows) + 3;
+        const { rgba, glow } = lightWindow(world.lighting, wx, wy, ww, wh, world.player, world.t, !world.reducedMotion);
+        const pl = progs.light;
+        gl.useProgram(pl.p);
+        gl.bindVertexArray(quadVao);
+        gl.uniform2f(pl.u.u_view, vx, vy);
+        gl.uniform2f(pl.u.u_cellPx, M.cw * dpr, M.ch * dpr);
+        gl.uniform2f(pl.u.u_lorigin, wx, wy);
+        gl.uniform2f(pl.u.u_lsize, ww, wh);
+        gl.uniform1f(pl.u.u_canvasH, canvas.height);
+        gl.uniform1i(pl.u.u_light, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.enable(gl.BLEND);
+        for (const [tex, data, src, dst] of [[lightTex, rgba, gl.DST_COLOR, gl.ZERO], [glowTex, glow, gl.ONE, gl.ONE]]) {
+          gl.bindTexture(gl.TEXTURE_2D, tex);
+          gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, ww, wh, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+          setFilter(gl.LINEAR, gl.LINEAR);
+          gl.blendFunc(src, dst);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+      }
+      // The arena from outside: the train at the gallery's cell size, lit by its own light.
+      drawTrain(world, left, top, cols, rows, vx, vy, drawGlyphs, true);
     }
 
     dynamic.length = 0;
@@ -498,21 +572,20 @@ export function createGlRenderer() {
     }
     if (world.focus && !world.focus.darkroom && !world.focus.backdrop) pushBorder(dynamic, world.focus, C.frameFocus);
     for (const e of world.entities || []) pushGlyph(dynamic, e.x - 0.5, e.y - 0.5, e.glyph, e.color, C.bg);
-    if (world.mode === 'side') drawGlyphs(arenaGlyphs); // platforms over the light, at full brightness
     drawGlyphs(new Float32Array(dynamic));
     drawFigures(world.figures || [], vx, vy);
     gl.bindVertexArray(null);
   }
 
   function cellAt(world, px, py) {
-    const cols = viewW / m.cw, rows = viewH / m.ch;
-    return { x: Math.floor(world.cam.x - cols / 2 + px / m.cw), y: Math.floor(world.cam.y - rows / 2 + py / m.ch) };
+    const k = M || m, cols = viewW / k.cw, rows = viewH / k.ch;
+    return { x: Math.floor(world.cam.x - cols / 2 + px / k.cw), y: Math.floor(world.cam.y - rows / 2 + py / k.ch) };
   }
 
   // Screen point → map position in fractional cells
   function pointAt(world, px, py) {
-    const cols = viewW / m.cw, rows = viewH / m.ch;
-    return { x: world.cam.x - cols / 2 + px / m.cw, y: world.cam.y - rows / 2 + py / m.ch };
+    const k = M || m, cols = viewW / k.cw, rows = viewH / k.ch;
+    return { x: world.cam.x - cols / 2 + px / k.cw, y: world.cam.y - rows / 2 + py / k.ch };
   }
 
   function dispose() {
@@ -521,11 +594,12 @@ export function createGlRenderer() {
       photoTex.forEach((t) => gl.deleteTexture(t.tex));
       gl.deleteTexture(lightTex);
       gl.deleteTexture(glowTex);
+      gl.deleteTexture(trainTex);
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     }
     photoTex.clear();
     gl = null;
   }
 
-  return { name: 'gl', init, resize, draw, dispose, cellAt, pointAt, onLoad, get lost() { return lost; }, get metrics() { return m; } };
+  return { name: 'gl', init, resize, setView, draw, dispose, cellAt, pointAt, onLoad, missing, get lost() { return lost; }, get metrics() { return M || m; } };
 }

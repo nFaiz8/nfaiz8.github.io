@@ -2,7 +2,6 @@
 import { withBrowser, ready, sleep, SHOTS } from './lib.mjs';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import { coverCrop } from '../src/arena.js';
 
 const results = [];
 const check = async (name, fn) => {
@@ -215,7 +214,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.goto(`${url}#/room/arena`); await ready(page);
     assert.equal(await page.evaluate(() => window.__ascii.mode()), 'side', '#/room/arena lands in the side view');
     const spot = await page.evaluate(() => {
-      const a = window.__ascii.map.arena, L = a.level, r = L.rows - 5;
+      const a = window.__ascii.map.arena, L = a.level, r = L.door.r + 1 - 5; // 5 rows above the floor's top
       for (let c = 2; c < L.cols - 2; c++) {
         const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] === 1);
         const clear = [1, 2, 3, 4].every((k) => [-1, 0, 1].every((d) => !L.cells[(r + k) * L.cols + c + d]));
@@ -239,11 +238,11 @@ await withBrowser(async ({ page, url, errors }) => {
   });
   await check('arena: a double jump (Space, then Space again in the air) reaches higher than a single jump', async () => {
     await page.goto(`${url}#/room/arena`); await ready(page);
-    // A spot on the long ═ with 15 clear rows above it, so neither jump meets anything.
+    // A spot on a car's floor with 15 clear rows above it (up to the roof), so neither jump meets anything.
     const spot = await page.evaluate(() => {
-      const a = window.__ascii.map.arena, L = a.level, r = L.rows - 5;
+      const a = window.__ascii.map.arena, L = a.level, r = L.door.r + 1;
       for (let c = 2; c < L.cols - 2; c++) {
-        const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] === 1);
+        const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] !== 0);
         const clear = [...Array(15)].every((_, k) => [-1, 0, 1].every((d) => !L.cells[(r - 1 - k) * L.cols + c + d]));
         if (run && clear) return { x: a.x + 1 + c + 0.5, y: a.y + 1 + r - 1.5 };
       }
@@ -276,113 +275,142 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(two.up > one.up + 3, `the double jump went ${two.up} rows`);
     assert.ok(two.flip, 'the air jump was taken');
   });
-  for (const r of ['canvas', 'gl']) {
-    await check(`${r}: the arena photo fills the back wall in the side view, with bright platforms`, async () => {
-      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
-      const id = await page.evaluate(() => window.__ascii.map.arena.backdrop.id);
-      await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, id);
-      await sleep(400);
-      const shot = await page.screenshot({ clip: { x: 200, y: 150, width: 1040, height: 600 } });
-      const { channels } = await sharp(shot).stats();
-      const mean = channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
-      const sd = channels.slice(0, 3).reduce((s, c) => s + c.stdev, 0) / 3;
-      console.log(`  ${r} arena: mean ${mean.toFixed(1)}, stdev ${sd.toFixed(1)}`);
-      assert.ok(mean > 25 && sd > 20, 'a photo, not a dark room');
-      const top = await page.evaluate(() => { window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y); return window.__ascii.mode(); });
-      assert.equal(top, 'top');
-    });
-  }
   // Where some cells are on screen right now, in CSS pixels.
   const cellsClip = (p, x0, y0, w, h) => p.evaluate((x0, y0, w, h) => {
     const { world, metrics } = window.__ascii, m = metrics();
     const left = world.cam.x - innerWidth / m.cw / 2, top = world.cam.y - innerHeight / m.ch / 2;
     return { x: (x0 - left) * m.cw, y: (y0 - top) * m.ch, width: w * m.cw, height: h * m.ch };
   }, x0, y0, w, h);
+  // The train level (train level addendum): the side view is two subway cars in a tunnel, drawn as glyphs.
   for (const r of ['canvas', 'gl']) {
-    await check(`${r}: from outside the arena is a dark room; inside, its platforms glow warm white over the photo`, async () => {
+    await check(`${r}: the arena is the train, seen from outside too; inside, the floor you stand on is warm white over the lit car; no photo drawn`, async () => {
       await page.goto(`${url}?r=${r}`); await ready(page);
       const a = await arenaInfo(page);
       await page.evaluate((d) => window.__ascii.teleport(d.x + 4.5, d.y + 1.5), a.door);
       await sleep(1500);
-      // Top-down, from the corridor: the arena's inside, west of the door.
+      // Top-down, from the corridor: the train in the arena's box, lit by its own light.
       const outside = await sharp(await page.screenshot({ clip: await cellsClip(page, a.door.x - 40, a.door.y - 12, 30, 12) })).stats();
-      const dark = outside.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
-      // Side view: 14 cells from the middle of the widest platform 5 rows up from the floor (row 29).
+      const lit = outside.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
-      const c0 = await page.evaluate(() => {
-        const L = window.__ascii.map.arena.level, row = L.rows - 5;
-        let best = [0, 0];
-        for (let c = 0, s = -1; c <= L.cols; c++) {
-          const on = c < L.cols && L.cells[row * L.cols + c] === 1;
-          if (on && s < 0) s = c;
-          if (!on && s >= 0) { if (c - s > best[1] - best[0]) best = [s, c]; s = -1; }
-        }
-        return Math.floor((best[0] + best[1]) / 2) - 7;
-      });
-      await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
-      await sleep(400);
+      await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 8000 });
+      await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 60.5, a.floorY - 1.5); });
+      await sleep(1500);
+      const L = await page.evaluate(() => window.__ascii.map.arena.level.door.r + 1); // the floor's top row
       const strip = async (row) => {
-        const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + c0, a.y + 1 + row, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
+        const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 40, a.y + 1 + row, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
         const px = [];
         for (let i = 0; i < data.length; i += info.channels) px.push([data[i], data[i + 1], data[i + 2]]);
         const lum = px.map(([R, G, B]) => (R + G + B) / 3).sort((x, y) => x - y);
-        // The strokes: the brightest twentieth of the strip, and whether they're warm (red over blue).
         const bright = px.filter(([R, G, B]) => (R + G + B) / 3 >= lum[Math.floor(lum.length * 0.95)]);
-        const warm = bright.filter(([R, , B]) => R >= B + 20).length / bright.length;
+        const warm = bright.filter(([R, , B]) => R >= B + 15).length / bright.length;
         return { median: lum[Math.floor(lum.length / 2)], p95: lum[Math.floor(lum.length * 0.95)], warm };
       };
-      const plat = await strip(29), above = await strip(28);
-      console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform strokes ${plat.p95.toFixed(0)} (${(plat.warm * 100).toFixed(0)}% warm), median ${plat.median.toFixed(0)} (row above ${above.median.toFixed(0)})`);
-      assert.ok(dark < 12, `outside, the arena is dark (${dark.toFixed(1)})`);
-      // Bright against any photo: street photo strokes ~1.9× the row above, the dark station ~2×; no platform ~1×.
-      assert.ok(plat.p95 > 1.4 * above.median && plat.warm > 0.5, 'bright, warm platform strokes');
-      assert.ok(plat.median > 0.7 * above.median, 'the photo shows behind the strokes (no dark band)');
+      const floor = await strip(L), above = await strip(L - 2);
+      const all = await sharp(await page.screenshot()).stats();
+      const mean = all.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3, sd = all.channels.slice(0, 3).reduce((s, c) => s + c.stdev, 0) / 3;
+      console.log(`  ${r} train: outside mean ${lit.toFixed(1)}; inside mean ${mean.toFixed(1)} sd ${sd.toFixed(1)}; floor strokes ${floor.p95.toFixed(0)} (${(floor.warm * 100).toFixed(0)}% warm), 2 rows up p95 ${above.p95.toFixed(0)}`);
+      assert.ok(lit > 12, `from outside the train shows, lit (${lit.toFixed(1)})`);
+      assert.ok(mean > 20 && sd > 20, 'a lit, detailed scene');
+      assert.ok(floor.p95 > 200 && floor.warm > 0.5, 'bright, warm floor strokes');
+      assert.ok(floor.p95 >= above.p95, 'the floor at least as bright as the car above it');
+      assert.equal(await page.evaluate(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id)), false, 'the photo was not loaded to be drawn');
     });
   }
-  // How closely a screenshot of some arena cells matches the backdrop photo itself (luminance correlation).
-  const likePhoto = async (p, a, cx, cy, w, h) => {
-    const src = await p.evaluate(() => window.__ascii.map.arena.backdrop.photo.src.hi);
-    const file = new URL(`../public/${src}`, import.meta.url).pathname;
-    const shot = await sharp(await p.screenshot({ clip: await cellsClip(p, a.x + 1 + cx, a.y + 1 + cy, w, h) })).raw().toBuffer({ resolveWithObject: true });
-    const { width: W, height: H } = await sharp(file).metadata();
-    const cr = coverCrop(W, H, a.cols, a.rows), kx = cr.sw / a.cols, ky = cr.sh / a.rows;
-    const ref = await sharp(file).extract({ left: Math.round(cr.sx + cx * kx), top: Math.round(cr.sy + cy * ky), width: Math.round(w * kx), height: Math.round(h * ky) })
-      .resize(shot.info.width, shot.info.height, { fit: 'fill' }).removeAlpha().raw().toBuffer();
-    const n = shot.info.width * shot.info.height, sc = shot.info.channels;
-    const A = [], B = [];
-    for (let i = 0; i < n; i++) { A.push(shot.data[i * sc] + shot.data[i * sc + 1] + shot.data[i * sc + 2]); B.push(ref[i * 3] + ref[i * 3 + 1] + ref[i * 3 + 2]); }
-    const mean = (v) => v.reduce((s, x) => s + x, 0) / v.length, ma = mean(A), mb = mean(B);
-    let ab = 0, aa = 0, bb = 0;
-    for (let i = 0; i < n; i++) { ab += (A[i] - ma) * (B[i] - mb); aa += (A[i] - ma) ** 2; bb += (B[i] - mb) ** 2; }
-    return ab / Math.sqrt(aa * bb);
-  };
-  for (const r of ['canvas', 'gl']) {
-    await check(`${r}: the arena backdrop is the photograph itself, not characters`, async () => {
-      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
-      const a = await page.evaluate(() => { const a = window.__ascii.map.arena; return { x: a.x, y: a.y, cols: a.cols, rows: a.rows, id: a.backdrop.id }; });
-      await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
-      await sleep(400);
-      // A gap in the level (rows 20–23, cols 64–83, the train's side): only the photo is there.
-      const corr = await likePhoto(page, a, 64, 20, 20, 4);
-      console.log(`  ${r} arena: backdrop vs the photo file, correlation ${corr.toFixed(3)}`);
-      assert.ok(corr > 0.9, `the photograph (${corr.toFixed(3)})`);
-      // A ▓ block is only its outline: the photo shows inside it (the tree trunk is one).
-      const b = await page.evaluate(() => {
-        const L = window.__ascii.map.arena.level, k = L.cells.indexOf(2);
-        if (k < 0) return null;
-        const c = k % L.cols, r = Math.floor(k / L.cols);
-        let w = 0, h = 0;
-        while (L.cells[r * L.cols + c + w] === 2) w++;
-        while (L.cells[(r + h) * L.cols + c] === 2) h++;
-        return { c, r, w, h };
-      });
-      if (b && b.w > 2 && b.h > 2) {
-        const inside = await likePhoto(page, a, b.c + 1, b.r + 1, b.w - 2, b.h - 2);
-        console.log(`  ${r} arena: inside a ▓ block vs the photo file, correlation ${inside.toFixed(3)}`);
-        assert.ok(inside > 0.8, `the photo inside the block (${inside.toFixed(3)})`);
+  await check('the side view zooms by gun: about 20 rows with the deagle, the whole room with the sniper; the mouse aims true at both', async () => {
+    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.waitForFunction(() => window.__ascii.pvp().entered && !window.__ascii.tilting(), { timeout: 8000 });
+    const rows = () => page.evaluate(() => innerHeight / window.__ascii.metrics().ch);
+    const facesMouse = async () => {
+      const out = [];
+      for (const side of [-1, 1]) {
+        // 4 cells to that side of me, level with my chest, on screen by this zoom's cell size.
+        const at = await page.evaluate((side) => {
+          const { world, metrics } = window.__ascii, m = metrics(), p = world.player;
+          const left = world.cam.x - innerWidth / m.cw / 2, top = world.cam.y - innerHeight / m.ch / 2;
+          return { x: (p.x + 4 * side - left) * m.cw, y: (p.y - 0.5 - top) * m.ch };
+        }, side);
+        await page.mouse.move(at.x, at.y);
+        await sleep(150);
+        const q = await page.evaluate((at) => ({ pt: window.__ascii.pointAt(at.x, at.y), p: { ...window.__ascii.world.player }, f: window.__ascii.pvp().bodies(performance.now()).find((b) => b.me).state.facing }), at);
+        assert.ok(Math.abs(q.pt.x - (q.p.x + 4 * side)) < 0.6 && Math.abs(q.pt.y - (q.p.y - 0.5)) < 0.6, `pointAt under the mouse (${JSON.stringify(q.pt)} vs ${q.p.x}, ${q.p.y})`);
+        out.push(q.f);
       }
-    });
+      return out;
+    };
+    await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 60.5, a.floorY - 1.5); });
+    await sleep(800);
+    const deagle = await rows();
+    assert.ok(deagle >= 20 && deagle < 22.4, `deagle: ${deagle.toFixed(2)} rows`);
+    assert.deepEqual(await facesMouse(), [-1, 1], 'faces the mouse (deagle zoom)');
+    await page.evaluate(() => { window.__ascii.pvp().me.gun = 'sniper'; });
+    await sleep(100);
+    const easing = await page.evaluate(() => window.__ascii.zoom());
+    await sleep(600);
+    const sniper = await rows(), z = await page.evaluate(() => window.__ascii.zoom());
+    console.log(`  zoom: deagle ${deagle.toFixed(2)} rows, sniper ${sniper.toFixed(2)} rows (mid-ease ${easing.rows.toFixed(1)}, settled ${easing.settled})`);
+    assert.ok(easing.rows > 20 && easing.rows < 33 && !easing.settled, 'it eases');
+    assert.ok(z.settled && sniper >= 33 && sniper < 37, `sniper: ${sniper.toFixed(2)} rows`);
+    assert.deepEqual(await facesMouse(), [-1, 1], 'faces the mouse (sniper zoom)');
+    assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'no glyph is missing from the atlas');
+    await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
+    await sleep(600);
+  });
+  await check('L switches the train\'s look (line, ascii) and the next visit remembers it; the HUD button does too, by name', async () => {
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.evaluate(() => { try { localStorage.removeItem('ascii-look'); } catch {} });
+    await page.goto('about:blank');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 8000 });
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'line by default');
+    const btn = () => page.$eval('#look-btn', (b) => ({ hidden: b.hidden, label: b.getAttribute('aria-label'), text: b.textContent }));
+    assert.match((await btn()).label, /look: line/);
+    assert.equal((await btn()).hidden, false, 'shown in the side view');
+    await page.focus('#stage');
+    await page.keyboard.press('KeyL');
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'ascii');
+    assert.match((await btn()).label, /look: ascii/);
+    await page.goto('about:blank');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'ascii', 'remembered');
+    await page.click('#look-btn');
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'the button switches it back');
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'stage', 'focus back on the stage');
+    await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+    await sleep(200);
+    assert.equal((await btn()).hidden, true, 'hidden top-down');
+  });
+  for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
+    for (const r of ['canvas', 'gl']) {
+      await check(`${r} on a ${size}: the train in both looks with the deagle and the sniper (screenshots), no ? glyphs`, async () => {
+        await page.setViewport(vp);
+        await page.goto('about:blank');
+        await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+        await page.waitForFunction(() => window.__ascii.pvp().entered && !window.__ascii.tilting(), { timeout: 8000 });
+        await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 150.5, a.floorY - 1.5); });
+        for (const gun of ['deagle', 'sniper']) {
+          await page.evaluate((g) => { window.__ascii.pvp().me.gun = g; }, gun);
+          for (const look of ['line', 'ascii']) {
+            if (await page.evaluate(() => window.__ascii.look()) !== look) await page.evaluate(() => document.getElementById('look-btn').click());
+            await sleep(900);
+            await page.screenshot({ path: `${SHOTS}/train-${r}-${size}-${look}-${gun}.png` });
+          }
+        }
+        await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; if (window.__ascii.look() !== 'line') document.getElementById('look-btn').click(); });
+        assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'no glyph drawn as ?');
+      });
+    }
   }
+  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  await check('Reduce Motion: the train holds still (one frame, no station passing, the dying tube dim and steady)', async () => {
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.goto('about:blank');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    const frames = [];
+    for (let k = 0; k < 4; k++) { frames.push(await page.evaluate(() => { const F = window.__ascii.world.train.F; return JSON.stringify([F.off, F.tubes, F.spoke, F.lamps.map((l) => l.x)]); })); await sleep(400); }
+    assert.equal(new Set(frames).size, 1, 'the same frame');
+    await page.emulateMediaFeatures([]);
+  });
   await check('arena on a landscape phone: ◀ ▶ JUMP ▼ show only inside, are big enough, and work', async () => {
     await page.setViewport({ width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true });
     await page.goto(url); await ready(page);
@@ -463,18 +491,18 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
   });
   for (const r of ['canvas', 'gl']) {
-    await check(`${r}: the backdrop's large image loads only near the arena, not at spawn`, async () => {
+    await check(`${r}: the arena photo's large image is never fetched to draw the arena (E opens it, and loads it then)`, async () => {
       const hits = [];
       const onReq = (q) => { if (/\/hi\//.test(q.url())) hits.push(q.url()); };
       page.on('request', onReq);
       try {
         await page.goto(`${url}?r=${r}`); await ready(page);
         const a = await arenaInfo(page);
-        await sleep(2000);
-        assert.deepEqual(hits.filter((h) => h.includes(a.id)), [], 'fetched at spawn');
         await page.evaluate((d) => window.__ascii.teleport(d.x + 6.5, d.y + 1.5), a.door); // in the corridor
-        await page.waitForFunction((id) => window.__ascii.loaded(id), { timeout: 15000 }, a.id);
-        assert.equal(hits.filter((h) => h.includes(a.id)).length, 1);
+        await sleep(1500);
+        await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+        await sleep(2000);
+        assert.deepEqual(hits.filter((h) => h.includes(a.id)), [], 'fetched for drawing');
       } finally { page.off('request', onReq); }
     });
   }
@@ -580,7 +608,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await page.$eval('#note', (e) => e.textContent), hint, 'the note changed');
   });
   // The stickman (stickman spec §8): my figure in every pose, pinned with __ascii.pose, with each renderer,
-  // on a computer and on a landscape phone, over the brightest part of the arena photo.
+  // on a computer and on a landscape phone, over the brightest part of the train.
   const POSES = [
     ['idle', {}], ['run', { vx: 30 }], ['rise', { ground: false, vy: -20 }], ['fall', { ground: false, vy: 20 }],
     ['shoot 0', { act: 'shoot', actT: 0.1, aim: 0 }], ['shoot -45', { act: 'shoot', actT: 0.1, aim: -Math.PI / 4 }],
@@ -618,16 +646,18 @@ await withBrowser(async ({ page, url, errors }) => {
   };
   for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
     for (const r of ['canvas', 'gl']) {
-      await check(`${r} on a ${size}: my stick figure in every pose, amber with a dark outline over the brightest part of the photo`, async () => {
+      await check(`${r} on a ${size}: my stick figure in every pose, amber with a dark outline over the brightest part of the train`, async () => {
         await page.setViewport(vp);
         await page.goto('about:blank');
         await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
-        await page.waitForFunction(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id), { timeout: 30000 });
+        // The train held still at a station (its brightest), so before and after differ only by the figure.
+        await page.evaluate(() => window.__ascii.freezeTrain(0));
         await page.evaluate(() => window.__ascii.pose({ act: 'dead', actT: 5 })); // nothing drawn
         await sleep(1500);
         const v = await viewOf(page);
         const spot = await brightest(page, v);
-        assert.ok(spot && spot.lum > 100, `a bright spot (${spot && spot.lum.toFixed(0)})`);
+        // The train is darker than the photo was: its brightest 3×4 cells at a station are about 40–70.
+        assert.ok(spot && spot.lum > 35, `a bright spot (${spot && spot.lum.toFixed(0)})`);
         const pin = { x: spot.x, y: spot.y, vx: 0, vy: 0, facing: 1, ground: true, act: 'idle', actT: 0, aim: 0, landT: 10, spawnT: 10 };
         // 8 cells either side, 4.5 rows above to 2.5 below the body's centre.
         const clip = { x: (spot.x - 8 - v.left) * v.cw, y: (spot.y - 4.5 - v.top) * v.ch, width: 16 * v.cw, height: 7 * v.ch };
@@ -651,6 +681,8 @@ await withBrowser(async ({ page, url, errors }) => {
             if (ink(fig.data[i], fig.data[i + 1], fig.data[i + 2]) && !ink(base.data[i], base.data[i + 1], base.data[i + 2])) { mask[y * w + x] = 1; n++; }
           }
           // The ring: within the outline's reach of those pixels.
+          // Dark: under 40 and darkened by the outline (the train is dark already in places, so "dark before" alone
+          // would hide an outline drawn over it).
           let ring = 0, dark = 0, baseDark = 0;
           const seen = new Uint8Array(w * h);
           for (let j = 0; j < w * h; j++) {
@@ -660,14 +692,15 @@ await withBrowser(async ({ page, url, errors }) => {
               const q = y * w + x;
               if (mask[q] || seen[q]) continue;
               seen[q] = 1; ring++;
-              if (lum(fig.data, q * 3) < 40) dark++;
-              if (lum(base.data, q * 3) < 40) baseDark++;
+              const lf = lum(fig.data, q * 3), lb = lum(base.data, q * 3);
+              if (lf < 40 && lf < lb - 12) dark++;
+              if (lb < 40) baseDark++;
             }
           }
           log.push(`${name}: ${n} ${ink === isWhite ? 'white' : 'amber'}, ring ${ring} (${dark} dark, ${baseDark} before)`);
           // Faded poses (dead after 1.4 s, the respawn's fly-in) fade their outline too.
           const full = !(dead && o2.actT > 1.4) && !(o2.spawnT < 0.45);
-          stats.push({ name, n, dark: dark - baseDark, full, ink: ink === isWhite ? 'white' : 'amber' });
+          stats.push({ name, n, dark, full, ink: ink === isWhite ? 'white' : 'amber' });
         }
         console.log(`  ${r} ${size}: spot lum ${spot.lum.toFixed(0)}; ${log.join('; ')}`);
         // A contact sheet of every pose, for looking at.
@@ -693,6 +726,9 @@ await withBrowser(async ({ page, url, errors }) => {
     await check(`${r}: running, the figure glides (it moves one way, mostly by fractions of a cell); top-down I'm still @`, async () => {
       await page.goto('about:blank');
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      await page.evaluate(() => window.__ascii.freezeTrain(5000)); // no lamp (amber too) passing behind me
+      // In car B, west of the sniper: walking over it would change the gun, and the zoom with it.
+      await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 160.5, a.floorY - 1.5); });
       await sleep(1500); // past the protection on entering, whose pulse dims the figure off amber
       await page.keyboard.down('ArrowLeft');
       await sleep(400);
@@ -737,16 +773,24 @@ await withBrowser(async ({ page, url, errors }) => {
     await check(`${r}: ?bots=30 draws thirty more stickmen (frame time logged)`, async () => {
       await page.goto('about:blank');
       await page.goto(`${url}?r=${r}&bots=30#/room/arena`); await ready(page);
-      await page.waitForFunction(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id), { timeout: 30000 });
       await sleep(1000);
-      await page.evaluate(() => { window.__ascii.stats.times.length = 0; });
-      await sleep(2000);
-      const t = await page.evaluate(() => window.__ascii.stats.times.slice());
-      const sorted = [...t].sort((a, b) => a - b), avg = t.reduce((a, b) => a + b, 0) / t.length;
-      const info = await page.evaluate(() => ({ bodies: window.__ascii.world.bodies.filter((b) => b.label !== 'dummy').length, glyphs: window.__ascii.world.figures.length }));
-      console.log(`  ${r} with 30 bots: ${info.bodies} bodies, ${info.glyphs} glyphs, ${(avg * 1000).toFixed(1)} ms a frame, p95 ${(sorted[Math.floor(sorted.length * 0.95)] * 1000).toFixed(1)} ms`);
+      // The deagle's close view, then the sniper's whole room (the most train cells to light), in both looks.
+      const fps = [];
+      for (const [gun, look] of [['deagle', 'line'], ['sniper', 'line'], ['sniper', 'ascii']]) {
+        await page.evaluate(([g, l]) => { window.__ascii.pvp().me.gun = g; if (window.__ascii.look() !== l) document.getElementById('look-btn').click(); }, [gun, look]);
+        await sleep(800);
+        await page.evaluate(() => { window.__ascii.stats.times.length = 0; });
+        await sleep(2000);
+        const t = await page.evaluate(() => window.__ascii.stats.times.slice());
+        const sorted = [...t].sort((a, b) => a - b), avg = t.reduce((a, b) => a + b, 0) / t.length;
+        const info = await page.evaluate(() => ({ bodies: window.__ascii.world.bodies.filter((b) => b.label !== 'dummy').length, glyphs: window.__ascii.world.figures.length }));
+        console.log(`  ${r} with 30 bots (${gun}, ${look}): ${info.bodies} bodies, ${info.glyphs} glyphs, ${(avg * 1000).toFixed(1)} ms a frame, p95 ${(sorted[Math.floor(sorted.length * 0.95)] * 1000).toFixed(1)} ms`);
+        fps.push([`${gun} ${look}`, 1 / avg]);
+        assert.equal(info.bodies, 31); // me and the bots (the practice dummy stands there too)
+      }
       await page.screenshot({ path: `${SHOTS}/stick-${r}-bots30.png` });
-      assert.equal(info.bodies, 31); // me and the bots (the practice dummy stands there too)
+      await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; if (window.__ascii.look() !== 'line') document.getElementById('look-btn').click(); });
+      for (const [what, f] of fps) assert.ok(f > 110, `${what}: ${f.toFixed(0)} fps (120 wanted)`);
     });
   }
   await check('leaving the arena and coming back within 5 s plays my fly-in again', async () => {

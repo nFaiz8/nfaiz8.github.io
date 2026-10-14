@@ -16,7 +16,16 @@ import { arenaTicker } from './live.js';
 import { enterSide } from './world.js';
 
 const DUMMY = 'dummy';
-const DUMMY_SPOT = { x: 80.5, y: 27.5 }; // arena-local: on the yellow line at column 80
+const DUMMY_COL = 50; // the dummy stands on car A's floor here
+const FLASH_MS = 110; // a muzzle flash lights the train this long
+// Where a body stands on the lowest floor under column c (arena-local): the dummy's spot, from the level.
+export function floorSpot(level, c) {
+  const at = (r) => level.cells[r * level.cols + c];
+  let r = level.rows - 1;
+  while (r > 0 && !at(r)) r--; // up through the air under the floor
+  while (r > 0 && at(r - 1)) r--; // up to the floor's top
+  return { x: c + 0.5, y: r - 1.5 };
+}
 const DUMMY_COLOR = [150, 150, 150];
 const DUMMY_BACK = 2000; // ms after the connection drops before the dummy shows
 const PK_EVERY = 500, RS_EVERY = 1000; // ms
@@ -38,6 +47,7 @@ export function createPvp({
   onNote = () => {}, onFeed = () => {}, reducedMotion = false, rand = Math.random, myId = () => 'me',
 }) {
   const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
+  const DUMMY_SPOT = floorSpot(level, DUMMY_COL);
   const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt });
   const fx = createFx({ kindAt: levelKind(level), offset: off, reducedMotion });
   // My own referee: my cap, ammo and combo always, and offline the whole fight (the dummy too). Online the
@@ -372,6 +382,20 @@ export function createPvp({
     return fx.glyphs(now, { bodies: list, pickups, aims }, out);
   }
 
+  // Muzzle flashes for the train's light (train level addendum §1): every shot in the last FLASH_MS, at
+  // its muzzle, arena-local, k fading from 1.8.
+  function flashes(now) {
+    const out = [];
+    for (const b of bodies(now)) {
+      const last = b.me ? lastShot : shotAt.has(b.id) ? shotAt.get(b.id) : -Infinity;
+      const age = now - last;
+      if (!(age >= 0 && age < FLASH_MS)) continue;
+      const s = b.state, mz = muzzleOf(s.x - off.x, s.y - off.y, s.facing, s.aim || 0, s.gun || 'deagle');
+      out.push({ x: mz.x, y: mz.y, k: 1.8 * (1 - age / FLASH_MS) });
+    }
+    return out;
+  }
+
   function hud(now) {
     const others = fighters.ids().map((id) => fighters.get(id)).filter(Boolean);
     const rows = [{ id: me.id, kills, me: true }, ...others.map((F) => ({ id: F.id, kills: F.kills, me: false }))];
@@ -451,7 +475,7 @@ export function createPvp({
   }
 
   return {
-    enter, leave, setOnline, control, frame, bodies, glyphs, hud,
+    enter, leave, setOnline, control, frame, bodies, glyphs, flashes, hud,
     onMessage(m, now) {
       try { apply(m, now); } catch (e) { console.warn('pvp: a message was ignored', m && m.t, e); }
     },

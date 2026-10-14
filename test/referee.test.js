@@ -8,7 +8,8 @@ import { newBody, stepBody, knock } from '../src/arena.js';
 
 const L = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
 const ref = () => createReferee({ level: L, rand: () => 0.5 });
-const F = (id, x, y = 27.5, f = 1) => Object.assign(newFighter(id, 0), { arena: true, x, y, f, at: 0, safeUntil: 0 });
+// Standing on car A's floor (row 26, the train level): y 24.5.
+const F = (id, x, y = 24.5, f = 1) => Object.assign(newFighter(id, 0), { arena: true, x, y, f, at: 0, safeUntil: 0 });
 const shoot = (R, A, now, all, a = 0) => { const m = muzzleOf(A.x, A.y, A.f, 0, A.gun); return R.fire(A, { x: m.x, y: m.y, a }, now, all); };
 const run = (R, from, to, all) => { const out = []; for (let t = from; t <= to + 1e-9; t += 0.033) out.push(...R.tick(t, all)); return out; };
 
@@ -23,8 +24,10 @@ test('a deagle shot at a standing target: s, then h with 25 damage and knockback
   assert.equal(R.live(), 0);
 });
 
-test('a ▓ pillar in the way stops the bullet', () => {
-  const R = ref(), A = F('a', 30.5), B = F('b', 45.5);
+// The train's solid walls at body height are the lintels over the doorways (cols 96–97 and 104–105, rows
+// 11–13): fighters at y 12.5 are level with them.
+test('a ▓ lintel in the way stops the bullet', () => {
+  const R = ref(), A = F('a', 86.5, 12.5), B = F('b', 101.5, 12.5);
   shoot(R, A, 1, [A, B]);
   assert.equal(run(R, 1, 2, [A, B]).filter((m) => m.t === 'h').length, 0);
   assert.equal(R.live(), 0);
@@ -116,7 +119,7 @@ test('strikes: mm always; a punch within reach; a ground kick outside a combo is
 test('a kick carries a target 11 ± 2 cells, a punch 5 ± 1.5 (the shared physics)', () => {
   const kinds = levelKind(L);
   const carry = (kind) => {
-    const b = newBody(60.5, 27.5);
+    const b = newBody(60.5, 24.5);
     for (let i = 0; i < 12; i++) stepBody(b, 1 / 60, {}, kinds);
     const { kx, ky, stun } = STRIKES[kind];
     knock(b, kx, -ky, stun);
@@ -134,7 +137,7 @@ test('respawn: refused before 1.9 s; then sp at the spawn farthest from everyone
   assert.equal(R.respawn(B, 11, [A, B]).ok, false);
   const { ok, out } = R.respawn(B, 12, [A, B]);
   assert.equal(ok, true);
-  const far = L.spawns.reduce((best, s) => (Math.hypot(s.x - 20.5, 2 * (s.y - 27.5)) > Math.hypot(best.x - 20.5, 2 * (best.y - 27.5)) ? s : best));
+  const far = L.spawns.reduce((best, s) => (Math.hypot(s.x - 20.5, 2 * (s.y - 24.5)) > Math.hypot(best.x - 20.5, 2 * (best.y - 24.5)) ? s : best));
   assert.deepEqual(out, [{ t: 'sp', id: 'b', x: far.x, y: far.y }]);
   assert.equal(B.hp, 100);
   assert.ok(B.safeUntil > 13);
@@ -206,7 +209,7 @@ test('enter keeps kills and resets the rest; view reports regen, safety and the 
 
 test('a claimed origin far from the muzzle estimate is replaced by the muzzle; bullet numbers wrap at 65536', () => {
   const R = ref(), A = F('a', 60.5);
-  const m = muzzleOf(60.5, 27.5, 1, 0, 'deagle');
+  const m = muzzleOf(60.5, 24.5, 1, 0, 'deagle');
   assert.deepEqual(R.fire(A, { x: m.x + 2.9, y: m.y - 1.9, a: 0 }, 1, [A]).out[0], { t: 's', id: 'a', n: 0, x: Math.round((m.x + 2.9) * 100) / 100, y: Math.round((m.y - 1.9) * 100) / 100, a: 0, w: 'd' });
   const far = R.fire(A, { x: m.x + 3.5, y: m.y, a: 0 }, 1, [A]).out[0];
   assert.deepEqual([far.x, far.y, far.n], [Math.round(m.x * 100) / 100, Math.round(m.y * 100) / 100, 1]);
@@ -224,7 +227,7 @@ test('a sprinting target cannot skip past a bullet in one tick: the sweep uses b
 });
 
 test('two fighters can pop each other at once: both kills count', () => {
-  const R = ref(), A = F('a', 20.5), B = F('b', 30.5, 27.5, -1);
+  const R = ref(), A = F('a', 20.5), B = F('b', 30.5, 24.5, -1);
   Object.assign(A, { hp: 10, hurtAt: 0.9 });
   Object.assign(B, { hp: 10, hurtAt: 0.9 });
   shoot(R, A, 1, [A, B]);
@@ -242,9 +245,9 @@ test('a strike skips the protected, the popped and a dodging target, and hits fr
   assert.deepEqual(hs.map((h) => [h.id, h.kx, h.ky]), [['m', 25, -10]]);
 });
 
-test('fix 1: no shot starts past a pillar: a sniper flush against each face claims an origin 2.99 cells past its muzzle', () => {
-  for (const [x, f] of [[34.6, 1], [43.4, -1], [132.6, 1], [140.4, -1]]) {
-    const R = ref(), A = F('a', x, 27.5, f), B = F('b', x + 12 * f);
+test('fix 1: no shot starts past a lintel: a sniper flush against each face claims an origin 2.99 cells past its muzzle', () => {
+  for (const [x, f] of [[95.6, 1], [98.4, -1], [103.6, 1], [106.4, -1]]) {
+    const R = ref(), A = F('a', x, 12.5, f), B = F('b', x + 12 * f, 12.5);
     A.gun = 'sniper'; A.ammo = 5;
     const m = muzzleOf(A.x, A.y, f, 0, 'sniper');
     const { ok } = R.fire(A, { x: m.x + 2.99 * f, y: m.y, a: f > 0 ? 0 : Math.PI }, 1, [A, B]);
@@ -254,10 +257,10 @@ test('fix 1: no shot starts past a pillar: a sniper flush against each face clai
   }
 });
 
-test('fix 1: a deagle whose last state has a big vx cannot fire from where the estimate carries it past a pillar', () => {
-  const R = ref(), A = F('a', 34.6), B = F('b', 50.5);
-  A.vx = 60; // estimated 6 cells on, past the pillar, by now
-  const m = muzzleOf(40.6, 27.5, 1, 0, 'deagle');
+test('fix 1: a deagle whose last state has a big vx cannot fire from where the estimate carries it past a lintel', () => {
+  const R = ref(), A = F('a', 103.6, 12.5), B = F('b', 118.5, 12.5);
+  A.vx = 60; // estimated 6 cells on, past car B's lintel, by now
+  const m = muzzleOf(109.6, 12.5, 1, 0, 'deagle');
   R.fire(A, { x: m.x, y: m.y, a: 0 }, 1, [A, B]);
   assert.equal(run(R, 1, 1.5, [A, B]).filter((h) => h.t === 'h').length, 0);
 });
@@ -275,11 +278,11 @@ test('fix 3: a fighter popped mid-roll respawns, or re-enters, able to fire, and
   for (const back of ['respawn', 'enter']) {
     const R = ref(), A = F('a', 60.5);
     Object.assign(A, { i: 32, rollAt: 0.5, alive: false, deadAt: 1, hp: 0 });
-    if (back === 'respawn') R.respawn(A, 3, [A], { x: 60.5, y: 27.5 });
+    if (back === 'respawn') R.respawn(A, 3, [A], { x: 60.5, y: 24.5 });
     else { R.leave(A, 3, [A]); R.enter(A, 3); A.safeUntil = 0; }
     assert.equal(A.i, 0, back);
     assert.equal(shoot(R, A, 4, [A]).ok, true, back);
-    R.state(A, { x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 32, a: 0 }, 5);
+    R.state(A, { x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 32, a: 0 }, 5);
     assert.equal(A.rollAt, 5, back);
   }
 });
@@ -287,7 +290,7 @@ test('fix 3: a fighter popped mid-roll respawns, or re-enters, able to fire, and
 test('fix 3: a roll bit already on with no roll open opens one', () => {
   const R = ref(), A = F('a', 60.5);
   A.i = 32;
-  R.state(A, { x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 32, a: 0 }, 2, 1.95);
+  R.state(A, { x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 32, a: 0 }, 2, 1.95);
   assert.equal(A.rollAt, 1.95);
 });
 
@@ -321,14 +324,14 @@ test('fix 5: a bullet adds its knock to a mid-air target\'s vy; a strike replace
 // ---- headshots (addendum §1): the hit point at the swept hit time, relative to the target's estimate ----
 
 test('headshot: a level deagle bullet at the head row does 50 with hs: 1; knockback unchanged', () => {
-  const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5); // the bullet flies at 26.2: 1.3 rows above B's centre
+  const R = ref(), A = F('a', 20.5, 23.5), B = F('b', 30.5); // the bullet flies at 23.2: 1.3 rows above B's centre
   shoot(R, A, 1, [A, B]);
   const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
   assert.deepEqual({ ...h, n: undefined }, { t: 'h', id: 'b', by: 'a', w: 'd', n: undefined, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 });
 });
 
 test('headshot: ×2 for the rifle too (18)', () => {
-  const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5);
+  const R = ref(), A = F('a', 20.5, 23.5), B = F('b', 30.5);
   A.gun = 'rifle'; A.ammo = 40;
   shoot(R, A, 1, [A, B]);
   const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
@@ -341,14 +344,14 @@ test('a level bullet at the torso does 1× with no hs; melee never has hs', () =
   const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
   assert.equal(h.d, 25);
   assert.equal('hs' in h, false);
-  const S = F('s', 60.5, 27.5), T = F('t', 62, 28.5); // T a row lower: S's punch reaches its head row
+  const S = F('s', 60.5, 24.5), T = F('t', 62, 25.5); // T a row lower: S's punch reaches its head row
   const p = R.strike(S, { k: 'p' }, 2, [S, T]).out.find((m) => m.t === 'h');
   assert.equal(p.d, STRIKES.punch.damage);
   assert.equal('hs' in p, false);
 });
 
 test('a sniper headshot kills from 100 and its k carries hs: 1; a sniper body shot does not kill', () => {
-  const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5);
+  const R = ref(), A = F('a', 20.5, 23.5), B = F('b', 30.5);
   A.gun = 'sniper'; A.ammo = 5;
   shoot(R, A, 1, [A, B]);
   const out = run(R, 1, 1.3, [A, B]);
@@ -382,7 +385,7 @@ test('a bullet coming straight down through the top of the box is a headshot (th
 });
 
 test('a steep downward bullet entering through the top edge, off the centre line, is a headshot', () => {
-  const R = ref(), A = F('a', 24.3, 18.5), B = F('b', 30.5), a = 1.2;
+  const R = ref(), A = F('a', 24.3, 15.5), B = F('b', 30.5), a = 1.2; // 9 rows above B
   const m = muzzleOf(A.x, A.y, 1, a, 'deagle');
   assert.equal(R.fire(A, { x: m.x, y: m.y, a }, 1, [A, B]).ok, true);
   const h = R.tick(1.5, [A, B]).find((q) => q.t === 'h'); // one long tick, as above
@@ -391,7 +394,7 @@ test('a steep downward bullet entering through the top edge, off the centre line
 
 test('a roll still dodges a bullet at the head row', () => {
   const at = (rollOffset) => {
-    const R = ref(), A = F('a', 20.5, 26.5), B = F('b', 30.5);
+    const R = ref(), A = F('a', 20.5, 23.5), B = F('b', 30.5);
     shoot(R, A, 1, [A, B]);
     B.rollAt = 1.082 - rollOffset;
     return run(R, 1, 1.3, [A, B]).some((m) => m.t === 'h');

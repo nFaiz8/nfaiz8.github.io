@@ -1,4 +1,5 @@
 import { GUNS } from '../src/fight.js';
+import { LEVEL_COLS, LEVEL_ROWS } from '../src/level.js';
 
 // Checks shared by the multiplayer Worker and its tests. Pure: no Workers or Node APIs.
 export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000 };
@@ -53,7 +54,8 @@ const pos = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <=
 
 const num = (n) => typeof n === 'number' && Number.isFinite(n);
 const within = (n, max) => num(n) && Math.abs(n) <= max;
-const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= 163 && y >= -1 && y <= 35;
+// The level, a cell around it, and three cells out through the door at its east end.
+const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= LEVEL_COLS + 3 && y >= -1 && y <= LEVEL_ROWS + 1;
 const stamp = (n) => Number.isInteger(n) && n >= 0 && n <= 1e9;
 const round = (n, k) => Math.round(n * k) / k;
 

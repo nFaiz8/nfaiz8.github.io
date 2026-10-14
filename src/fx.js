@@ -68,7 +68,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
       for (const g of bulletGlyphs(b.gun, b.angle, tmp)) {
         const back = Math.max(0, run - g.du);
         const p = along(b.angle, back);
-        out.push({ x: b.x + p.dx, y: b.y + p.dy, ch: g.ch, color, a: g.a });
+        out.push({ x: b.x + p.dx, y: b.y + p.dy, ch: g.ch, color, a: g.a, glow: true }); // tracers light the train
       }
     }
     const life = reducedMotion ? SPARK_STILL : SPARK_TIME;
@@ -77,7 +77,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
       const k = Math.max(0, (now - s.t0) / life);
       for (const p of SPARK_ART) {
         const d = reducedMotion ? { dx: 0, dy: 0 } : along(p.ang, SPARK_REACH * k * 2);
-        out.push({ x: s.x + d.dx, y: s.y + d.dy, ch: p.ch, color: SPARK_COLOR, a: 1 - k });
+        out.push({ x: s.x + d.dx, y: s.y + d.dy, ch: p.ch, color: SPARK_COLOR, a: 1 - k, glow: true });
       }
     }
     for (const q of numbers) {

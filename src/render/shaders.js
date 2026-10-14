@@ -46,27 +46,6 @@ void main() {
   o = vec4(mix(c, red, u_mono), 0.5 + 0.5 * l); // alpha ≥ 0.5 marks photo cells
 }`;
 
-// The arena's backdrop: the photograph itself, drawn straight to the screen (not turned into characters),
-// cropped to the room's shape.
-export const BACKDROP_VS = `#version 300 es
-in vec2 a_pos; // 0..1 quad
-uniform vec4 u_rect;   // x, y, w, h in world cells
-uniform vec4 u_uv;     // the part of the image to show (x, y, w, h in 0..1)
-uniform vec2 u_view, u_viewCells; // top-left world cell on screen, cells across and down
-out vec2 v_uv;
-void main() {
-  v_uv = u_uv.xy + a_pos * u_uv.zw;
-  vec2 p = (u_rect.xy + a_pos * u_rect.zw - u_view) / u_viewCells;
-  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-}`;
-
-export const BACKDROP_FS = `#version 300 es
-precision highp float;
-in vec2 v_uv;
-uniform sampler2D u_img;
-out vec4 o;
-void main() { o = vec4(texture(u_img, v_uv).rgb, 1.0); }`;
-
 // Pass 2: the ASCII pass. Every output pixel finds its world cell, averages that cell of the scene,
 // picks a glyph by brightness and draws it in the cell's colour over a dimmed background.
 export const ASCII_VS = TILES_VS;

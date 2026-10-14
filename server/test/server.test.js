@@ -190,11 +190,12 @@ async function fighter(r, name, ip) {
   return ws;
 }
 const at = (ws, x, y, o = {}) => ws.send2({ t: 'a', x, y, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: Date.now() - ws.t0, ...o });
-const fire = (ws, x, y = 27.5, a = 0) => { const m = muzzleOf(x, y, 1, 0, 'deagle'); ws.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a, ts: Date.now() - ws.t0 }); };
+const fire = (ws, x, y = FLOOR, a = 0) => { const m = muzzleOf(x, y, 1, 0, 'deagle'); ws.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a, ts: Date.now() - ws.t0 }); };
 
-// The door: the bottom 3 rows of the east wall (src/layout.js). A body standing in it is centred here.
-const DOOR = { x: LV.cols - 0.5, y: LV.rows - 1.5 };
-// Legal steps from the door to (x, y): along the track bed under the floor, then up or down.
+// The door: the level's D marker, on the floor line at the east end. A body standing in it is centred here.
+const DOOR = { x: LV.door.x, y: LV.door.y };
+const FLOOR = DOOR.y; // the car floors' line
+// Legal steps from the door to (x, y): along the floor, then up or down.
 function steps(x, y) {
   const out = [];
   let cx = DOOR.x, cy = DOOR.y;
@@ -221,6 +222,11 @@ async function nextA(ws, id, ok = () => true, ms = 2000) {
   for (;;) { const m = await ws.next('a', ms); if (m.id === id && ok(m)) return m; }
 }
 
+test('the door is the level\'s D on the floor line at the east end, not the bottom-right corner', () => {
+  assert.deepEqual(DOOR, { x: 203.5, y: 24.5 });
+  assert.notEqual(DOOR.y, LV.rows - 1.5);
+});
+
 test('welcome carries the level hash', async () => {
   const ws = client({ room: room() });
   await ws.opened;
@@ -244,11 +250,11 @@ test('two fighters entering get aw and aj; someone outside gets none of it', asy
   [a, b, out].forEach((w) => w.close());
 });
 
-test('a deagle shot hits a standing, unprotected target for 25; a ▓ in the way stops it; a protected target is not hit', async () => {
+test('a deagle shot hits a standing, unprotected target for 25; the roof (▓) in the way stops it; a protected target is not hit', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
-  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
+  at(a, 20.5, FLOOR); at(b, 30.5, FLOOR);
   await sleepMs(250);
   fire(a, 20.5);
   await assert.rejects(b.next('h', 600), 'B is protected for 1.5 s after entering');
@@ -256,21 +262,23 @@ test('a deagle shot hits a standing, unprotected target for 25; a ▓ in the way
   fire(a, 20.5);
   const h = await b.next('h', 2000);
   assert.deepEqual([h.id, h.by, h.d, h.hp], [b.id, a.id, 25, 75]);
-  at(a, 30.5, 27.5); at(b, 45.5, 27.5);
+  // B up on car A's roof, right above: a shot at B from the floor meets the roof first.
+  at(b, 30.5, 6.5);
   await sleepMs(500);
-  fire(a, 30.5);
-  await assert.rejects(b.next('h', 600), 'the pillar is in the way');
+  const m = muzzleOf(20.5, FLOOR, 1, 0, 'deagle');
+  fire(a, 20.5, FLOOR, Math.atan2((6.5 - m.y) * 2, 30.5 - m.x));
+  await assert.rejects(b.next('h', 600), 'the roof is in the way');
   a.close(); b.close();
 });
 
 test('a headshot reaches the wire: a shot from a row higher hits the head row for 50, with hs: 1', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
   await sleepMs(1600);
-  at(a, 20.5, 26.5, { g: 0 }); at(b, 30.5, 27.5);
+  at(a, 20.5, FLOOR - 1, { g: 0 }); at(b, 30.5, FLOOR);
   await sleepMs(150);
-  fire(a, 20.5, 26.5); // the bullet flies at 26.2: 1.3 rows above B's centre
+  fire(a, 20.5, FLOOR - 1); // the bullet flies 1.3 rows above B's centre
   const h = await b.next('h', 2000);
   assert.deepEqual([h.id, h.by, h.d, h.hp, h.hs], [b.id, a.id, 50, 50, 1]);
   a.close(); b.close();
@@ -279,7 +287,7 @@ test('a headshot reaches the wire: a shot from a row higher hits the head row fo
 test('five shots within 100 ms give at most two bullets', async () => {
   const r = room();
   const a = await fighter(r, 'A');
-  at(a, 60.5, 27.5);
+  at(a, 60.5, FLOOR);
   await sleepMs(100);
   for (let k = 0; k < 5; k++) fire(a, 60.5);
   await sleepMs(400);
@@ -290,9 +298,9 @@ test('five shots within 100 ms give at most two bullets', async () => {
 test('four deagle hits pop: k with kills 1; rs at 1 s is ignored, at 2 s gives sp at a marked spawn', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
   await sleepMs(1600);
-  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  at(a, 20.5, FLOOR); at(b, 30.5, FLOOR);
   await sleepMs(150);
   for (let k = 0; k < 4; k++) { fire(a, 20.5); await sleepMs(450); }
   const k = await a.next('k', 2000);
@@ -310,10 +318,10 @@ test('four deagle hits pop: k with kills 1; rs at 1 s is ignored, at 2 s gives s
 test('a teleporting state is clamped', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5]], [b]);
-  at(a, 20.5, 27.5);
+  await walkIn([[a, 20.5, FLOOR]], [b]);
+  at(a, 20.5, FLOOR);
   await sleepMs(100);
-  at(a, 150.5, 27.5);
+  at(a, 150.5, FLOOR);
   const seen = await (async () => { for (;;) { const m = await b.next('a', 2000); if (m.x > 20.5) return m; } })();
   assert.ok(seen.x < 40, `seen at ${seen.x}`);
   a.close(); b.close();
@@ -322,9 +330,9 @@ test('a teleporting state is clamped', async () => {
 test('leaving within 3 s of a hit gives the hitter the kill, fled', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
   await sleepMs(1600);
-  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  at(a, 20.5, FLOOR); at(b, 30.5, FLOOR);
   await sleepMs(150);
   fire(a, 20.5);
   await b.next('h', 2000);
@@ -340,7 +348,7 @@ test('a, f and m from someone not in the arena are dropped', async () => {
   const a = await fighter(r, 'A');
   const o = client({ room: r });
   await o.opened; o.send2({ t: 'hi', name: '' }); await o.next('welcome');
-  o.send2({ t: 'a', x: 30.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 });
+  o.send2({ t: 'a', x: 30.5, y: FLOOR, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 });
   o.send2({ t: 'f', x: 33, y: 27.2, a: 0, ts: 0 });
   o.send2({ t: 'm', k: 'p', ts: 0 });
   await sleepMs(300);
@@ -351,7 +359,7 @@ test('a, f and m from someone not in the arena are dropped', async () => {
 test('a ground kick outside a combo comes back as a punch', async () => {
   const r = room();
   const a = await fighter(r, 'A');
-  at(a, 60.5, 27.5);
+  at(a, 60.5, FLOOR);
   await sleepMs(100);
   a.send2({ t: 'm', k: 'k', ts: Date.now() - a.t0 });
   assert.equal((await a.next('mm')).k, 'p');
@@ -385,7 +393,8 @@ test('40 rifle shots, then the next s carries w d, after a w message', async () 
   await sleepMs(150);
   a.send2({ t: 'pk', n: p.n });
   await a.next('w');
-  for (let k = 0; k < 41; k++) { const m = muzzleOf(p.x, p.y, 1, 0, 'rifle'); a.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a: 0, ts: Date.now() - a.t0 }); await sleepMs(120); }
+  // Down into the roof it stands on, so no more than the rifle's 7 are ever in flight.
+  for (let k = 0; k < 41; k++) { const m = muzzleOf(p.x, p.y, 1, 0, 'rifle'); a.send2({ t: 'f', x: +m.x.toFixed(2), y: +m.y.toFixed(2), a: 1.2, ts: Date.now() - a.t0 }); await sleepMs(120); }
   await sleepMs(300);
   const ss = a.inbox.filter((m) => m.t === 's');
   assert.equal(ss.filter((m) => m.w === 'r').length, 40);
@@ -397,11 +406,11 @@ test('40 rifle shots, then the next s carries w d, after a w message', async () 
 test('a shot reaching a target inside its roll\'s dodge window does not hit', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
   await sleepMs(1600);
-  at(a, 20.5, 27.5); at(b, 30.5, 27.5);
+  at(a, 20.5, FLOOR); at(b, 30.5, FLOOR);
   await sleepMs(150);
-  at(b, 30.5, 27.5, { i: 32 });
+  at(b, 30.5, FLOOR, { i: 32 });
   await sleepMs(60);
   fire(a, 20.5);
   await assert.rejects(b.next('h', 500));
@@ -412,13 +421,13 @@ test('a shot reaching a target inside its roll\'s dodge window does not hit', as
 test('a backdated state does not open the speed clamp', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 32.5]], [b]);
+  await walkIn([[a, 20.5, FLOOR]], [b]);
   await sleepMs(1000);
-  at(a, 20.5, 32.5);
+  at(a, 20.5, FLOOR);
   await sleepMs(50);
-  at(a, 20.5, 32.5, { ts: 0 });
+  at(a, 20.5, FLOOR, { ts: 0 });
   await sleepMs(100);
-  at(a, 150.5, 32.5);
+  at(a, 150.5, FLOOR);
   const seen = await nextA(b, a.id, (m) => m.x > 20.5);
   assert.ok(seen.x < 33, `seen at ${seen.x}`);
   a.close(); b.close();
@@ -427,9 +436,9 @@ test('a backdated state does not open the speed clamp', async () => {
 test('a pause banks no speed: an a 2.5 s on and 100 cells away is clamped', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 32.5]], [b]);
+  await walkIn([[a, 20.5, FLOOR]], [b]);
   await sleepMs(2500);
-  at(a, 120.5, 32.5);
+  at(a, 120.5, FLOOR);
   const seen = await nextA(b, a.id, (m) => m.x > 20.5);
   assert.ok(seen.x < 45, `seen at ${seen.x}`);
   a.close(); b.close();
@@ -441,7 +450,7 @@ test('entering, the first state is clamped from the door: no jumping onto the sn
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
   at(a, p.x, p.y);
   const seen = await nextA(b, a.id);
-  assert.ok(seen.x > 150 && seen.y > 25, `seen at ${seen.x}, ${seen.y}`);
+  assert.ok(seen.x > p.x + 5 && Math.abs(seen.y - DOOR.y) < 1, `seen at ${seen.x}, ${seen.y}`);
   a.send2({ t: 'pk', n: p.n });
   await assert.rejects(a.next('w', 500));
   a.close(); b.close();
@@ -450,13 +459,13 @@ test('entering, the first state is clamped from the door: no jumping onto the sn
 test('back from away, the first state may start where I left', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walk(a, 50.5, 32.5);
+  await walk(a, 50.5, FLOOR);
   await sleepMs(100);
   a.send2({ t: 'al' }); a.send2({ t: 'ae' });
   await a.next('aw'); a.t0 = Date.now();
   await b.next('aj');
   b.inbox.length = 0;
-  at(a, 50.5, 32.5);
+  at(a, 50.5, FLOOR);
   assert.equal((await nextA(b, a.id)).x, 50.5);
   a.close(); b.close();
 });
@@ -465,10 +474,10 @@ test('the door is open, the wall above it is not', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
   await sleepMs(300);
-  at(a, 160.5, 32.5);
-  assert.ok((await nextA(b, a.id)).x >= 160);
+  at(a, LV.cols + 0.5, DOOR.y);
+  assert.ok((await nextA(b, a.id)).x >= LV.cols);
   await sleepMs(300);
-  at(a, 160.5, 28.5);
+  at(a, LV.cols + 0.5, DOOR.y - 4);
   await assert.rejects(nextA(b, a.id, () => true, 500));
   a.close(); b.close();
 });
@@ -476,7 +485,7 @@ test('the door is open, the wall above it is not', async () => {
 test('a popped fighter coming back in respawns at once', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
   await sleepMs(1600);
   for (let k = 0; k < 4; k++) { fire(a, 20.5); await sleepMs(450); }
   await b.next('k', 2000);
@@ -492,11 +501,11 @@ test('a popped fighter coming back in respawns at once', async () => {
 test('a flood of states from a popped fighter closes the socket', async () => {
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 20.5, 27.5], [b, 30.5, 27.5]]);
+  await walkIn([[a, 20.5, FLOOR], [b, 30.5, FLOOR]]);
   await sleepMs(1600);
   for (let k = 0; k < 4; k++) { fire(a, 20.5); await sleepMs(450); }
   await b.next('k', 2000);
-  for (let k = 0; k < 120; k++) at(b, 30.5, 27.5);
+  for (let k = 0; k < 120; k++) at(b, 30.5, FLOOR);
   assert.equal(await Promise.race([b.closed, sleepMs(3000).then(() => 'still open')]), 1008);
   a.close(); b.close();
 });
@@ -506,10 +515,10 @@ test('an honest full jump plus a double jump is passed on exactly as sent, never
   assert.equal(DOUBLE_V, 34);
   const r = room();
   const a = await fighter(r, 'A'), b = await fighter(r, 'B');
-  await walkIn([[a, 60.5, 27.5]], [b]);
+  await walkIn([[a, 60.5, FLOOR]], [b]);
   await sleepMs(300);
   // A full jump, then the air jump at its top, held: states every 4 steps of 1/60 s, as the page's ticker.
-  const kinds = levelKind(LV), body = newBody(60.5, 27.5), states = [];
+  const kinds = levelKind(LV), body = newBody(60.5, FLOOR), states = [];
   for (let i = 0; i < 12; i++) stepBody(body, 1 / 60, {}, kinds);
   for (let k = 0; k <= 84; k++) {
     const ms = (k * 1000) / 60;
@@ -519,7 +528,7 @@ test('an honest full jump plus a double jump is passed on exactly as sent, never
   }
   assert.ok(states.some((s) => s.air < AIR_JUMPS) && Math.min(...states.map((s) => s.vy)) <= -30, 'the air jump was taken');
   const top = Math.min(...states.map((s) => s.y));
-  assert.ok(27.5 - top > 9, `it rose ${27.5 - top} rows`);
+  assert.ok(FLOOR - top > 9, `it rose ${FLOOR - top} rows`);
   const start = Date.now(), base = start - a.t0;
   for (const s of states) {
     const wait = start + s.ms - Date.now();

@@ -1,12 +1,15 @@
 // Renderer A: every cell is drawn as a character on a 2D canvas. Static things (walls, floor, labels,
 // still photos) are baked into chunk canvases; each frame only blits them and draws what moves.
-import { cellMetrics, drawGlyph, prepareText, rgb, FONT_FAMILY } from './glyphs.js';
+// The arena is the train (src/train.js): its glyphs are stamped white from an atlas, coloured cell by cell
+// in one composite, over its backgrounds, and its glow is added on top. The side view has its own cell
+// size (the zoom).
+import { cellMetrics, sideMetrics, drawGlyph, prepareText, rgb, FONT_FAMILY } from './glyphs.js';
 import { C, LABEL_COLOR, roomTint } from './palette.js';
 import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, cellsFor, hasFailed } from '../photos.js';
 import { lightWindow } from '../light.js';
-import { coverCrop, nearArena, blockGlyph } from '../arena.js';
+import { paintWindow, halation, TRAIN_GLYPHS } from '../train.js';
 
 const CW = 48, CH = 24; // chunk size in cells
 
@@ -29,12 +32,16 @@ export function createSpriteCache(cap = SPRITE_CAP) {
 
 export function createCanvasRenderer() {
   let canvas, ctx, m, dpr = 1, viewW = 0, viewH = 0, map, darkRoomIndex = -1, tints = [];
+  // M: the metrics in use (the gallery's m, or the side view's by its zoom); atlasM: the ones the sprites and
+  // the train's glyph atlas were drawn at (scaled while the zoom eases, redrawn crisp once it settles).
+  let M = null, atlasM = null, zoom = null;
+  let trainAtlas = null, trainWin = null, layerCv = null, fgCv = null, bgCv = null, haloCv = null;
+  const halo = { a: new Float32Array(0), b: new Float32Array(0) };
   const chunks = new Map();
   const bitmaps = new Map();
   const requested = new Set();
   const onLoad = new Set();
   let lightCv = null, glowCv = null;
-  let bakedMode = null; // chunks are baked for one view: the arena's inside differs top-down and side-on
   const sprites = createSpriteCache(); // the figure layer's glyphs: 'ch|r,g,b|bold' (fill) or 'ch|outline|bold' → a small canvas
 
   function init(el, theMap) {
@@ -60,8 +67,99 @@ export function createCanvasRenderer() {
     canvas.height = Math.round(h * dpr);
     m = cellMetrics(w, h);
     chunks.clear();
-    sprites.clear();
+    atlasM = null;
+    layerCv = null;
+    setView(zoom);
     return m;
+  }
+
+  // The side view's zoom: { rows, settled } (main.js eases it by the gun in hand), or null top-down.
+  function setView(z) {
+    zoom = z ? { rows: z.rows, settled: !!z.settled } : null;
+    if (!m) return;
+    M = zoom ? sideMetrics(viewH, dpr, zoom.rows, zoom.settled) : m;
+    if (!zoom || zoom.settled) useAtlas(M);
+  }
+  function useAtlas(k) {
+    if (atlasM && atlasM.cw === k.cw && atlasM.fontPx === k.fontPx) return;
+    atlasM = k;
+    sprites.clear();
+    trainAtlas = null;
+  }
+
+  // The train's glyphs, white, one device-pixel cell each at atlasM.
+  function buildTrainAtlas() {
+    const list = [...new Set(TRAIN_GLYPHS)];
+    const cols = 32, gw = Math.round(atlasM.cw * dpr), gh = Math.round(atlasM.ch * dpr);
+    const cv = new OffscreenCanvas(cols * gw, Math.ceil(list.length / cols) * gh);
+    const c = cv.getContext('2d');
+    c.scale(dpr, dpr);
+    prepareText(c, atlasM.font);
+    c.fillStyle = '#fff';
+    list.forEach((g, i) => drawGlyph(c, g, (i % cols) * atlasM.cw, Math.floor(i / cols) * atlasM.ch, atlasM.cw, atlasM.ch, atlasM.fontPx));
+    trainAtlas = { cv, cols, gw, gh, index: new Map(list.map((g, i) => [g, i])) };
+  }
+
+  // The train (world.train: { T, F, look, glows }) over the level's box. Side-on it fills the view (the
+  // tunnel runs on past the room's ends); top-down it is clipped to the room. In device pixels.
+  function drawTrain(world, left, top, cols, rows, clip) {
+    const tr = world.train, a = map.arena;
+    if (!tr || !a) return;
+    if (!trainAtlas) buildTrainAtlas();
+    const ox = a.x + 1, oy = a.y + 1;
+    let x0 = Math.floor(left) - ox - 1, y0 = Math.floor(top) - oy - 1;
+    let x1 = x0 + Math.ceil(cols) + 3, y1 = y0 + Math.ceil(rows) + 3;
+    if (clip) { x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(a.cols, x1); y1 = Math.min(a.rows, y1); }
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+    trainWin = paintWindow(tr.T, tr.F, tr.look, x0, y0, w, h, trainWin);
+    const cwd = M.cw * dpr, chd = M.ch * dpr;
+    const X = (cx) => Math.round((cx - left) * cwd), Y = (cy) => Math.round((cy - top) * chd);
+    const px0 = X(ox + x0), py0 = Y(oy + y0), pw = X(ox + x1) - px0, ph = Y(oy + y1) - py0;
+    const field = (cv, data) => {
+      if (!cv || cv.width !== w || cv.height !== h) cv = new OffscreenCanvas(w, h);
+      cv.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0);
+      return cv;
+    };
+    bgCv = field(bgCv, trainWin.bg);
+    fgCv = field(fgCv, trainWin.fg);
+    // The glyphs, white, into a layer the size of the canvas; then coloured in one go by the fg field.
+    if (!layerCv || layerCv.width !== canvas.width || layerCv.height !== canvas.height) layerCv = new OffscreenCanvas(canvas.width, canvas.height);
+    const lc = layerCv.getContext('2d');
+    lc.globalCompositeOperation = 'source-over';
+    lc.clearRect(0, 0, layerCv.width, layerCv.height);
+    lc.imageSmoothingEnabled = !zoom || !zoom.settled;
+    const A = trainAtlas, dw = Math.round(cwd), dh = Math.round(chd);
+    for (let y = 0; y < h; y++) {
+      const dy = Y(oy + y0 + y);
+      for (let x = 0; x < w; x++) {
+        const g = trainWin.ch[y * w + x];
+        if (g === ' ') continue;
+        let i = A.index.get(g);
+        if (i === undefined) i = A.index.get('?');
+        lc.drawImage(A.cv, (i % A.cols) * A.gw, Math.floor(i / A.cols) * A.gh, A.gw, A.gh, X(ox + x0 + x), dy, dw, dh);
+      }
+    }
+    lc.globalCompositeOperation = 'source-in';
+    lc.imageSmoothingEnabled = false;
+    lc.drawImage(fgCv, px0, py0, pw, ph);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(bgCv, px0, py0, pw, ph);
+    ctx.drawImage(layerCv, 0, 0);
+    // Halation: emissive cells, tracers and muzzle flashes, blurred and added (only over the train).
+    const extra = (tr.glows || []).map((q) => ({ x: q.x - x0, y: q.y - y0, c: q.c }));
+    haloCv = field(haloCv, halation(trainWin.glow, w, h, extra, undefined, halo));
+    ctx.beginPath();
+    ctx.rect(px0, py0, pw, ph);
+    ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.globalCompositeOperation = 'lighter';
+    // Smoothed from cell centres, as GL's LINEAR does.
+    ctx.drawImage(haloCv, px0, py0, pw, ph);
+    ctx.restore();
   }
 
   const inDark = (x, y) => darkRoomIndex >= 0 && map.roomOf[y * map.W + x] === darkRoomIndex;
@@ -131,7 +229,6 @@ export function createCanvasRenderer() {
         }
       }
     }
-    if (bakedMode === 'side' && map.arena) bakeArena(c, x0, y0);
     const visible = (x, y, w, h) => x < x0 + CW && x + w > x0 && y < y0 + CH && y + h > y0;
     for (const l of map.lines) {
       if (!visible(l.x, l.y, l.w, 1)) continue;
@@ -151,31 +248,6 @@ export function createCanvasRenderer() {
     return cv;
   }
 
-  // Side view: the arena's photo over the whole back wall (the photograph itself, cropped to the room's
-  // shape; this chunk draws its own slice of it), and the level's platforms on top.
-  function bakeArena(c, x0, y0) {
-    const a = map.arena, f = a.backdrop;
-    const bmp = f && bitmaps.get(f.id);
-    const ix0 = Math.max(x0, a.x + 1), ix1 = Math.min(x0 + CW, a.x + 1 + a.cols);
-    const iy0 = Math.max(y0, a.y + 1), iy1 = Math.min(y0 + CH, a.y + 1 + a.rows);
-    if (ix0 >= ix1 || iy0 >= iy1) return;
-    if (bmp) {
-      const cr = coverCrop(bmp.width, bmp.height, a.cols, a.rows);
-      const kx = cr.sw / a.cols, ky = cr.sh / a.rows;
-      c.imageSmoothingEnabled = true;
-      c.imageSmoothingQuality = 'high';
-      c.drawImage(bmp, cr.sx + (ix0 - a.x - 1) * kx, cr.sy + (iy0 - a.y - 1) * ky, (ix1 - ix0) * kx, (iy1 - iy0) * ky,
-        (ix0 - x0) * m.cw, (iy0 - y0) * m.ch, (ix1 - ix0) * m.cw, (iy1 - iy0) * m.ch);
-    }
-    for (let y = iy0 - y0; y < iy1 - y0; y++) {
-      const ay = y0 + y - a.y - 1;
-      for (let x = ix0 - x0; x < ix1 - x0; x++) {
-        const ax = x0 + x - a.x - 1;
-        if (!bmp && f && hasFailed(f.id)) put(c, (ax + ay) % 2 ? '?' : ' ', x, y, C.plaque, C.bg); // as a print that failed
-      }
-    }
-  }
-
   function invalidateFrame(f) {
     for (let iy = Math.floor(f.y / CH); iy <= Math.floor((f.y + f.h) / CH); iy++)
       for (let ix = Math.floor(f.x / CW); ix <= Math.floor((f.x + f.w) / CW); ix++) chunks.delete(`${ix},${iy}`);
@@ -184,22 +256,48 @@ export function createCanvasRenderer() {
   function request(f) {
     if (requested.has(f.id)) return;
     requested.add(f.id);
-    loadImage(f.photo, f.backdrop ? 'hi' : 'low').then((bmp) => { bitmaps.set(f.id, bmp); invalidateFrame(f); onLoad.forEach((cb) => cb(f)); },
+    loadImage(f.photo, 'low').then((bmp) => { bitmaps.set(f.id, bmp); invalidateFrame(f); onLoad.forEach((cb) => cb(f)); },
       () => invalidateFrame(f));
   }
 
   function draw(world) {
     if (!m) return;
-    if (world.mode !== bakedMode) { bakedMode = world.mode; chunks.clear(); }
-    const cols = viewW / m.cw, rows = viewH / m.ch;
+    if (!M) M = m;
+    const side = world.mode === 'side' && !!map.arena;
+    const cols = viewW / M.cw, rows = viewH / M.ch;
     const left = world.cam.x - cols / 2, top = world.cam.y - rows / 2;
-    const sx = (cx) => Math.round((cx - left) * m.cw * dpr) / dpr;
-    const sy = (cy) => Math.round((cy - top) * m.ch * dpr) / dpr;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = rgb(...C.bg);
     ctx.fillRect(0, 0, viewW, viewH);
+    if (side) {
+      // Side-on the train is the whole view: nothing of the gallery shows.
+      drawTrain(world, left, top, cols, rows, false);
+    } else drawGallery(world, left, top, cols, rows);
 
+    const sx = (cx) => Math.round((cx - left) * M.cw * dpr) / dpr;
+    const sy = (cy) => Math.round((cy - top) * M.ch * dpr) / dpr;
+    ctx.save();
+    ctx.translate(sx(0), sy(0));
+    ctx.scale(M.cw / m.cw, M.ch / m.ch); // entities are drawn in gallery cells
+    prepareText(ctx, m.font);
+    for (const e of world.entities || []) {
+      ctx.save();
+      ctx.translate((e.x - 0.5) * m.cw, (e.y - 0.5) * m.ch);
+      ctx.fillStyle = rgb(...C.bg);
+      ctx.fillRect(m.cw * 0.1, m.ch * 0.1, m.cw * 0.8, m.ch * 0.8);
+      ctx.fillStyle = rgb(...e.color);
+      drawGlyph(ctx, e.glyph, 0, 0, m.cw, m.ch, m.fontPx);
+      ctx.restore();
+    }
+    ctx.restore();
+    drawFigures(world.figures || [], left, top);
+  }
+
+  // The gallery, top-down, at its own cell size m (M is m here).
+  function drawGallery(world, left, top, cols, rows) {
+    const sx = (cx) => Math.round((cx - left) * m.cw * dpr) / dpr;
+    const sy = (cy) => Math.round((cy - top) * m.ch * dpr) / dpr;
     const ix0 = Math.floor(left / CW), ix1 = Math.floor((left + cols) / CW);
     const iy0 = Math.floor(top / CH), iy1 = Math.floor((top + rows) / CH);
     for (let iy = iy0; iy <= iy1; iy++) {
@@ -216,11 +314,9 @@ export function createCanvasRenderer() {
       if (ix < ix0 - 2 || ix > ix1 + 2 || iy < iy0 - 2 || iy > iy1 + 2) chunks.delete(key);
     }
 
-    // Load photos within about a screen of the view
-    // The arena's backdrop is a large image: only once you're near it.
-    const arenaNear = world.mode === 'side' || !!world.want || nearArena(map, world.player);
+    // Load photos within about a screen of the view (never the arena's: it is opened by E, and loads then).
     for (const f of map.frames) {
-      if (f.backdrop && !arenaNear) continue;
+      if (f.backdrop) continue;
       if (f.x < left + cols * 2 && f.x + f.w > left - cols && f.y < top + rows * 2 && f.y + f.h > top - rows) request(f);
     }
 
@@ -275,33 +371,9 @@ export function createCanvasRenderer() {
       }
       for (let y = fo.y + 1; y < y1; y++) { put(ctx, '│', fo.x, y, C.frameFocus, C.bg); put(ctx, '│', x1, y, C.frameFocus, C.bg); }
     }
-    // The arena's platforms, over the light at full brightness (box shapes: a couple of rects each), and its
-    // ▓ blocks as outlines. No background, so the photo shows through; a dark copy just below reads on a white
-    // wall too.
-    if (world.mode === 'side' && map.arena) {
-      const a = map.arena;
-      const c0 = Math.max(0, Math.floor(left) - a.x - 1), c1 = Math.min(a.cols, Math.ceil(left + cols) - a.x);
-      const r0 = Math.max(0, Math.floor(top) - a.y - 1), r1 = Math.min(a.rows, Math.ceil(top + rows) - a.y);
-      for (const [color, dy] of [[C.platformShadow, 0.09], [C.platform, 0]]) {
-        ctx.fillStyle = rgb(...color);
-        for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
-          const kind = a.level.cells[r * a.cols + c];
-          const g = kind === 1 ? '═' : kind ? blockGlyph(a.level, c, r) : null;
-          if (g) drawGlyph(ctx, g, (a.x + 1 + c) * m.cw, (a.y + 1 + r + dy) * m.ch, m.cw, m.ch, m.fontPx);
-        }
-      }
-    }
-    for (const e of world.entities || []) {
-      ctx.save();
-      ctx.translate((e.x - 0.5) * m.cw, (e.y - 0.5) * m.ch);
-      ctx.fillStyle = rgb(...C.bg);
-      ctx.fillRect(m.cw * 0.1, m.ch * 0.1, m.cw * 0.8, m.ch * 0.8);
-      ctx.fillStyle = rgb(...e.color);
-      drawGlyph(ctx, e.glyph, 0, 0, m.cw, m.ch, m.fontPx);
-      ctx.restore();
-    }
     ctx.restore();
-    drawFigures(world.figures || [], left, top);
+    // The arena from outside: the train at the gallery's cell size, lit by its own light.
+    drawTrain(world, left, top, cols, rows, true);
   }
 
   // The figure layer (side view): stick figures and their labels, over everything else, in two passes like
@@ -309,16 +381,17 @@ export function createCanvasRenderer() {
   // bone's outline never cuts across the bone it joins. Each glyph is a cached sprite with its corner
   // snapped to a device pixel; turned (rot), stretched (len) or flipped ones are drawn through a transform
   // about its centre. o is the outline's radius in device pixels.
-  const outlinePx = () => Math.max(2, Math.round(0.14 * m.cw * dpr));
+  // Sprites are drawn at atlasM; while the zoom eases they are drawn scaled (the outline grows with the zoom).
+  const outlinePx = () => Math.max(2, Math.round(0.14 * atlasM.cw * dpr));
   function sprite(glyph, color, bold) {
     const key = color ? `${glyph}|${color[0]},${color[1]},${color[2]}|${bold ? 1 : 0}` : `${glyph}|outline|${bold ? 1 : 0}`;
     let cv = sprites.get(key);
     if (cv) return cv;
-    const o = outlinePx(), w = Math.round(m.cw * dpr), h = Math.round(m.ch * dpr);
+    const o = outlinePx(), w = Math.round(atlasM.cw * dpr), h = Math.round(atlasM.ch * dpr);
     cv = new OffscreenCanvas(w + 2 * o, h + 2 * o);
     const c = cv.getContext('2d');
-    prepareText(c, `${bold ? 'bold ' : ''}${m.fontPx * dpr}px ${FONT_FAMILY}`);
-    const x = o + w / 2, y = o + h / 2 + m.fontPx * dpr * 0.05;
+    prepareText(c, `${bold ? 'bold ' : ''}${atlasM.fontPx * dpr}px ${FONT_FAMILY}`);
+    const x = o + w / 2, y = o + h / 2 + atlasM.fontPx * dpr * 0.05;
     // Drawn in white, then tinted, as the GL atlas is: text's coverage depends on its colour, and a dark
     // outline drawn as dark text comes out thinner than GL's.
     c.fillStyle = c.strokeStyle = '#fff';
@@ -336,8 +409,8 @@ export function createCanvasRenderer() {
 
   function drawFigures(list, left, top) {
     if (!list.length) return;
-    const cw = m.cw * dpr, chp = m.ch * dpr, o = outlinePx();
-    const sw = Math.round(cw) + 2 * o, sh = Math.round(chp) + 2 * o;
+    const cw = M.cw * dpr, chp = M.ch * dpr, o = outlinePx(), k = M.cw / atlasM.cw;
+    const sw = (Math.round(atlasM.cw * dpr) + 2 * o) * k, sh = (Math.round(atlasM.ch * dpr) + 2 * o) * k;
     // Bilinear, like the GL atlas: 'high' would blur a squeezed bone's thin outline grey.
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'low';
@@ -358,11 +431,12 @@ export function createCanvasRenderer() {
         const img = sprite(g.ch, pass ? g.color : null, g.bold), x0 = Math.round(px - sw / 2), y0 = Math.round(py - sh / 2);
         const rot = g.rot || 0, len = g.len > 0 ? g.len : 1, fx = g.flip ? -1 : 1;
         if (rot === 0 && len === 1 && fx === 1) {
-          ctx.drawImage(img, x0, y0);
+          if (k === 1) ctx.drawImage(img, x0, y0);
+          else ctx.drawImage(img, x0, y0, sw, sh);
         } else {
           const c = Math.cos(rot), s = Math.sin(rot);
           ctx.setTransform(c * fx, s * fx, -s * len, c * len, x0 + sw / 2, y0 + sh / 2);
-          ctx.drawImage(img, -sw / 2, -sh / 2);
+          ctx.drawImage(img, -sw / 2, -sh / 2, sw, sh);
           ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
       }
@@ -372,14 +446,14 @@ export function createCanvasRenderer() {
 
   // Screen point → cell
   function cellAt(world, px, py) {
-    const cols = viewW / m.cw, rows = viewH / m.ch;
-    return { x: Math.floor(world.cam.x - cols / 2 + px / m.cw), y: Math.floor(world.cam.y - rows / 2 + py / m.ch) };
+    const k = M || m, cols = viewW / k.cw, rows = viewH / k.ch;
+    return { x: Math.floor(world.cam.x - cols / 2 + px / k.cw), y: Math.floor(world.cam.y - rows / 2 + py / k.ch) };
   }
 
   // Screen point → map position in fractional cells
   function pointAt(world, px, py) {
-    const cols = viewW / m.cw, rows = viewH / m.ch;
-    return { x: world.cam.x - cols / 2 + px / m.cw, y: world.cam.y - rows / 2 + py / m.ch };
+    const k = M || m, cols = viewW / k.cw, rows = viewH / k.ch;
+    return { x: world.cam.x - cols / 2 + px / k.cw, y: world.cam.y - rows / 2 + py / k.ch };
   }
 
   function dispose() {
@@ -388,5 +462,6 @@ export function createCanvasRenderer() {
     ctx = null;
   }
 
-  return { name: 'canvas', init, resize, draw, dispose, cellAt, pointAt, onLoad, get metrics() { return m; } };
+  const missing = new Set(); // the canvas draws any glyph the font has; nothing is missing from an atlas
+  return { name: 'canvas', init, resize, setView, draw, dispose, cellAt, pointAt, onLoad, missing, get metrics() { return M || m; } };
 }

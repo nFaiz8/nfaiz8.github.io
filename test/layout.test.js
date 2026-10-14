@@ -94,22 +94,24 @@ const withArena = (photoId = 'IMG_1003') => {
   return buildLayout(d, SITE, { arena: { photo: d.byId.get(photoId) || null, level } });
 };
 
-test('the arena is west of the lobby: 160 × 34 inside, its door in line with a 10-cell corridor', () => {
+test('the arena is west of the lobby: 204 × 33 inside, its door at the level\'s D, in line with a 10-cell corridor', () => {
   const map = withArena();
   const a = map.arena, lobby = map.rooms[0], room = map.rooms.at(-1);
   assert.equal(room.id, 'arena');
   assert.equal(a.index, map.rooms.length - 1);
-  assert.equal(a.w - 2, 160);
-  assert.equal(a.h - 2, 34);
+  assert.equal(a.w - 2, 204);
+  assert.equal(a.h - 2, 33);
   assert.equal(lobby.x - a.door.x, 10, 'corridor length');
   assert.ok(a.x + a.w <= lobby.x, 'west of the lobby');
-  // Door: the bottom 3 interior rows of the east wall, and the matching cells of the lobby's west wall.
+  // Door: the 3 rows of the east wall ending on the D marker's row, and the matching cells of the lobby's west wall.
   for (let k = 0; k < 3; k++) {
     assert.equal(map.tiles[(a.door.y + k) * map.W + a.door.x], T.DOOR);
     assert.equal(map.tiles[(a.door.y + k) * map.W + lobby.x], T.DOOR);
   }
-  assert.equal(a.door.y + 2, a.y + a.h - 2, 'door ends on the bottom interior row');
-  assert.equal(a.floorY, a.y + a.h - 1);
+  assert.equal(map.tiles[(a.door.y - 1) * map.W + a.door.x], T.WALL, 'wall above the door');
+  assert.equal(map.tiles[(a.door.y + 3) * map.W + a.door.x], T.WALL, 'wall below the door (the floor and the undercarriage)');
+  assert.equal(a.door.y + 2, a.y + 1 + level.door.r, 'door ends on the D row');
+  assert.equal(a.floorY, a.y + 1 + level.door.r + 1, 'the floor line is the row under the door');
   assert.deepEqual(a.entry, { x: a.door.x - 1, y: a.floorY - 1 });
   for (let x = a.door.x + 1; x < lobby.x; x++) assert.ok(isWalkable(map, x, a.door.y + 1), `corridor ${x}`);
   assert.ok(map.labels.some((l) => l.text === '← ARENA' && l.x > lobby.x && l.x < lobby.x + 12), 'sign inside the lobby by the door');
@@ -132,13 +134,13 @@ test('the arena is reachable from spawn, its inside is plain floor, and no room 
   }
 });
 
-test('the arena photo is one backdrop frame over the whole room, last in the frame order', () => {
+test('the arena photo (the inspiration, opened with E) is one frame over the whole room, last in the frame order', () => {
   const map = withArena();
   const a = map.arena, f = map.frames.at(-1);
   assert.equal(f, a.backdrop);
   assert.equal(f.id, 'IMG_1003');
   assert.equal(f.backdrop, true);
-  assert.deepEqual([f.x, f.y, f.w, f.h, f.cols, f.rows], [a.x, a.y, a.w, a.h, 160, 34]);
+  assert.deepEqual([f.x, f.y, f.w, f.h, f.cols, f.rows], [a.x, a.y, a.w, a.h, 204, 33]);
   assert.equal(map.frames.filter((x) => x.id === 'IMG_1003').length, 1, 'not also on a colour-room wall');
   assert.deepEqual(map.rooms[a.index].frames, [f]);
 });

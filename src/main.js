@@ -1,6 +1,7 @@
 import { SITE, ARENA } from './config.js';
 import levelText from './arena.txt?raw';
-import { parseLevel } from './arena.js';
+import { parseLevel, sideZoom } from './arena.js';
+import { buildTrain, frameAt } from './train.js';
 import { levelHash } from './level.js';
 import { createPvp } from './pvp.js';
 import { createFightHud } from './fighthud.js';
@@ -9,14 +10,14 @@ import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
 import { cleanName, cleanText } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout, isWalkable } from './layout.js';
-import { createWorld, step, walkTo, frameAtCell, teleport, roomAt, enterSide, exitSide, inArena } from './world.js';
+import { createWorld, step, walkTo, frameAtCell, teleport, roomAt, enterSide, exitSide, inArena, snapCamera } from './world.js';
 import { createInput } from './input.js';
 import { createCanvasRenderer } from './render/canvas.js';
 import { createGlRenderer } from './render/gl.js';
 import { C } from './render/palette.js';
 import { figureGlyphs } from './render/figures.js';
 import { createMotionMemory } from './stick.js';
-import { createLighting, createArenaLighting } from './light.js';
+import { createLighting } from './light.js';
 import { createViewer } from './viewer.js';
 import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router.js';
 import { createMap } from './map.js';
@@ -27,6 +28,7 @@ const captionEl = document.getElementById('caption');
 const noteEl = document.getElementById('note');
 const fightSr = document.getElementById('fight-sr');
 const rendererBtn = document.getElementById('renderer-btn');
+const lookBtn = document.getElementById('look-btn');
 const debugEl = document.getElementById('debug');
 document.getElementById('hud-name').textContent = SITE.name;
 
@@ -92,8 +94,62 @@ function setRenderer(name) {
 }
 
 function resize() {
-  const m = renderer.resize(innerWidth, innerHeight, Math.min(2, devicePixelRatio || 1));
+  renderer.resize(innerWidth, innerHeight, Math.min(2, devicePixelRatio || 1));
+  syncView();
+  padTop = null;
+}
+
+// The cells on screen, from the renderer's metrics of the moment (the side view's zoom, or the gallery's).
+function syncView() {
+  const m = renderer.metrics;
   if (world && m) world.view = { cols: innerWidth / m.cw, rows: innerHeight / m.ch };
+}
+
+// The train's look (train level addendum §1): 'line' (box drawing and colour, the default) or 'ascii'
+// (7-bit). L or the HUD button switches it; remembered for the next visit.
+const LOOKS = ['line', 'ascii'];
+let look = 'line';
+try { const v = localStorage.getItem('ascii-look'); if (LOOKS.includes(v)) look = v; } catch {}
+function showLook() {
+  const long = document.createElement('span');
+  long.className = 'long';
+  long.textContent = ` ${look}`;
+  lookBtn.replaceChildren('[L]', long);
+  const other = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
+  lookBtn.setAttribute('aria-label', `Train look: ${look}. Switch to ${other} (L)`);
+}
+function toggleLook() {
+  look = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
+  try { localStorage.setItem('ascii-look', look); } catch {}
+  showLook();
+}
+
+// The side view's zoom by the gun in hand (train level addendum §2), and on touch how far the figure keeps
+// clear of the pad: its top, in rows above the screen's bottom (measured when the pad shows or the screen
+// changes).
+let zoom = null, padTop = null;
+function sideView(t) {
+  if (world.mode !== 'side' || !map.arena) {
+    zoom = null;
+    renderer.setView(null);
+    world.inset = null;
+    return;
+  }
+  // The gun in hand; while popped, keep the last zoom; not fighting, the plain side view.
+  const gun = pvp && pvp.entered ? (pvp.me.alive ? pvp.me.gun : undefined) : null;
+  const first = !zoom;
+  zoom = sideZoom(zoom, gun, t / 1000, { reducedMotion });
+  renderer.setView({ rows: zoom.rows, settled: zoom.settled });
+  // Just in: the camera snapped for the gallery's view size; snap it again for the side view's.
+  if (first) { syncView(); snapCamera(world); }
+  if (!padEl.hidden) {
+    if (padTop === null) {
+      padTop = innerHeight;
+      for (const b of padEl.querySelectorAll('button')) if (!b.hidden) padTop = Math.min(padTop, b.getBoundingClientRect().top);
+    }
+    const m = renderer.metrics;
+    world.inset = { bottom: (innerHeight - padTop) / m.ch + 0.5, side: 4 };
+  } else world.inset = null;
 }
 
 // Where a frame's picture is on screen right now, in CSS pixels (its grid tile while the grid is open).
@@ -187,6 +243,7 @@ function onKey(e) {
     else if (world.atKiosk) openGrid();
     return true;
   }
+  if (e.code === 'KeyL') { toggleLook(); return true; }
   if (e.code === 'KeyR') {
     const names = Object.keys(RENDERERS);
     setRenderer(names[(names.indexOf(renderer.name) + 1) % names.length]);
@@ -271,14 +328,18 @@ function loop(now) {
   const t = performance.now(); // the fight's clock, the same as its messages'
   const away = viewer.isOpen || mapView.isOpen || grid.isOpen;
   if (pvp) syncFight(t);
+  sideView(t);
+  syncView();
   step(world, dt, away ? idle() : controls(t));
   if (pvp) { syncFight(t); pvp.frame(dt, t); } // through the door: out of the fight as the tilt starts
   if (world.want) tilt();
-  world.lighting = world.mode === 'side' ? lightingSide : lightingTop;
+  // Side-on the train lights itself; top-down the gallery's light (the train in its box has its own).
+  world.lighting = world.mode === 'side' ? null : lightingTop;
   if (world.mode !== lastMode) {
     lastMode = world.mode;
     input.clear(); // nothing held, no strike or roll carried in or out of the arena
     document.body.classList.toggle('side', world.mode === 'side');
+    lookBtn.hidden = world.mode !== 'side';
     if (world.mode === 'side') meEntry++; // a fresh motion-memory entry: my fly-in plays on every entry
     if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
   }
@@ -287,6 +348,7 @@ function loop(now) {
     padEl.hidden = !showPad;
     document.body.classList.toggle('pad-on', showPad);
     if (!showPad) { input.clear(); padJump = false; }
+    padTop = null;
   }
   world.people = [];
   const att = map.kiosk.attendant;
@@ -372,7 +434,13 @@ function loop(now) {
     world.figures = figureGlyphs(bodies, { t: now / 1000, reducedMotion, phone: touch, memory,
       view: { left: world.cam.x - cols / 2, top: world.cam.y - rows / 2, cols, rows }, ceiling: map.arena.y + 1 });
     // Bullets, sparks, damage numbers, hp bars, pickups and sniper lines, over the figures.
+    const fx0 = world.figures.length;
     if (fight.length) pvp.glyphs(t, world.figures);
+    // Tracers and sparks light the train (its halation), arena-local.
+    for (let i = fx0; i < world.figures.length; i++) {
+      const g = world.figures[i];
+      if (g.glow) trainGlows.push({ x: g.x - map.arena.x - 1, y: g.y - map.arena.y - 1, c: g.color.map((v) => v * Math.min(1, g.a)) });
+    }
     // Hearts last: the label layer, over every figure (stickman spec §5 draw order), with the outline.
     for (const h of hearts) world.figures.push({ x: h.x, y: h.y, ch: h.glyph, color: h.color, a: 1, bold: false, strip: false });
   } else {
@@ -381,6 +449,13 @@ function loop(now) {
     world.figures = [];
   }
   world.bodies = bodies;
+  // The train, both side-on and top-down: its frame of the moment, the look, muzzle flashes and glows.
+  if (train) {
+    const F = frameAt(trainAt ?? t, { reducedMotion });
+    if (side && fight.length) F.flashes = pvp.flashes(t);
+    world.train = { T: train, F, look, glows: trainGlows };
+  }
+  trainGlows = [];
   if (fightHud) fightHud.render(fight.length ? pvp.hud(t) : null);
   if (renderer.lost) {
     note('WebGL context lost, switched to the canvas renderer');
@@ -404,7 +479,9 @@ function loop(now) {
 }
 
 let live = null;
-let lightingTop = null, lightingSide = null, tilting = false, lastMode = 'top';
+let lightingTop = null, tilting = false, lastMode = 'top';
+let train = null, trainGlows = [];
+let trainAt = null; // __ascii.freezeTrain (localhost): the train held at this time (ms), for screenshots
 const loadedIds = new Set();
 let following = null, followAt = 0;
 const muted = new Set(); // ids whose chat you've hidden, for this visit
@@ -540,8 +617,9 @@ async function boot() {
   map = buildLayout(data, SITE, { arena: ARENA.enabled ? { photo: arenaPhoto, level: parseLevel(levelText) } : null });
   world = createWorld(map, { reducedMotion });
   lightingTop = createLighting(map);
-  lightingSide = map.arena ? createArenaLighting(map) : null;
+  train = map.arena ? buildTrain(map.arena.level) : null;
   world.lighting = lightingTop;
+  showLook();
   input = createInput(stage, { onTap, onKey, arena: () => !!pvp && world.mode === 'side' });
   if (PVP && map.arena) {
     const myId = () => (live && live.peers.myId) || 'me';
@@ -621,6 +699,7 @@ async function boot() {
   setRenderer(RENDERERS[pick] ? pick : 'gl'); // WebGL by default; falls back to canvas if unavailable
   addEventListener('resize', resize);
   rendererBtn.addEventListener('click', () => onKey({ code: 'KeyR' }));
+  lookBtn.addEventListener('click', () => { toggleLook(); stage.focus({ preventScroll: true }); });
   mapView = createMap(map, {
     onOpen: () => { input.clear(); stopFollowing(); },
     onClose: () => stage.focus({ preventScroll: true }),
@@ -769,9 +848,11 @@ async function boot() {
 
   // Test hook for the e2e scripts.
   window.__ascii = { map, world, stats, viewer, mode: () => world.mode, tilting: () => tilting, loaded: (id) => loadedIds.has(id), teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
-    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; } };
+    open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; },
+    look: () => look, zoom: () => zoom, missing: () => [...(renderer.missing || [])], pointAt: (px, py) => renderer.pointAt(world, px, py) };
   // Pins fields of my side-view state (act, actT, aim, x, y, landT, spawnT…) until called with null.
   if (onLocalhost) window.__ascii.pose = (state) => { posePin = state ? { ...state } : null; };
+  if (onLocalhost) window.__ascii.freezeTrain = (t) => { trainAt = t; };
   window.__ascii.pvp = () => pvp;
   window.__ascii.input = () => input;
   requestAnimationFrame((t) => { last = t; loop(t); });

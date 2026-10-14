@@ -112,11 +112,12 @@ export function buildLayout(data, site, { arena = null } = {}) {
   const dark = data.rooms.find((r) => r.wing === 'east');
   const darkPlan = dark ? planRoom(dark, true) : null;
   const darkBox = darkPlan && { x: lobby.x + lobby.w - 1 + DARK_CORRIDOR, y: cy - 2 - darkPlan.doorY, w: darkPlan.W + 2, h: darkPlan.H + 2 };
-  // West: the arena, a corridor's length past the lobby's west wall. Its door is the bottom 3 rows of its
-  // east wall, level with the corridor, so you walk in along its floor. It rises far above the lobby, so
-  // the north wing's west-side rooms start beyond it.
+  // West: the arena, a corridor's length past the lobby's west wall. Its door is the 3 rows of its east
+  // wall ending on the level's D (the floor line), level with the corridor, so you walk in along its floor.
+  // It rises far above the lobby, so the north wing's west-side rooms start beyond it.
+  const doorRow = arena ? (arena.level.door ? arena.level.door.r : arena.level.rows - 1) : 0;
   const arenaBox = arena && {
-    x: lobby.x - DARK_CORRIDOR - (arena.level.cols + 2) + 1, y: cy - arena.level.rows + 1,
+    x: lobby.x - DARK_CORRIDOR - (arena.level.cols + 2) + 1, y: cy - doorRow,
     w: arena.level.cols + 2, h: arena.level.rows + 2,
   };
 
@@ -238,8 +239,8 @@ export function buildLayout(data, site, { arena = null } = {}) {
     if (r.subtitle) labels.push({ x: ox + Math.floor((r.plan.W - r.subtitle.length) / 2), y: ly + 1, text: r.subtitle, role: 'subtitle' });
   });
 
-  // The arena's photo is its whole back wall: one big frame, drawn only in the side view. Its cells stay
-  // floor (not props) so you can walk and jump in front of it.
+  // The arena's photo, the train's inspiration: one big frame over the room that E opens. It is never drawn
+  // (the train is). Its cells stay floor (not props) so you can walk and jump in front of it.
   let arenaInfo = null;
   const ar = rooms.find((r) => r.arena);
   if (ar) {
@@ -256,7 +257,7 @@ export function buildLayout(data, site, { arena = null } = {}) {
     }
     arenaInfo = {
       index, x: ar.x, y: ar.y, w: ar.w, h: ar.h, cols, rows, level: arena.level, backdrop: ar.frames[0] || null,
-      entry: ar.entry, door: { x: ar.x + ar.w - 1, y: ar.entry.y - 2 }, floorY: ar.y + ar.h - 1,
+      entry: ar.entry, door: { x: ar.x + ar.w - 1, y: ar.entry.y - 2 }, floorY: ar.y + 1 + doorRow + 1, // the row under the door
     };
   }
 

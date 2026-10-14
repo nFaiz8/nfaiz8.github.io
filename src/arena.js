@@ -1,7 +1,7 @@
-// The arena: a side-scrolling room. Pure: the level, platform physics, the side-view camera and the
-// backdrop crop. world.js hands the player to stepBody while you're inside.
+// The arena: a side-scrolling room. Pure: the level, platform physics, the side-view camera and its
+// zoom by gun. world.js hands the player to stepBody while you're inside.
 
-import { CELL_ASPECT, isWalkable } from './layout.js';
+import { isWalkable } from './layout.js';
 
 import { AIR, PLATFORM, SOLID } from './level.js';
 export { AIR, PLATFORM, SOLID, LEVEL_COLS, LEVEL_ROWS, parseLevel } from './level.js';
@@ -182,22 +182,47 @@ function moveY(b, dy, kindAt, dropping) {
   return false;
 }
 
-// Where the side-view camera centres. a = the room with its walls, view = {cols, rows} on screen.
-export function sideCamera(a, view, p, lead = 0) {
+// Where the side-view camera centres. a = the room with its walls, view = {cols, rows} on screen. lead is
+// the look-ahead for a 150-cell view; a narrower (zoomed-in) view leads less. inset (touch: rows and cells)
+// keeps the feet that far above the screen's bottom and the body that far from its sides, past the room's
+// edges if it must, so the figure stays clear of the pad.
+export const LEAD_COLS = 150;
+export const FLOOR_BELOW = 5;
+export function sideCamera(a, view, p, lead = 0, inset = null) {
   const fit = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
-  const x = fit(p.x + lead, a.x + view.cols / 2, a.x + a.w - view.cols / 2);
-  if (view.rows >= a.h) return { x, y: a.y + a.h / 2 };
-  // Near the floor, keep it on screen; higher up, keep you a little above the middle.
-  const floorAtBottom = a.y + a.h - view.rows / 2;
-  return { x, y: fit(Math.min(floorAtBottom, p.y + view.rows * 0.15), a.y + view.rows / 2, floorAtBottom) };
+  let x = fit(p.x + (lead * view.cols) / LEAD_COLS, a.x + view.cols / 2, a.x + a.w - view.cols / 2);
+  let y;
+  if (view.rows >= a.h) y = a.y + a.h / 2;
+  else {
+    // Near the floor, keep it on screen; higher up, keep you a little above the middle. A room with a floor
+    // line (the train) shows FLOOR_BELOW rows under it (the slab and the bogies), not all its undercarriage.
+    let floorAtBottom = a.y + a.h - view.rows / 2;
+    if (a.floorY != null) floorAtBottom = Math.min(floorAtBottom, a.floorY + FLOOR_BELOW - view.rows / 2);
+    y = fit(Math.min(floorAtBottom, p.y + view.rows * 0.15), a.y + view.rows / 2, floorAtBottom);
+  }
+  if (inset) {
+    const side = Math.min(inset.side || 0, view.cols / 2), bottom = Math.min(inset.bottom || 0, view.rows / 2);
+    x = Math.max(p.x + side - view.cols / 2, Math.min(p.x - side + view.cols / 2, x));
+    y = Math.max(y, p.y + 1.5 + bottom - view.rows / 2); // the feet are 1.5 rows under the centre
+  }
+  return { x, y };
 }
 
-// The middle part of a w×h image with the shape of cols×rows cells.
-export function coverCrop(w, h, cols, rows) {
-  const want = cols / (rows * CELL_ASPECT);
-  if (w / h > want) { const sw = h * want; return { sx: (w - sw) / 2, sy: 0, sw, sh: h }; }
-  const sh = w / want;
-  return { sx: 0, sy: (h - sh) / 2, sw: w, sh };
+// How many rows the side view shows, by the gun in your hand (train level addendum §2): pick up the sniper
+// and it pulls back to the whole room; back to the deagle, it pushes in.
+export const SIDE_ROWS = { deagle: 20, rifle: 25, sniper: 33, none: 24 };
+export const ZOOM_TIME = 0.35; // s
+
+// The zoom, eased: z is the last result (null at first), gun the gun in hand, null when not fighting and
+// undefined while dead (keep the last value); t in seconds. Returns { from, to, at, rows, settled }.
+export function sideZoom(z, gun, t, { reducedMotion = false } = {}) {
+  const to = gun === undefined && z ? z.to : SIDE_ROWS[gun || 'none'] || SIDE_ROWS.none;
+  if (!z || reducedMotion) return { from: to, to, at: t, rows: to, settled: true };
+  let { from, at } = z;
+  if (to !== z.to) { from = z.rows; at = t; }
+  const k = Math.max(0, Math.min(1, (t - at) / ZOOM_TIME));
+  const settled = k >= 1;
+  return { from, to, at, rows: settled ? to : from + (to - from) * (1 - (1 - k) ** 3), settled };
 }
 
 // What fills a map cell in the side view: the level inside the arena, the building's walls outside it.
@@ -208,26 +233,4 @@ export function kindsFor(map) {
     if (ix >= 0 && iy >= 0 && ix < a.cols && iy < a.rows) return a.level.cells[iy * a.cols + ix];
     return isWalkable(map, cx, cy) ? AIR : SOLID;
   };
-}
-
-// In the arena, its corridor, or the lobby's west end by its sign: close enough to start loading the
-// backdrop's large image. Spawn and the rest of the gallery are not, so most visitors never fetch it.
-export const NEAR = 25;
-export function nearArena(map, p) {
-  const a = map.arena;
-  return !!a && p.x < a.x + a.w + NEAR && p.y >= a.y && p.y <= a.floorY + 6;
-}
-
-// A ▓ block is drawn as its outline, its inside left clear so the photo behind it shows.
-export function blockGlyph(L, c, r) {
-  const solid = (x, y) => x >= 0 && y >= 0 && x < L.cols && y < L.rows && L.cells[y * L.cols + x] === SOLID;
-  if (!solid(c, r)) return null;
-  const up = !solid(c, r - 1), down = !solid(c, r + 1), left = !solid(c - 1, r), right = !solid(c + 1, r);
-  if (up && left) return '┌';
-  if (up && right) return '┐';
-  if (down && left) return '└';
-  if (down && right) return '┘';
-  if (up || down) return '─';
-  if (left || right) return '│';
-  return null;
 }

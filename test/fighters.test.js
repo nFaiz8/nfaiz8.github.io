@@ -10,10 +10,10 @@ const L = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url
 const kinds = levelKind(L);
 const bits = (inp) => (inp.x < 0 ? 1 : 0) | (inp.x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (inp.down ? 8 : 0) | (inp.run ? 16 : 0);
 
-// The scripted run: right, jump onto the ═ at row 24 (cols 66–78), stand, drop through it, then turn and run left.
+// The scripted run: right, jump onto the gangway's ═ at row 21 (cols 98–103), stand, drop through it, then turn and run left.
 const script = (t) => (t < 0.2 ? { x: 1 } : t < 0.6 ? { x: 1, jump: true } : t < 0.75 ? { x: 1 } : t < 1.2 ? {} : t < 1.3 ? { down: true } : t < 1.6 ? {} : t < 2.4 ? { x: -1 } : {});
 function truth() {
-  const b = newBody(56.5, 27.5);
+  const b = newBody(84.5, 24.5);
   for (let i = 0; i < 12; i++) stepBody(b, 1 / 60, {}, kinds);
   const out = [];
   for (let k = 0; k <= 180; k++) {
@@ -91,7 +91,7 @@ test('played back at 60 fps with 50 ms latency and jitter: smooth, close to the 
 
 test('a remote jump seen 50 ms late glides onto its arc: no frame jumps more than 1.5 cells', () => {
   // The sender stands, then jumps (right, then straight up); states every 67 ms or at once on a change, 50 ms on the way.
-  const b = newBody(60.5, 27.5);
+  const b = newBody(60.5, 24.5);
   for (let i = 0; i < 12; i++) stepBody(b, 1 / 60, {}, kinds);
   const sends = [];
   let lastAt = -1e9, last = null;
@@ -116,12 +116,12 @@ test('a remote jump seen 50 ms late glides onto its arc: no frame jumps more tha
   assert.ok(worst <= 1.5, `a frame moved ${worst.toFixed(3)}`);
 });
 
-const one = (F, now, o = {}) => F.apply({ t: 'aw', fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ...o }] }, now);
+const one = (F, now, o = {}) => F.apply({ t: 'aw', fighters: [{ id: 'b', hp: 100, kills: 0, alive: 1, safe: 0, w: 'd', ammo: -1, x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ...o }] }, now);
 
 test('silence for 300 ms releases their input: they slow to a stop', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 30, vy: 0, f: 1, g: 1, i: 2, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 24.5, vx: 30, vy: 0, f: 1, g: 1, i: 2, a: 0, ts: 0 }, 0);
   for (let ms = 0; ms < 1000; ms += 1000 / 60) F.step(1 / 60, ms);
   assert.ok(Math.abs(F.list(1000)[0].state.vx) < 0.1);
   assert.ok(F.list(1000)[0].state.x < 60.5 + 30 * 0.4, 'stopped soon after 300 ms');
@@ -131,7 +131,7 @@ test('an error over 4 cells snaps instead of gliding', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
   F.step(1 / 60, 16);
-  F.apply({ t: 'a', id: 'b', x: 100.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 16 }, 16);
+  F.apply({ t: 'a', id: 'b', x: 100.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 16 }, 16);
   assert.ok(Math.abs(F.list(16)[0].state.x - 100.5) < 0.01);
 });
 
@@ -149,7 +149,7 @@ test('an h knocks the body back at once and shows hurt for the stun', () => {
 test('a remote roll (bit 32) is predicted: it covers the roll\'s distance without a correction', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 48, vy: 0, f: 1, g: 1, i: 32 | 2, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 24.5, vx: 48, vy: 0, f: 1, g: 1, i: 32 | 2, a: 0, ts: 0 }, 0);
   let x0 = F.list(0)[0].state.x;
   // The state is ~50 ms old (rtt / 2), so the body has already rolled that far; the drawn fighter glides
   // after it from x0. Measured when the predicted roll ends (not after 300 ms more, which adds the age).
@@ -172,12 +172,12 @@ test('the offset turns wire cells into map cells', () => {
   const F = createFighters({ kindAt: (c, r) => kinds(c - 100, r - 50), offset: { x: 100, y: 50 } });
   one(F, 0);
   assert.equal(F.list(0)[0].state.x, 160.5);
-  assert.equal(F.list(0)[0].state.y, 77.5);
+  assert.equal(F.list(0)[0].state.y, 74.5);
 });
 
 test('a roll sent over several states, with latency, covers 14.4 cells once and is not restarted', () => {
   // The sender rolls right from rest at 60.5 (bit 32 for its 0.3 s), sending every 67 ms; each state arrives 60 ms later.
-  const b = newBody(60.5, 27.5);
+  const b = newBody(60.5, 24.5);
   for (let i = 0; i < 12; i++) stepBody(b, 1 / 60, {}, kinds);
   const sends = [];
   let rollEnd = null;
@@ -208,7 +208,7 @@ test('a roll sent over several states, with latency, covers 14.4 cells once and 
 test('the act shows the roll while the body rolls', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 48, vy: 0, f: 1, g: 1, i: 32, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 24.5, vx: 48, vy: 0, f: 1, g: 1, i: 32, a: 0, ts: 0 }, 0);
   F.step(1 / 60, 16);
   assert.equal(F.list(16)[0].state.act, 'roll');
   for (let ms = 32; ms <= 500; ms += 16) F.step(0.016, ms);
@@ -219,7 +219,7 @@ test('s: shoot, its gun, and facing and aim from the absolute angle; firing ends
   const F = createFighters({ kindAt: kinds });
   one(F, 0, { safe: 1 });
   assert.equal(F.list(0)[0].state.safe, true);
-  F.apply({ t: 's', id: 'b', n: 1, x: 60, y: 27, a: Math.PI - 0.3, w: 'r' }, 100);
+  F.apply({ t: 's', id: 'b', n: 1, x: 60, y: 24, a: Math.PI - 0.3, w: 'r' }, 100);
   let s = F.list(100)[0].state;
   assert.equal(s.act, 'shoot');
   assert.equal(s.gun, 'rifle');
@@ -229,7 +229,7 @@ test('s: shoot, its gun, and facing and aim from the absolute angle; firing ends
   assert.equal(s.safe, false);
   assert.equal(F.list(250)[0].state.actT.toFixed(2), '0.15');
   assert.equal(F.list(301)[0].state.act, 'idle', 'shoot lasts ACT_TIME.shoot');
-  F.apply({ t: 's', id: 'b', n: 2, x: 60, y: 27, a: -0.5, w: 'd' }, 400);
+  F.apply({ t: 's', id: 'b', n: 2, x: 60, y: 24, a: -0.5, w: 'd' }, 400);
   s = F.list(400)[0].state;
   assert.equal(s.facing, 1);
   assert.ok(Math.abs(s.aim + 0.5) < 1e-9);
@@ -265,9 +265,9 @@ test('k: dead until sp, stepped with no input; sp snaps, protects for 1.5 s, ful
   assert.equal(r.alive, false);
   assert.equal(r.state.act, 'dead');
   assert.equal(r.state.vx, 0, 'no input while dead');
-  F.apply({ t: 'a', id: 'b', x: 10.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 2000 }, 2000);
+  F.apply({ t: 'a', id: 'b', x: 10.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 2000 }, 2000);
   assert.ok(F.list(2000)[0].state.x > 50, 'a stray state while dead is ignored');
-  F.apply({ t: 'sp', id: 'b', x: 20.5, y: 27.5 }, 2100);
+  F.apply({ t: 'sp', id: 'b', x: 20.5, y: 24.5 }, 2100);
   r = F.list(2100)[0];
   assert.equal(r.alive, true);
   assert.equal(r.state.x, 20.5);
@@ -280,7 +280,7 @@ test('k: dead until sp, stepped with no input; sp snaps, protects for 1.5 s, ful
 
 test('a bullet hit adds to vy and does not cancel a jump; hp regenerates by regenHp', () => {
   const F = createFighters({ kindAt: kinds });
-  one(F, 0, { y: 20.5, vy: -30, g: 0, i: 4 });
+  one(F, 0, { y: 17.5, vy: -30, g: 0, i: 4 });
   F.apply({ t: 'h', id: 'b', by: 'a', w: 'd', n: 1, d: 25, hp: 75, kx: 10, ky: -2 }, 0);
   assert.equal(F.get('b').body.vy, -32);
   F.apply({ t: 'h', id: 'b', by: 'a', w: 'p', n: -1, d: 14, hp: 61, kx: 25, ky: -10 }, 0);
@@ -294,13 +294,13 @@ test('aim is smoothed over 60 ms', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
   assert.equal(F.list(0)[0].state.aimed, false);
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0.6, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0.6, ts: 0 }, 0);
   F.step(0.06, 60);
   const a = F.list(60)[0].state.aim;
   assert.ok(Math.abs(a - 0.6 * (1 - Math.exp(-1))) < 1e-6, `${a}`);
   for (let ms = 76; ms < 600; ms += 16) F.step(0.016, ms);
   assert.ok(Math.abs(F.list(600)[0].state.aim - 0.6) < 0.01);
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 600 }, 600);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 600 }, 600);
   for (let ms = 616; ms < 1200; ms += 16) F.step(0.016, ms);
   assert.equal(F.list(1200)[0].state.aimed, false, 'not aimed once the wire aim is back to 0');
 });
@@ -308,9 +308,9 @@ test('aim is smoothed over 60 ms', () => {
 test('a re-entry aj for a known id starts fresh: its restarted ts is not dropped as old', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
-  for (let ts = 0; ts <= 60000; ts += 10000) F.apply({ t: 'a', id: 'b', x: 60.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts }, ts + 50);
+  for (let ts = 0; ts <= 60000; ts += 10000) F.apply({ t: 'a', id: 'b', x: 60.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts }, ts + 50);
   F.apply({ t: 'aj', id: 'b', hp: 100, kills: 2 }, 61000);
-  F.apply({ t: 'a', id: 'b', x: 20.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 50 }, 61050);
+  F.apply({ t: 'a', id: 'b', x: 20.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 50 }, 61050);
   const r = F.list(61050)[0];
   assert.equal(r.state.x, 20.5);
   assert.equal(r.kills, 2);
@@ -322,7 +322,7 @@ test('a popped fighter that re-enters (aj) is alive again', () => {
   one(F, 0);
   F.apply({ t: 'k', id: 'b', by: 'a', kills: 1 }, 100);
   F.apply({ t: 'aj', id: 'b', hp: 100, kills: 0 }, 200);
-  F.apply({ t: 'a', id: 'b', x: 30.5, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 5 }, 250);
+  F.apply({ t: 'a', id: 'b', x: 30.5, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 5 }, 250);
   const r = F.list(250)[0];
   assert.equal(r.alive, true);
   assert.notEqual(r.state.act, 'dead');
@@ -381,7 +381,7 @@ function watch({ T, sends }, start, late = 50) {
 const press = (on) => (ms) => ({ jump: on.some(([a, b]) => ms >= a && ms < b) });
 
 test('a remote double jump is predicted from the bit edges: the ground jump is not taken for it, the air jump is, and it peaks where it really did', () => {
-  const start = { x: 60.5, y: 27.5 };
+  const start = { x: 60.5, y: 24.5 };
   // Jump, let go while rising, the air jump just after the top, let go while rising again, then a third press (nothing).
   const run = sender(start, press([[200, 350], [450, 600], [700, 760]]));
   const { T } = run, shown = watch(run, start);
@@ -409,7 +409,7 @@ test('a remote double jump is predicted from the bit edges: the ground jump is n
 });
 
 test('a remote air jump whose state went out ahead of its step (ahead of a shot) is predicted too', () => {
-  const start = { x: 60.5, y: 27.5 };
+  const start = { x: 60.5, y: 24.5 };
   const run = sender(start, press([[200, 350], [450, 600]]), { forced: [450] });
   assert.ok(run.sends.some((m) => m.ts === 450 && m.i === 4 && m.vy > 0), 'the forced state: the bit on, still falling');
   const { T } = run, shown = watch(run, start);
@@ -419,7 +419,7 @@ test('a remote air jump whose state went out ahead of its step (ahead of a shot)
 });
 
 test('a remote jump just after running off a ledge (coyote time) is the ground jump, not the air jump', () => {
-  const start = { x: 76.5, y: 22.5 }; // on the ═ at row 24, cols 66–78
+  const start = { x: 101.5, y: 19.5 }; // on the gangway's ═ at row 21, cols 98–103
   // Run right off the edge, and jump 50 ms after leaving it.
   const go = (left) => sender(start, (ms) => ({ x: 1, jump: left != null && ms >= left + 50 && ms < left + 300 }), { frames: 60 });
   const left = go(null).T.find((s) => !s.g).ms;
@@ -438,9 +438,9 @@ test('a remote jump just after running off a ledge (coyote time) is the ground j
 
 test('a let-go is in the state already: the remote body does not cut the jump a second time', () => {
   const F = createFighters({ kindAt: kinds, rtt: () => 0 });
-  one(F, 0, { y: 20.5, vy: -30, g: 0, i: 4 });
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 20.5, vx: 0, vy: -30, f: 1, g: 0, i: 4, a: 0, ts: 0 }, 0);
-  F.apply({ t: 'a', id: 'b', x: 60.5, y: 20, vx: 0, vy: -15, f: 1, g: 0, i: 0, a: 0, ts: 30 }, 30);
+  one(F, 0, { y: 17.5, vy: -30, g: 0, i: 4 });
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 17.5, vx: 0, vy: -30, f: 1, g: 0, i: 4, a: 0, ts: 0 }, 0);
+  F.apply({ t: 'a', id: 'b', x: 60.5, y: 17, vx: 0, vy: -15, f: 1, g: 0, i: 0, a: 0, ts: 30 }, 30);
   assert.equal(F.get('b').body.vy, -15);
   F.step(1 / 60, 46);
   assert.ok(Math.abs(F.get('b').body.vy - (-15 + 133 / 60)) < 1e-9, `${F.get('b').body.vy}`);
@@ -450,7 +450,7 @@ test('flipT: Infinity before any air jump and after a respawn', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0);
   assert.equal(F.list(0)[0].state.flipT, Infinity);
-  F.apply({ t: 'sp', id: 'b', x: 20.5, y: 27.5 }, 100);
+  F.apply({ t: 'sp', id: 'b', x: 20.5, y: 24.5 }, 100);
   assert.equal(F.list(100)[0].state.flipT, Infinity);
 });
 

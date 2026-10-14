@@ -31,6 +31,7 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     want: null, // 'side' | 'top' when you've crossed the arena door; main.js tilts, then switches
     frozen: false, // input ignored (during the tilt)
     view: { cols: 150, rows: 50 }, // cells on screen; main.js keeps it current
+    inset: null, // { bottom, side } in rows and cells: on touch the side camera keeps the figure clear of the pad
     kindAt: map.arena ? kindsFor(map) : null,
     inside: map.arena ? insideFor(map) : null,
     aimFacing: 0, // -1 or 1: in the side view you face this way (the mouse's side), not the way you run
@@ -293,11 +294,12 @@ export const inArena = (map, x, y) => !!map.arena && roomAt(map, x, y) === map.a
 function cameraGoal(world) {
   const p = world.player;
   if (world.camTarget) return world.camTarget;
-  if (world.mode === 'side') return sideCamera(world.map.arena, world.view, p, p.vx * LOOK_AHEAD);
+  if (world.mode === 'side') return sideCamera(world.map.arena, world.view, p, p.vx * LOOK_AHEAD, world.inset);
   return { x: p.x + p.vx * LOOK_AHEAD, y: p.y + (p.vy / CELL_ASPECT) * LOOK_AHEAD };
 }
 
-function snapCamera(world) {
+// Straight to where the camera wants to be (main.js calls it again once the side view's zoom is known).
+export function snapCamera(world) {
   const g = cameraGoal(world);
   world.cam.x = g.x; world.cam.y = g.y; world.cam.vx = world.cam.vy = 0;
   world.shakeOff = { x: 0, y: 0 };

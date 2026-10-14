@@ -113,7 +113,7 @@ test('arena messages parse; malformed ones do not', () => {
   assert.deepEqual(parseMessage('{"t":"rs"}'), { t: 'rs' });
   assert.deepEqual(parseMessage(JSON.stringify({ t: 'a', x: 10.123, y: 27.5, vx: 30.04, vy: 0, f: 1, g: 1, i: 34, a: 0.789, ts: 1200 })),
     { t: 'a', x: 10.12, y: 27.5, vx: 30, vy: 0, f: 1, g: 1, i: 34, a: 0.79, ts: 1200 });
-  for (const bad of [{ x: 170 }, { y: -2 }, { vx: 61 }, { f: 0 }, { g: 2 }, { i: 64 }, { i: 1.5 }, { a: 1.6 }, { ts: -1 }, { x: 'NaN' }])
+  for (const bad of [{ x: 210 }, { y: -2 }, { vx: 61 }, { f: 0 }, { g: 2 }, { i: 64 }, { i: 1.5 }, { a: 1.6 }, { ts: -1 }, { x: 'NaN' }])
     assert.equal(parseMessage(JSON.stringify({ t: 'a', x: 10, y: 20, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0, ...bad })), null, JSON.stringify(bad));
   assert.deepEqual(parseMessage('{"t":"f","x":12,"y":27.2,"a":3.1,"ts":5}'), { t: 'f', x: 12, y: 27.2, a: 3.1, ts: 5 });
   assert.equal(parseMessage('{"t":"f","x":12,"y":27.2,"a":3.2,"ts":5}'), null);
@@ -191,4 +191,18 @@ test('a quiet window does not break the sender clock', () => {
   assert.equal(sentAt(clk, 20000, 21000), 21000, 'first sample after a long quiet gap');
   for (let t = 21067; t < 30000; t += 67) sentAt(clk, t - 1000, t);
   assert.ok(Math.abs(sentAt(clk, 30000, 31000) - 31000) <= 1);
+});
+
+test('a and f are accepted anywhere in the train level (204 × 33) and a step through its door, refused past that', async () => {
+  const { LEVEL_COLS, LEVEL_ROWS } = await import('../src/level.js');
+  const a = (x, y) => parseMessage(JSON.stringify({ t: 'a', x, y, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 }));
+  const f = (x, y) => parseMessage(JSON.stringify({ t: 'f', x, y, a: 0, ts: 0 }));
+  for (const [x, y] of [[203.5, 24.5], [LEVEL_COLS + 0.5, 24.5], [LEVEL_COLS + 2.9, 24.5], [100, LEVEL_ROWS - 0.5], [-0.9, -0.9]]) {
+    assert.ok(a(x, y), `a at ${x}, ${y}`);
+    assert.ok(f(x, y), `f at ${x}, ${y}`);
+  }
+  for (const [x, y] of [[LEVEL_COLS + 3.5, 24.5], [100, LEVEL_ROWS + 1.5], [-1.5, 5]]) {
+    assert.equal(a(x, y), null, `a at ${x}, ${y}`);
+    assert.equal(f(x, y), null, `f at ${x}, ${y}`);
+  }
 });

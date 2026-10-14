@@ -89,7 +89,7 @@ test('a heart at the arena photo rises from whoever sent it, not from the ceilin
   assert.deepEqual(heartEntities([{ f: 'bg', id: 'gone', age: 0 }], frames, { posOf }), [], 'sender gone: nothing');
 });
 
-const snap = (o = {}) => ({ x: 10, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0, ...o });
+const snap = (o = {}) => ({ x: 10, y: 24.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0, ...o });
 
 test('peerColor never returns a hue in the amber band (20°–60°)', () => {
   const hue = ([r, g, b]) => {

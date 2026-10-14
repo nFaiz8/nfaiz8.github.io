@@ -5,7 +5,6 @@ import { T, CELL_ASPECT } from './layout.js';
 
 const AMBIENT = [0.2, 0.21, 0.27]; // moonlight through the skylights
 const LANTERN = { color: [1.0, 0.8, 0.56], radius: 28, intensity: 1.1 };
-const ARENA_AMBIENT = [0.75, 0.75, 0.75]; // the arena's side view: even and neutral, so its photo reads
 const HALO_GAIN = 150; // halo light → additive glow bytes (film halation)
 
 const blocks = (t) => t === T.WALL || t === T.VOID; // props (frames, benches) don't cast shadows
@@ -116,21 +115,6 @@ export function createLighting(map, { ambient = AMBIENT, lights = staticLights(m
   }
   const dark = map.rooms.find((r) => r.plan && r.plan.darkroom) || null;
   return { map, buf, halo, print, lights, dark, ambient, lantern, area, scratch: new Float32Array(0) };
-}
-
-// The arena's side view: a brighter, neutral light so the photo reads, and every platform glows with a
-// red-orange halo bleeding onto the photo around it like film halation. The platforms themselves are drawn
-// on top of the light at full brightness, so nothing here brightens the photo under them. Only the room
-// (walls included) is lit: a view taller than the room shows black past its ceiling, not the next room.
-export function createArenaLighting(map) {
-  const a = map.arena, halos = [];
-  for (let r = 0; r < a.rows; r++) for (let c = 0; c < a.cols; c++) {
-    const kind = a.level.cells[r * a.cols + c];
-    // A ▓ block glows only along its top (its standing surface), so a tall one doesn't flood the photo.
-    if (!kind || (kind === 2 && r > 0 && a.level.cells[(r - 1) * a.cols + c] === 2)) continue;
-    halos.push({ x: a.x + 1 + c + 0.5, y: a.y + 1 + r + 0.5, radius: 5, color: [1.0, 0.36, 0.16], intensity: 0.04 });
-  }
-  return createLighting(map, { ambient: ARENA_AMBIENT, lights: [], halos, prints: false, lantern: false, area: { x: a.x, y: a.y, w: a.w, h: a.h } });
 }
 
 // The light for a window of the map: static light plus the lantern at (px, py), flickering with t.
