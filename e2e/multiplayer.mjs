@@ -267,6 +267,196 @@ try {
       await b.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x + 4, window.__ascii.map.spawn.y));
       await sleep(300);
     });
+    // ---------- The fight with two browsers (PvP spec §14 e2e) ----------
+    // Both pages reloaded straight into the arena (a fresh connection each), my shots and every hit logged in
+    // window.__fight by wrapping pvp.js's fx.shot and fx.hit.
+    const ids = {};
+    const fightIn = async (r) => {
+      for (const p of [a, b]) { await p.goto(`${live}&r=${r}#/room/arena`); await ready(p); } // a new query: a fresh page
+      for (const p of [a, b]) await p.waitForFunction(() => { const P = window.__ascii.pvp(); return P.entered && P.online && P.fighters.ids().length === 1; }, { timeout: 15000 });
+      for (const p of [a, b]) {
+        await p.evaluate(() => {
+          const fx = window.__ascii.pvp().fx, log = window.__fight = { shots: [], hits: [] }, shot = fx.shot, hit = fx.hit;
+          fx.shot = (s) => { log.shots.push({ id: s.id, gun: s.gun, angle: s.angle, mine: s.mine, at: s.at }); return shot(s); };
+          fx.hit = (h) => { log.hits.push({ d: h.d, at: h.at }); return hit(h); };
+        });
+      }
+      ids.a = await a.evaluate(() => window.__ascii.pvp().me.id);
+      ids.b = await b.evaluate(() => window.__ascii.pvp().me.id);
+    };
+    // Spots from the level: the floor, 40 cells of open floor (10 clear rows over it, clear of the pickups),
+    // the pickups, the spawns. Map cells.
+    const spotsOf = () => a.evaluate(() => {
+      const A = window.__ascii, a = A.map.arena, L = a.level, ox = a.x + 1, oy = a.y + 1, top = L.door.r + 1;
+      const busy = (c) => L.pickups.some((q) => q.r === top - 1 && Math.abs(q.c - c) < 4);
+      let open = null;
+      for (let c0 = 2; !open && c0 + 40 < L.cols - 2; c0++) {
+        let ok = true;
+        for (let c = c0; ok && c <= c0 + 40; c++) ok = L.cells[top * L.cols + c] !== 0 && !busy(c) && [...Array(10)].every((_, k) => !L.cells[(top - 1 - k) * L.cols + c]);
+        if (ok) open = ox + c0 + 0.5;
+      }
+      const pk = (gun) => { const q = L.pickups.find((p) => p.gun === gun); return { x: q.x + ox, y: q.y + oy }; };
+      return { floor: a.floorY - 1.5, open, rifle: pk('rifle'), sniper: pk('sniper'), spawns: L.spawns.map((s) => ({ x: s.x + ox, y: s.y + oy })) };
+    });
+    // A fighter as page p draws it (null if not drawn).
+    const bodyOn = (p, id) => p.evaluate((id) => { const q = window.__ascii.pvp().bodies(performance.now()).find((x) => x.id === id); return q ? { ...q.state, color: q.color } : null; }, id);
+    const meOn = (p) => p.evaluate(() => { const q = window.__ascii.world.player; return { x: q.x, y: q.y }; });
+    // Puts p's fighter at (x, y) facing f, until q sees it there. The server clamps a jump in position (a
+    // teleport) to a run from the last state it took, so it's carried over a step at a time: each teleport is a
+    // new state, a third of a second after the last (the clamp allows more after a longer gap).
+    const putAt = async (p, q, x, y, f) => {
+      const id = p === a ? ids.a : ids.b;
+      for (let k = 0; k < 16; k++) {
+        await p.evaluate((x, y, f) => { window.__ascii.teleport(x, y); window.__ascii.world.player.facing = f; }, x + (k % 2) * 0.01, y, f);
+        await sleep(350);
+        const s = await bodyOn(q, id), me = await meOn(p);
+        if (s && Math.abs(s.x - me.x) < 0.3 && Math.abs(s.y - me.y) < 0.3) return;
+      }
+      throw new Error(`${id} isn't seen where it was put (${x}, ${y})`);
+    };
+    let S;
+    for (const r of ['canvas', 'gl']) {
+      await check(`arena PvP (${r}): both in the fight see each other as fighters; A holds J facing B: B's hp falls on both screens`, async () => {
+        await fightIn(r);
+        assert.deepEqual([await a.evaluate(() => window.__ascii.renderer), await b.evaluate(() => window.__ascii.renderer)], [r, r]);
+        assert.deepEqual([await a.evaluate(() => window.__ascii.pvp().fighters.ids()), await b.evaluate(() => window.__ascii.pvp().fighters.ids())], [[ids.b], [ids.a]]);
+        S = await spotsOf();
+        await putAt(a, b, S.open + 5, S.floor, 1);
+        await putAt(b, a, S.open + 17, S.floor, -1);
+        await sleep(1000); // past the 1.5 s of protection on entering
+        await a.keyboard.down('KeyJ');
+        try { await b.waitForFunction(() => window.__ascii.pvp().me.hp < 100, { timeout: 4000 }); } finally { await a.keyboard.up('KeyJ'); }
+        const hp = await b.evaluate(() => window.__ascii.pvp().me.hp);
+        await a.waitForFunction((id, hp) => window.__ascii.pvp().bodies(performance.now()).find((x) => x.id === id)?.state.hp === hp, { timeout: 2000 }, ids.b, hp);
+        console.log(`  ${r}: B's hp ${hp} on B's screen and on A's`);
+        assert.ok(hp <= 75, `hit (${hp})`);
+      });
+    }
+    await check('arena PvP: A pops B: the scoreboards say so (you 1 / Ann 1); B is back about 2 s later at a marked spawn, protected on A\'s screen', async () => {
+      await sleep(1000); // A's last shots land or fly off
+      const track = b.evaluate(() => new Promise((resolve) => {
+        const P = window.__ascii.pvp(), p = window.__ascii.world.player, out = [], t0 = performance.now();
+        const tick = () => {
+          out.push({ t: performance.now(), alive: P.me.alive, x: p.x, y: p.y });
+          const died = out.findIndex((q) => !q.alive), back = died < 0 ? -1 : out.findIndex((q, i) => i > died && q.alive);
+          if (performance.now() - t0 < 12000 && back < 0) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }));
+      await a.keyboard.down('KeyJ');
+      try { await b.waitForFunction(() => !window.__ascii.pvp().me.alive, { timeout: 6000 }); } finally { await a.keyboard.up('KeyJ'); }
+      await a.waitForFunction(() => /you 1/.test(document.getElementById('fight-board').textContent), { timeout: 2000 });
+      await b.waitForFunction(() => /Ann 1/.test(document.getElementById('fight-board').textContent), { timeout: 2000 });
+      await a.waitForFunction((id) => window.__ascii.pvp().bodies(performance.now()).find((x) => x.id === id)?.state.safe === true, { timeout: 5000, polling: 'raf' }, ids.b);
+      const out = await track;
+      const died = out.findIndex((q) => !q.alive), back = out.findIndex((q, i) => i > died && q.alive);
+      assert.ok(died >= 0 && back > died, 'popped and back');
+      const gone = out[back].t - out[died].t, at = out.at(-1);
+      const spawn = S.spawns.find((s) => Math.abs(s.x - at.x) < 0.1 && Math.abs(s.y - at.y) < 0.1);
+      console.log(`  pop: B back after ${gone.toFixed(0)} ms at ${at.x}, ${at.y}; boards "${await a.$eval('#fight-board', (e) => e.textContent)}" / "${await b.$eval('#fight-board', (e) => e.textContent)}"`);
+      assert.ok(gone > 1800 && gone < 3000, `back after ${gone.toFixed(0)} ms`);
+      assert.ok(spawn, `at a marked spawn (${at.x}, ${at.y})`);
+    });
+    await check('arena PvP: A presses K next to B: B is knocked more than 2 cells away, on both screens', async () => {
+      await putAt(b, a, S.open + 17, S.floor, -1);
+      await putAt(a, b, S.open + 15.8, S.floor, 1);
+      await sleep(1600); // B's protection from the respawn is over
+      const b0 = (await meOn(b)).x, seen0 = (await bodyOn(a, ids.b)).x;
+      await a.focus('#stage');
+      await a.keyboard.press('KeyK');
+      await sleep(900);
+      const b1 = (await meOn(b)).x, seen1 = (await bodyOn(a, ids.b)).x;
+      console.log(`  K: B moved ${(b1 - b0).toFixed(2)} cells on B's screen, ${(seen1 - seen0).toFixed(2)} on A's`);
+      assert.ok(b1 - b0 > 2, `on B's screen (${b1 - b0})`);
+      assert.ok(seen1 - seen0 > 2, `on A's screen (${seen1 - seen0})`);
+    });
+    await check('arena PvP: B jumps: on A\'s screen B never moves more than 1.2 cells a frame, and peaks within 0.5 rows of B\'s own peak', async () => {
+      await sleep(600);
+      const seen = a.evaluate((id) => new Promise((resolve) => {
+        const P = window.__ascii.pvp(), out = [], t0 = performance.now();
+        const tick = () => {
+          const q = P.bodies(performance.now()).find((x) => x.id === id);
+          if (q) out.push({ t: performance.now(), x: q.state.x, y: q.state.y });
+          if (performance.now() - t0 < 1800) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }), ids.b);
+      const own = b.evaluate(() => new Promise((resolve) => {
+        const p = window.__ascii.world.player, out = [], t0 = performance.now();
+        const tick = () => { out.push(p.y); if (performance.now() - t0 < 1800) requestAnimationFrame(tick); else resolve(out); };
+        requestAnimationFrame(tick);
+      }));
+      await sleep(150);
+      await b.focus('#stage');
+      await b.keyboard.down('Space'); await sleep(400); await b.keyboard.up('Space');
+      const fr = await seen, ys = await own;
+      let step = 0, gap = 0;
+      for (let i = 1; i < fr.length; i++) { step = Math.max(step, Math.hypot(fr[i].x - fr[i - 1].x, fr[i].y - fr[i - 1].y)); gap = Math.max(gap, fr[i].t - fr[i - 1].t); }
+      const peakSeen = Math.min(...fr.map((f) => f.y)), peak = Math.min(...ys);
+      console.log(`  B's jump on A's screen: ${fr.length} frames (longest ${gap.toFixed(0)} ms), largest step ${step.toFixed(2)} cells, peak ${peakSeen.toFixed(2)} vs B's own ${peak.toFixed(2)} (rise ${(ys[0] - peak).toFixed(2)})`);
+      assert.ok(ys[0] - peak > 4, 'B jumped');
+      assert.ok(step <= 1.2, `largest step a frame ${step.toFixed(2)}`);
+      assert.ok(Math.abs(peakSeen - peak) <= 0.5, `peak ${peakSeen} vs ${peak}`);
+    });
+    await check('arena PvP: B opens a photo: B leaves the fight on A\'s screen, and is back on closing it', async () => {
+      await b.focus('#stage');
+      await b.keyboard.press('KeyE');
+      await b.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });
+      await a.waitForFunction(() => window.__ascii.pvp().fighters.ids().length === 0, { timeout: 3000 });
+      await b.keyboard.press('Escape');
+      await b.waitForFunction(() => window.__ascii.viewer.state === 'closed', { timeout: 20000 });
+      await a.waitForFunction((id) => window.__ascii.pvp().fighters.ids().includes(id), { timeout: 5000 }, ids.b);
+    });
+    await check('arena PvP: A walks into the rifle: A holds a rifle on both screens, and B sees A\'s shots as rifle bullets', async () => {
+      // Onto car A's roof from the floor right under it: one step straight up (a slanted run of clamped steps
+      // can end one inside the roof, which the server drops).
+      await putAt(a, b, S.rifle.x - 4, S.floor, 1);
+      await putAt(a, b, S.rifle.x - 4, S.rifle.y, 1);
+      await a.focus('#stage');
+      await a.keyboard.down('ArrowRight');
+      try { await a.waitForFunction(() => window.__ascii.pvp().me.gun === 'rifle', { timeout: 3000 }); } finally { await a.keyboard.up('ArrowRight'); }
+      await b.waitForFunction((id) => window.__ascii.pvp().bodies(performance.now()).find((x) => x.id === id)?.state.gun === 'rifle', { timeout: 3000 }, ids.a);
+      const n0 = await b.evaluate(() => window.__fight.shots.length); // A's earlier shots (the deagle) aren't these
+      await a.keyboard.down('KeyJ'); await sleep(350); await a.keyboard.up('KeyJ');
+      await b.waitForFunction((id, n0) => window.__fight.shots.slice(n0).filter((s) => s.id === id).length >= 2, { timeout: 2000 }, ids.a, n0);
+      const guns = await b.evaluate((id, n0) => window.__fight.shots.slice(n0).filter((s) => s.id === id).map((s) => s.gun), ids.a, n0);
+      console.log(`  rifle: B saw A's shots as ${[...new Set(guns)].join(', ')} (${guns.length})`);
+      assert.ok(guns.every((g) => g === 'rifle'), guns.join(' '));
+    });
+    await check('arena PvP: A holds the sniper: B\'s screen draws A\'s dotted aim line', async () => {
+      await putAt(a, b, S.sniper.x - 4, S.floor, 1);
+      await a.keyboard.down('ArrowRight');
+      try { await a.waitForFunction(() => window.__ascii.pvp().me.gun === 'sniper', { timeout: 3000 }); } finally { await a.keyboard.up('ArrowRight'); }
+      await b.waitForFunction((id) => {
+        const A = window.__ascii, q = A.pvp().bodies(performance.now()).find((x) => x.id === id);
+        return q && q.state.gun === 'sniper' && A.world.figures.filter((g) => g.ch === '·' && g.color && g.color.join() === q.color.join()).length >= 5;
+      }, { timeout: 3000, polling: 'raf' }, ids.a);
+      await b.screenshot({ path: `${SHOTS}/pvp-aim-line.png` });
+    });
+    await check('arena PvP: A double-taps → and rolls about 14 cells on both screens, through B (who isn\'t pushed)', async () => {
+      await putAt(b, a, S.open + 12, S.floor, -1);
+      await putAt(a, b, S.open + 5, S.floor, 1);
+      await sleep(700);
+      const own = a.evaluate(() => new Promise((resolve) => {
+        const p = window.__ascii.world.player, out = [], t0 = performance.now();
+        const tick = () => { out.push({ x: p.x, rollT: p.rollT }); if (performance.now() - t0 < 1500) requestAnimationFrame(tick); else resolve(out); };
+        requestAnimationFrame(tick);
+      }));
+      await a.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const bAt = await meOn(b), seen0 = (await bodyOn(b, ids.a)).x;
+      await a.focus('#stage');
+      await a.keyboard.press('ArrowRight'); await a.keyboard.press('ArrowRight');
+      const fr = await own;
+      await sleep(500);
+      const i = fr.findIndex((f) => f.rollT >= 0), j = fr.findIndex((f, k) => k > i && f.rollT < 0);
+      const roll = i > 0 && j > i ? fr[j].x - fr[i - 1].x : NaN, aEnd = fr.at(-1).x, seen1 = (await bodyOn(b, ids.a)).x;
+      const bNow = await meOn(b), bSeen = (await bodyOn(a, ids.b)).x;
+      console.log(`  roll: ${roll.toFixed(2)} cells on A's screen (${(aEnd - fr[0].x).toFixed(2)} with the slide after); on B's ${(seen1 - seen0).toFixed(2)}, ending at ${seen1.toFixed(2)} vs ${aEnd.toFixed(2)}; B at ${bNow.x.toFixed(2)}`);
+      assert.ok(roll > 13 && roll < 15.6, `rolled ${roll} cells`);
+      assert.ok(Math.abs(seen1 - aEnd) < 1 && seen1 - seen0 > 13, `on B's screen (${seen0} → ${seen1})`);
+      assert.ok(aEnd > bAt.x + 1 && seen1 > bNow.x + 1 && bSeen < aEnd - 1, 'through B, on both screens');
+      assert.ok(Math.abs(bNow.x - bAt.x) < 0.05, 'B was not pushed');
+    });
     await check('stopping the server leaves both galleries walkable', async () => {
       dev.kill();
       await sleep(1500);
@@ -274,6 +464,12 @@ try {
       const before = await a.evaluate(() => window.__ascii.world.player.x);
       await a.keyboard.down('ArrowRight'); await sleep(500); await a.keyboard.up('ArrowRight');
       assert.notEqual(await a.evaluate(() => window.__ascii.world.player.x), before);
+    });
+    await check('stopping the server mid-fight: both get the dummy', async () => {
+      for (const p of [a, b]) {
+        assert.equal(await p.evaluate(() => window.__ascii.mode()), 'side', 'in the arena when it stopped');
+        await p.waitForFunction(() => { const P = window.__ascii.pvp(); return P.entered && !P.online && P.bodies(performance.now()).some((x) => x.dummy); }, { timeout: 8000 });
+      }
     });
     await check('when the connection is lost the other person fades out and the count goes', async () => {
       await a.waitForFunction(() => window.__ascii.live().peers.count() === 0, { timeout: 5000 });

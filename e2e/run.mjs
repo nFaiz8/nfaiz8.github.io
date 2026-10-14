@@ -643,6 +643,416 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await page.$eval('#fight-sr', (e) => e.getAttribute('role')), 'status');
     assert.equal(await page.$eval('#note', (e) => e.textContent), hint, 'the note changed');
   });
+  // ---------- The fight alone, against the practice dummy (PvP spec §14 e2e) ----------
+  // Every spot comes from the level (the pickups, the dummy, the ledges, a stretch of open floor).
+  const DESKTOP = { width: 1440, height: 900, deviceScaleFactor: 1 };
+  const PHONE = { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true };
+  // A fresh page in the fight, the dummy standing. window.__fight logs my shots and every hit: pvp.js hands
+  // each one to fx.shot and fx.hit, so wrapping those sees them all.
+  const enterFight = async (r = 'canvas', vp = DESKTOP) => {
+    await page.setViewport(vp);
+    await page.goto('about:blank');
+    await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+    await page.waitForFunction(() => { const P = window.__ascii.pvp(); return P.entered && !window.__ascii.tilting() && P.bodies(performance.now()).some((b) => b.dummy); }, { timeout: 8000 });
+    return page.evaluate(() => {
+      const A = window.__ascii, P = A.pvp(), fx = P.fx, log = window.__fight = { shots: [], hits: [] };
+      const shot = fx.shot, hit = fx.hit;
+      fx.shot = (s) => { log.shots.push({ id: s.id, x: s.x, y: s.y, angle: s.angle, gun: s.gun, mine: s.mine, at: s.at }); return shot(s); };
+      fx.hit = (h) => { log.hits.push({ d: h.d, hs: !!h.hs, at: h.at, hp: P.dummy.rec ? P.dummy.rec.hp : null }); return hit(h); };
+      const a = A.map.arena, L = a.level, ox = a.x + 1, oy = a.y + 1, top = L.door.r + 1; // the floor's top row
+      const pk = (gun) => { const q = L.pickups.find((p) => p.gun === gun); return { x: q.x + ox, y: q.y + oy }; };
+      const d = P.dummy.body;
+      // 40 cells of floor with 10 clear rows over them, 4 cells clear of the dummy and of any pickup on it.
+      const busy = (c) => Math.abs(d.x - ox - c) < 4 || L.pickups.some((q) => q.r === top - 1 && Math.abs(q.c - c) < 4);
+      let open = null;
+      for (let c0 = 2; !open && c0 + 40 < L.cols - 2; c0++) {
+        let ok = true;
+        for (let c = c0; ok && c <= c0 + 40; c++) ok = L.cells[top * L.cols + c] !== 0 && !busy(c) && [...Array(10)].every((_, k) => !L.cells[(top - 1 - k) * L.cols + c]);
+        if (ok) open = { x: ox + c0 + 0.5 };
+      }
+      return { floor: a.floorY - 1.5, rifle: pk('rifle'), sniper: pk('sniper'), dummy: { x: d.x, y: d.y }, open };
+    });
+  };
+  const place = (x, y, facing) => page.evaluate((x, y, f) => { window.__ascii.teleport(x, y); window.__ascii.world.player.facing = f; }, x, y, facing);
+  const fightLog = () => page.evaluate(() => window.__fight);
+  // Holds a key until the page says so (or the wait times out), then lets go.
+  const holdUntil = async (key, fn, timeout, arg) => {
+    await page.keyboard.down(key);
+    try { await page.waitForFunction(fn, { timeout, polling: 'raf' }, arg); } finally { await page.keyboard.up(key); }
+  };
+  // My x and roll every frame for ms; the roll's length: from the frame before it to the frame it ended.
+  const rollFrames = (ms) => page.evaluate((ms) => new Promise((resolve) => {
+    const p = window.__ascii.world.player, P = window.__ascii.pvp(), out = [], t0 = performance.now();
+    const tick = () => {
+      out.push({ x: p.x, rollT: p.rollT, act: P.bodies(performance.now()).find((b) => b.me).state.act });
+      if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out);
+    };
+    requestAnimationFrame(tick);
+  }), ms);
+  // Two frames go by (so a sampler started just before has its first frame in hand).
+  const twoFrames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const rollOf = (fr) => {
+    const i = fr.findIndex((f) => f.rollT >= 0), j = fr.findIndex((f, k) => k > i && f.rollT < 0);
+    return i > 0 && j > i ? { dist: fr[j].x - fr[i - 1].x, drawn: fr.slice(i, j).some((f) => f.act === 'roll') } : null;
+  };
+  await check('arena PvP alone: held J shoots the dummy (25 a hit, knocked back) until it pops; it is back at its spot about 2 s later', async () => {
+    const s = await enterFight();
+    await place(s.dummy.x - 10, s.floor, 1);
+    await sleep(300);
+    const track = page.evaluate(() => new Promise((resolve) => {
+      const P = window.__ascii.pvp(), out = [], t0 = performance.now();
+      const tick = () => {
+        const now = performance.now(), d = P.bodies(now).find((b) => b.dummy);
+        out.push({ t: now - t0, x: d && d.state.x, hp: d && d.state.hp, act: d && d.state.act, alive: P.dummy.rec.alive });
+        const died = out.findIndex((q) => !q.alive), back = died < 0 ? -1 : out.findIndex((q, i) => i > died && q.alive);
+        if (now - t0 < 10000 && !(back > 0 && now - t0 - out[back].t > 200)) requestAnimationFrame(tick); else resolve(out);
+      };
+      requestAnimationFrame(tick);
+    }));
+    await holdUntil('KeyJ', () => !window.__ascii.pvp().dummy.rec.alive, 5000);
+    const out = await track, { hits } = await fightLog();
+    const died = out.findIndex((q) => !q.alive), back = out.findIndex((q, i) => i > died && q.alive), x0 = out[0].x;
+    const pushed = Math.max(...out.slice(0, died).map((q) => q.x)) - x0;
+    console.log(`  dummy: hits ${hits.map((h) => `-${h.d}→${h.hp}`).join(' ')}; knocked ${pushed.toFixed(2)} cells; back ${died > 0 && back > 0 ? (out[back].t - out[died].t).toFixed(0) : '?'} ms after it popped`);
+    assert.deepEqual(hits.map((h) => [h.d, h.hp, h.hs]), [[25, 75, false], [25, 50, false], [25, 25, false], [25, 0, false]], 'four deagle hits of 25 pop it');
+    assert.ok(pushed > 0.3, `knocked back (${pushed.toFixed(2)} cells)`);
+    assert.ok(died > 0 && out.slice(died, back).some((q) => q.act === 'dead'), 'popped');
+    assert.ok(back > died, 'came back');
+    const gone = out[back].t - out[died].t;
+    assert.ok(gone > 1800 && gone < 2600, `back after ${gone.toFixed(0)} ms`);
+    assert.ok(Math.abs(out[back].x - x0) < 0.05 && out[back].hp === 100, `at its spot with full health (${out[back].x}, ${out[back].hp})`);
+  });
+  await check('arena PvP alone: the mouse: a click on the dummy\'s head is a headshot (50, -50!); a click up and to my left fires at that angle', async () => {
+    const s = await enterFight();
+    await place(s.dummy.x - 10, s.floor, 1);
+    await sleep(400);
+    const click = async (x, y) => {
+      const at = await page.evaluate((x, y) => { const { world, metrics } = window.__ascii, m = metrics(); return { x: (x - world.cam.x) * m.cw + innerWidth / 2, y: (y - world.cam.y) * m.ch + innerHeight / 2 }; }, x, y);
+      assert.ok(at.x > 0 && at.x < DESKTOP.width && at.y > 0 && at.y < DESKTOP.height, `on screen (${at.x.toFixed(0)}, ${at.y.toFixed(0)})`);
+      await page.mouse.move(at.x, at.y);
+      await sleep(200); // aimed: the figure turns to the pointer
+      const n = (await fightLog()).shots.length;
+      await page.mouse.down(); await sleep(50); await page.mouse.up();
+      await page.waitForFunction((n) => window.__fight.shots.length > n, { timeout: 2000 }, n);
+      return (await fightLog()).shots[n];
+    };
+    // The head is the top row of the body's box: a row above its centre, where the O is drawn.
+    await click(s.dummy.x, s.dummy.y - 1);
+    await page.waitForFunction(() => window.__fight.hits.length > 0, { timeout: 2000, polling: 'raf' });
+    // Its number, in flash white with a !, for 0.78 s.
+    await page.waitForFunction(() => {
+      const rows = new Map();
+      for (const g of window.__ascii.world.figures) if (!g.bold && g.color && g.color.join() === '255,255,255') rows.set(g.y.toFixed(2), (rows.get(g.y.toFixed(2)) || '') + g.ch);
+      return [...rows.values()].some((t) => t.includes('-50!'));
+    }, { timeout: 700, polling: 'raf' });
+    const h = (await fightLog()).hits[0];
+    assert.ok(h.hs && h.d === 50 && h.hp === 50, `a headshot of 50 (${JSON.stringify(h)})`);
+    await sleep(500); // the deagle's cooldown
+    const p = await page.evaluate(() => ({ x: window.__ascii.world.player.x, y: window.__ascii.world.player.y }));
+    const to = { x: p.x - 12, y: p.y - 5 };
+    const shot = await click(to.x, to.y);
+    // The bullet starts at the muzzle, on the line from the shoulder to the pointer: from there it points at
+    // the pointer (on screen, where a row counts twice).
+    const want = Math.atan2((to.y - shot.y) * 2, to.x - shot.x);
+    console.log(`  mouse: headshot -${h.d}${h.hs ? '!' : ''}; a click up-left fired at ${shot.angle.toFixed(3)} rad, the pointer at ${want.toFixed(3)}`);
+    assert.ok(shot.mine && shot.x < p.x && Math.abs(shot.angle - want) < 0.1, `fired at ${shot.angle}, wanted ${want}`);
+  });
+  await check('arena PvP alone: the sniper pickup: 5 rounds (HUD), my aim line, 70 a hit, back to the deagle when empty, and there again 10 s after it was taken', async () => {
+    const s = await enterFight();
+    // Whether the sniper is drawn at its spot, each frame: its art (with the °), or a dim dotted outline.
+    const watch = page.evaluate((q) => new Promise((resolve) => {
+      const A = window.__ascii, P = A.pvp(), out = [], t0 = performance.now();
+      const tick = () => {
+        const mine = P.bodies(performance.now()).find((b) => b.me).color.join();
+        const gs = A.world.figures.filter((g) => !g.bold && g.color && g.color.join() !== mine && Math.abs(g.x - q.x) < 4 && Math.abs(g.y - (q.y - 0.5)) < 0.4);
+        const there = gs.some((g) => g.ch === '°') ? true : gs.some((g) => g.ch === '·') ? false : null;
+        if (!out.length || out.at(-1).there !== there) out.push({ t: performance.now(), there });
+        const back = out.findIndex((o, i) => o.there === true && out.slice(0, i).some((x) => x.there === false));
+        if (performance.now() - t0 < 25000 && back < 0) requestAnimationFrame(tick); else resolve(out);
+      };
+      requestAnimationFrame(tick);
+    }), s.sniper);
+    await place(s.sniper.x - 4, s.floor, 1);
+    await sleep(200);
+    await holdUntil('ArrowRight', () => window.__ascii.pvp().me.gun === 'sniper', 3000);
+    assert.deepEqual(await page.evaluate(() => ({ gun: window.__ascii.pvp().me.gun, ammo: window.__ascii.pvp().me.ammo })), { gun: 'sniper', ammo: 5 });
+    await page.waitForFunction(() => /· sniper 5$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
+    // My aim line: a · every 2 cells, in my colour, along my aim.
+    await page.waitForFunction(() => {
+      const A = window.__ascii, c = A.pvp().bodies(performance.now()).find((b) => b.me).color.join();
+      return A.world.figures.filter((g) => g.ch === '·' && g.color && g.color.join() === c).length >= 5;
+    }, { timeout: 1000 });
+    // Five shots at the dummy from 30 cells (through the gangway is fine: the sniper crosses the room).
+    await place(s.dummy.x + 30, s.floor, -1);
+    await sleep(300);
+    await holdUntil('KeyJ', () => window.__ascii.pvp().me.gun === 'deagle', 9000);
+    const { shots, hits } = await fightLog();
+    const sn = shots.filter((q) => q.mine && q.gun === 'sniper');
+    console.log(`  sniper: ${sn.length} shots, hits ${hits.map((h) => `-${h.d}→${h.hp}`).join(' ')}`);
+    assert.equal(sn.length, 5, 'five rounds');
+    assert.ok(hits.length >= 2 && hits.every((h) => h.d === 70 && !h.hs) && hits[0].hp === 30, 'a sniper body shot does 70');
+    assert.equal(await page.evaluate(() => window.__ascii.pvp().me.ammo), -1);
+    await page.waitForFunction(() => /^hp [█░]{10} \d+$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
+    const seen = await watch;
+    const taken = seen.find((o) => o.there === false), back = taken && seen.find((o) => o.there === true && o.t > taken.t);
+    console.log(`  sniper pickup: ${seen.map((o) => `${o.there}@${(o.t - seen[0].t).toFixed(0)}`).join(' ')}`);
+    assert.ok(seen[0].there === true && taken, 'there, then taken');
+    assert.ok(back && back.t - taken.t > 9500 && back.t - taken.t < 10800, `back ${back && (back.t - taken.t).toFixed(0)} ms after it was taken`);
+  });
+  await check('arena PvP alone: the rifle gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (at most 2.6 a second); 9 a rifle hit, 25 a deagle hit', async () => {
+    const s = await enterFight();
+    await place(s.rifle.x - 4, s.rifle.y, 1); // on car A's roof
+    await sleep(200);
+    await holdUntil('ArrowRight', () => window.__ascii.pvp().me.gun === 'rifle', 3000);
+    assert.equal(await page.evaluate(() => window.__ascii.pvp().me.ammo), 40);
+    await page.waitForFunction(() => /· rifle 40$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
+    await place(s.dummy.x - 10, s.floor, 1);
+    await sleep(300);
+    await page.evaluate(() => { window.__fight.shots.length = 0; window.__fight.hits.length = 0; });
+    await page.keyboard.down('KeyJ');
+    try {
+      await page.waitForFunction(() => window.__ascii.pvp().me.gun === 'deagle', { timeout: 7000 });
+      await sleep(1700); // and on with the deagle
+    } finally { await page.keyboard.up('KeyJ'); }
+    const { shots, hits } = await fightLog();
+    const rifle = shots.filter((q) => q.mine && q.gun === 'rifle'), deagle = shots.filter((q) => q.mine && q.gun === 'deagle');
+    const rate = (l) => (l.length - 1) / ((l.at(-1).at - l[0].at) / 1000);
+    const rifleHits = hits.filter((h) => h.at <= rifle.at(-1).at + 150), deagleHits = hits.filter((h) => deagle.length && h.at > deagle[0].at);
+    console.log(`  rifle: ${rifle.length} shots at ${rate(rifle).toFixed(2)}/s, then ${deagle.length} deagle at ${deagle.length > 1 ? rate(deagle).toFixed(2) : '?'}/s; hits ${hits.map((h) => h.d).join(' ')}`);
+    assert.equal(rifle.length, 40, 'forty rounds');
+    assert.ok(rate(rifle) > 8 && rate(rifle) <= 10.5, `about 10 a second (${rate(rifle).toFixed(2)})`);
+    assert.ok(deagle.length >= 3 && deagle[0].at > rifle.at(-1).at, 'then the deagle');
+    assert.ok(rate(deagle) <= 2.6, `the deagle at most 2.6 a second (${rate(deagle).toFixed(2)})`);
+    assert.ok(rifleHits.length >= 10 && rifleHits.every((h) => h.d === 9 && !h.hs), `9 a rifle hit (${rifleHits.map((h) => h.d).join(' ')})`);
+    assert.ok(deagleHits.every((h) => h.d === 25 && !h.hs), `25 a deagle hit (${deagleHits.map((h) => h.d).join(' ')})`);
+  });
+  await check('arena PvP alone: a double-tap of D rolls about 14 cells; a bullet reaching the dummy inside its roll\'s dodge window passes through it (rules and screen)', async () => {
+    const s = await enterFight();
+    await place(s.open.x + 2, s.floor, 1);
+    await sleep(300);
+    const frames = rollFrames(1200);
+    await twoFrames();
+    await page.keyboard.press('KeyD'); await page.keyboard.press('KeyD');
+    const roll = rollOf(await frames);
+    console.log(`  roll (D D): ${roll ? roll.dist.toFixed(2) : '?'} cells`);
+    assert.ok(roll && roll.dist > 13 && roll.dist < 15.6 && roll.drawn, `rolled ${roll && roll.dist} cells, drawn rolling`);
+    // The dummy never rolls by itself: scripted, its body rolls toward me (as startRoll sets it) and the local
+    // referee's rollAt is held at the roll's start (syncDummy would clear it every frame). My shot is on its
+    // way first, so it meets the dummy about 0.11 s into the roll: inside the dodge window.
+    await place(s.dummy.x - 30, s.floor, 1);
+    await sleep(700);
+    const { shots: before, hits: hitsBefore } = await fightLog();
+    const run = page.evaluate((n0) => new Promise((resolve) => {
+      const A = window.__ascii, P = A.pvp(), log = window.__fight, out = [], t0 = performance.now();
+      let shot = null, rollAt = null;
+      const tick = () => {
+        const now = performance.now();
+        if (!shot && log.shots.length > n0) shot = log.shots[n0];
+        if (shot && rollAt == null && now - shot.at >= 150) {
+          Object.assign(P.dummy.body, { rollT: 0, rollDir: -1 });
+          rollAt = now / 1000;
+          Object.defineProperty(P.dummy.rec, 'rollAt', { get: () => rollAt, set() {}, configurable: true });
+        }
+        if (shot) {
+          const d = P.bodies(now).find((q) => q.dummy);
+          // Where the rules have my bullet: the deagle's 80 cells/s (PvP spec §2.2) from its muzzle.
+          out.push({ t: now / 1000, x: d.state.x, act: d.state.act, hp: P.dummy.rec.hp, bx: shot.x + 80 * Math.cos(shot.angle) * (now - shot.at) / 1000,
+            tracer: A.world.figures.filter((g) => g.ch === '•').map((g) => g.x) });
+        }
+        if (now - t0 < 4000 && !(rollAt != null && now / 1000 - rollAt > 0.9)) requestAnimationFrame(tick);
+        else { delete P.dummy.rec.rollAt; P.dummy.rec.rollAt = null; resolve({ out, rollAt }); }
+      };
+      requestAnimationFrame(tick);
+    }), before.length);
+    await holdUntil('KeyJ', (n0) => window.__fight.shots.length > n0, 2000, before.length);
+    const { out, rollAt } = await run, { shots, hits } = await fightLog();
+    const k = out.findIndex((f, i) => i > 0 && f.bx >= f.x && out[i - 1].bx < out[i - 1].x); // the bullet passes its centre
+    const into = k > 0 ? out[k].t - rollAt : NaN;
+    const past = out.slice(k + 1).filter((f) => f.tracer.some((x) => x > f.x + 1)).length;
+    console.log(`  dodge: the bullet met the rolling dummy ${(into * 1000).toFixed(0)} ms into its roll; hp ${[...new Set(out.map((f) => f.hp))].join(' ')}; my tracer drawn past it in ${past} frames`);
+    assert.equal(shots.length - before.length, 1, 'one shot');
+    assert.ok(rollAt != null && k > 0 && into > 0.04 && into < 0.26, `met inside the dodge window (${into})`);
+    assert.equal(out[k].act, 'roll', 'drawn rolling');
+    assert.ok(out.every((f) => f.hp === 100) && hits.length === hitsBefore.length, 'its hp unchanged, no hit');
+    assert.ok(past > 0, 'my tracer flies on past it');
+  });
+  await check('arena PvP alone: a jump out of a roll keeps its speed: from standing, the long jump lands at least 4 cells further than a running jump', async () => {
+    const s = await enterFight();
+    // From standing: D held (a double-tap of it for the roll), Space 100 ms later and held until landing.
+    const jumpFrom = async (roll) => {
+      await place(s.open.x + 2, s.floor, 1);
+      await sleep(700); // standing, the last roll cooled down
+      const x0 = await page.evaluate(() => window.__ascii.world.player.x);
+      const frames = page.evaluate(() => new Promise((resolve) => {
+        const p = window.__ascii.world.player, out = [], t0 = performance.now();
+        const tick = () => {
+          out.push({ x: p.x, g: p.onGround, vx: p.vx });
+          const air = out.findIndex((f) => !f.g);
+          if (performance.now() - t0 < 3000 && !(air >= 0 && out.at(-1).g)) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }));
+      if (roll) await page.keyboard.press('KeyD');
+      await page.keyboard.down('KeyD');
+      await sleep(100);
+      await page.keyboard.down('Space');
+      const fr = await frames;
+      await page.keyboard.up('Space'); await page.keyboard.up('KeyD');
+      const air = fr.findIndex((f) => !f.g), land = fr.findIndex((f, i) => i > air && f.g);
+      assert.ok(air > 0 && land > air, 'took off and landed');
+      return { total: fr[land].x - x0, air: fr[land].x - fr[air - 1].x, vx: fr[air].vx };
+    };
+    const run = await jumpFrom(false), long = await jumpFrom(true);
+    console.log(`  running jump: ${run.total.toFixed(1)} cells (${run.air.toFixed(1)} in the air, took off at ${run.vx.toFixed(0)}/s); long jump: ${long.total.toFixed(1)} (${long.air.toFixed(1)} in the air, at ${long.vx.toFixed(0)}/s)`);
+    assert.ok(long.vx > run.vx + 10, 'took off at the roll\'s speed');
+    assert.ok(long.total >= run.total + 4, `${long.total.toFixed(1)} vs ${run.total.toFixed(1)} cells`);
+  });
+  await check('arena PvP alone: climbing a gap with real keys: a jump lands on the first ledge, not the second; a jump and an air jump at its top reach the second; on via the third to a roof', async () => {
+    const s = await enterFight();
+    const g = await page.evaluate(() => {
+      const a = window.__ascii.map.arena, L = a.level, top = L.door.r + 1, ox = a.x + 1, oy = a.y + 1;
+      const kind = (r, c) => L.cells[r * L.cols + c];
+      // The widest ledge 5 rows over the floor (the gangway's), and the ones 5 and 10 rows over it.
+      let best = null;
+      for (let c = 0; c < L.cols; c++) {
+        if (kind(top - 5, c) !== 1) continue;
+        let e = c;
+        while (e + 1 < L.cols && kind(top - 5, e + 1) === 1) e++;
+        if (!best || e - c > best.e - best.c) best = { c, e };
+        c = e;
+      }
+      const rows = [top - 5, top - 10, top - 15];
+      // The roof west of it: the top of the solid over the third ledge's row.
+      const wc = best.c - 3;
+      let r = rows[2] - 1;
+      while (r > 0 && kind(r, wc) !== 2) r--;
+      while (r > 0 && kind(r - 1, wc) === 2) r--;
+      return { x: ox + (best.c + best.e + 1) / 2, west: ox + best.c, ledges: rows.map((q) => oy + q), roof: oy + r, ok: rows.every((q) => kind(q, best.c) === 1 && kind(q, best.e) === 1) };
+    });
+    assert.ok(g.ok, 'three ledges, 5 rows apart, in the gap');
+    const feet = () => page.evaluate(() => { const p = window.__ascii.world.player; return { y: p.y + 1.5, x: p.x, airJumpT: p.airJumpT, t: p.t }; });
+    const jump = async (air, side) => {
+      await page.keyboard.down('Space');
+      await page.waitForFunction(() => !window.__ascii.world.player.onGround, { timeout: 1000, polling: 'raf' });
+      if (side) await page.keyboard.down(side);
+      if (air) {
+        await page.waitForFunction(() => window.__ascii.world.player.vy > -3, { timeout: 1500, polling: 'raf' }); // at the top
+        await page.keyboard.up('Space');
+        await twoFrames(); // a frame without it
+        await page.keyboard.down('Space'); // a fresh press in the air: the air jump
+      }
+      await page.waitForFunction(() => window.__ascii.world.player.onGround, { timeout: 3000, polling: 'raf' });
+      await page.keyboard.up('Space');
+      if (side) await page.keyboard.up(side);
+      await sleep(150);
+      return feet();
+    };
+    const on = (f, row, what) => assert.ok(Math.abs(f.y - row) < 0.01, `${what}: the feet at ${f.y.toFixed(2)}, the ledge at ${row}`);
+    await place(g.x, s.floor, 1);
+    await sleep(400);
+    on(await jump(false), g.ledges[0], 'one jump from the floor lands on the first ledge');
+    await place(g.x, s.floor, 1);
+    await sleep(400);
+    const two = await jump(true);
+    on(two, g.ledges[1], 'a jump and an air jump from the floor land on the second');
+    assert.ok(two.t - two.airJumpT < 2, 'the air jump was taken');
+    on(await jump(false), g.ledges[2], 'a jump from the second lands on the third');
+    const roof = await jump(false, 'ArrowLeft');
+    console.log(`  climb: ledges at rows ${g.ledges.join(', ')}, roof ${g.roof}; on the roof at ${roof.x.toFixed(1)}, ${roof.y.toFixed(2)}`);
+    on(roof, g.roof, 'a jump and ← from the third land on the roof');
+    assert.ok(roof.x < g.west, 'on the roof west of the gap');
+  });
+  await check('arena PvP alone on a landscape phone: FIRE shoots, HIT strikes, FIRE with JUMP held shoots 45° up, and ◀ ◀ rolls left', async () => {
+    const s = await enterFight('canvas', PHONE);
+    await place(s.open.x + 20, s.floor, 1);
+    await sleep(500);
+    const at = await page.$$eval('#pad button', (bs) => Object.fromEntries(bs.map((b) => { const r = b.getBoundingClientRect(); return [b.dataset.code, { x: r.x + r.width / 2, y: r.y + r.height / 2 }]; })));
+    const tap = async (code, ms = 60) => { const t = await page.touchscreen.touchStart(at[code].x, at[code].y); await sleep(ms); await t.end(); };
+    const mine = async () => (await fightLog()).shots.filter((q) => q.mine);
+    await tap('Fire', 150);
+    const level = await mine();
+    assert.ok(level.length >= 1 && level.every((q) => Math.abs(q.angle) < 0.01), `FIRE shoots, level (${level.map((q) => q.angle).join(' ')})`);
+    const strikeAt = await page.evaluate(() => window.__ascii.pvp().me.strikeAt);
+    await tap('Hit');
+    await page.waitForFunction((t) => { const P = window.__ascii.pvp(); return P.me.strikeAt !== t && P.bodies(performance.now()).find((b) => b.me).state.act === 'punch'; }, { timeout: 1000, polling: 'raf' }, strikeAt);
+    await sleep(500); // the deagle's cooldown
+    const jump = await page.touchscreen.touchStart(at.Jump.x, at.Jump.y);
+    await sleep(60);
+    const fire = await page.touchscreen.touchStart(at.Fire.x, at.Fire.y);
+    await sleep(150);
+    await fire.end(); await jump.end();
+    const up = (await mine()).slice(level.length);
+    assert.ok(up.length >= 1 && up.every((q) => Math.abs(q.angle + Math.PI / 4) < 0.02), `FIRE with JUMP held shoots 45° up (${up.map((q) => q.angle).join(' ')})`);
+    await page.waitForFunction(() => window.__ascii.world.player.onGround, { timeout: 2000 });
+    await sleep(700);
+    const frames = rollFrames(1200);
+    await twoFrames();
+    await tap('ArrowLeft', 40); await sleep(60); await tap('ArrowLeft', 40);
+    const roll = rollOf(await frames);
+    console.log(`  phone: FIRE ${level.length} level, FIRE + JUMP ${up.map((q) => q.angle.toFixed(2)).join(' ')}; ◀ ◀ rolled ${roll ? roll.dist.toFixed(2) : '?'} cells`);
+    assert.ok(roll && roll.dist < -13 && roll.dist > -15.6 && roll.drawn, `◀ ◀ rolls left (${roll && roll.dist})`);
+    await page.setViewport(DESKTOP);
+  });
+  await check('arena PvP alone with Reduce Motion: kicked, the camera follows my body without a wobble (without Reduce Motion it shakes), and no page errors', async () => {
+    const kicked = async () => {
+      const s = await enterFight();
+      await place(s.open.x + 20, s.floor, 1);
+      await sleep(600);
+      return page.evaluate(() => new Promise((resolve) => {
+        const A = window.__ascii, P = A.pvp(), w = A.world, out = [];
+        let n = 0;
+        const tick = () => {
+          if (n++ === 3) P.onMessage({ t: 'h', id: P.me.id, by: 'x', w: 'k', n: -1, d: 22, hp: 78, kx: 45, ky: -22 }, performance.now());
+          out.push({ dx: w.cam.x - w.player.x, dy: w.cam.y - w.player.y, off: Math.hypot(w.shakeOff.x, w.shakeOff.y), shake: !!w.shake, hp: P.me.hp, px: w.player.x });
+          if (n < 90) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }));
+    };
+    // How often the camera's offset from me turns back, frame to frame: a wobble turns back and forth.
+    const turns = (fr, k) => {
+      let n = 0, last = 0;
+      for (let i = 1; i < fr.length; i++) {
+        const d = fr[i][k] - fr[i - 1][k];
+        if (Math.abs(d) < 0.01) continue;
+        if (last && Math.sign(d) !== last) n++;
+        last = Math.sign(d);
+      }
+      return n;
+    };
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    let still;
+    try { still = await kicked(); } finally { await page.emulateMediaFeatures([]); }
+    const moving = await kicked();
+    const pushed = still.at(-1).px - still[0].px;
+    console.log(`  kicked ${pushed.toFixed(1)} cells: with Reduce Motion the camera turned ${turns(still, 'dx')}/${turns(still, 'dy')} times, shake ${Math.max(...still.map((f) => f.off)).toFixed(2)}; without, ${turns(moving, 'dx')}/${turns(moving, 'dy')}, shake ${Math.max(...moving.map((f) => f.off)).toFixed(2)}`);
+    assert.ok(still.some((f) => f.hp === 78) && pushed > 2, 'the kick landed, and knocked me away');
+    assert.ok(still.every((f) => f.off === 0 && !f.shake), 'no shake with Reduce Motion');
+    assert.ok(turns(still, 'dx') <= 2 && turns(still, 'dy') <= 2, 'the camera follows without a wobble');
+    assert.ok(moving.some((f) => f.off > 0.05) && turns(moving, 'dx') + turns(moving, 'dy') > turns(still, 'dx') + turns(still, 'dy'), 'without Reduce Motion the same kick shakes');
+    assert.deepEqual(errors, [], 'no page errors');
+  });
+  for (const [size, vp] of [['computer', DESKTOP], ['phone', PHONE]]) {
+    for (const r of ['canvas', 'gl']) {
+      await check(`${r} on a ${size}: the fight with the dummy, mid-fire and holding the sniper (screenshots), no ? glyphs`, async () => {
+        const s = await enterFight(r, vp);
+        await place(s.dummy.x - 10, s.floor, 1);
+        await sleep(400);
+        await page.keyboard.down('KeyJ');
+        try {
+          // A moment after the second hit: a bullet in flight, a spark, damage numbers, the hp bar.
+          await page.waitForFunction(() => { const h = window.__fight.hits; return h.length >= 2 && performance.now() - h.at(-1).at > 60; }, { timeout: 3000, polling: 'raf' });
+          await page.screenshot({ path: `${SHOTS}/fight-${r}-${size}.png` });
+        } finally { await page.keyboard.up('KeyJ'); }
+        await page.evaluate(() => { window.__ascii.pvp().me.gun = 'sniper'; });
+        await sleep(900);
+        await page.screenshot({ path: `${SHOTS}/fight-${r}-${size}-sniper.png` });
+        await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
+        assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'no glyph drawn as ?');
+      });
+    }
+  }
+  await page.setViewport(DESKTOP);
   // The stickman (stickman spec §8): my figure in every pose, pinned with __ascii.pose, with each renderer,
   // on a computer and on a landscape phone, over the brightest part of the train.
   const POSES = [
@@ -860,21 +1270,30 @@ await withBrowser(async ({ page, url, errors }) => {
     // Protection's pulse dims the figure too: pinned off, only the fly-in can.
     await page.evaluate(() => window.__ascii.pose({ safe: false }));
     try {
-      // My sprites (amber, or white in the flash): how far they spread from my centre, and how faint.
-      const mine = () => {
-        const w = window.__ascii.world, me = (w.bodies || []).find((b) => b.me);
-        const gs = (w.figures || []).filter((g) => g.bold && me && (g.color === me.color || g.color.every((c) => c === 255)));
-        if (!me || !gs.length) return null;
-        return { n: gs.length, spread: Math.max(...gs.map((g) => Math.hypot(g.x - me.state.x, (g.y - me.state.y) * 2))),
-          faint: gs.some((g) => g.a < 1), white: gs.some((g) => g.color.every((c) => c === 255)), solid: gs.every((g) => g.a === 1) };
-      };
-      await page.evaluate((e) => window.__ascii.teleport(e.x + 0.5, e.y + 0.5), entry);
-      const early = await (await page.waitForFunction(`window.__ascii.mode() === 'side' && (${mine})()`, { timeout: 3000 })).jsonValue();
-      await sleep(700);
-      const late = await page.evaluate(`(${mine})()`);
-      console.log(`  fly-in: first frame ${JSON.stringify(early)}; after 0.7 s ${JSON.stringify(late)}`);
+      // Every frame from the step back in, sampled in the page (no race with a separate wait): my sprites (amber,
+      // or white in the flash), how far they spread from my centre, and how faint.
+      const frames = await page.evaluate((e) => new Promise((resolve) => {
+        const mine = () => {
+          const w = window.__ascii.world, me = (w.bodies || []).find((b) => b.me);
+          const gs = (w.figures || []).filter((g) => g.bold && me && (g.color === me.color || g.color.every((c) => c === 255)));
+          if (!me || !gs.length) return null;
+          return { n: gs.length, spread: Math.max(...gs.map((g) => Math.hypot(g.x - me.state.x, (g.y - me.state.y) * 2))),
+            faint: gs.some((g) => g.a < 1), white: gs.some((g) => g.color.every((c) => c === 255)), solid: gs.every((g) => g.a === 1) };
+        };
+        window.__ascii.teleport(e.x + 0.5, e.y + 0.5);
+        const out = [], t0 = performance.now();
+        const tick = () => {
+          const m = window.__ascii.mode() === 'side' ? mine() : null;
+          if (m) out.push({ t: performance.now() - t0, ...m });
+          if (performance.now() - t0 < 1000) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }), entry);
+      const early = frames[0], late = frames.at(-1);
+      console.log(`  fly-in: ${frames.length} frames; first at ${early && early.t.toFixed(0)} ms ${JSON.stringify(early)}; last ${JSON.stringify(late)}`);
+      assert.ok(early && early.t < 200, 'drawn at once');
       assert.ok(early.faint && early.spread > late.spread + 0.5, 'flying in: faint, and spread out from where it lands');
-      assert.ok(late.solid && !late.white, 'in place after 0.45 s: solid, the flash over');
+      assert.ok(late.solid && !late.white, 'in place after the fly-in: solid, the flash over');
     } finally {
       await page.evaluate(() => window.__ascii.pose(null));
     }
