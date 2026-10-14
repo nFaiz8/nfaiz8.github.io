@@ -98,8 +98,10 @@ test('my bullet flies through a dead body and a spawn-protected one', () => {
   for (const state of [{ x: 30.5, y: 27.5, act: 'dead' }, { x: 30.5, y: 27.5, safe: true }]) {
     const f = fx();
     f.shot({ id: 'me', n: null, x: 23.45, y: 27.2, angle: 0, gun: 'deagle', color: [1, 2, 3], mine: true, at: 0 });
-    for (let ms = 16; ms <= 32; ms += 16) f.step(0.016, ms, [{ id: 'b', state }]);
-    assert.equal(f.glyphs(32, {}).filter((g) => g.ch === '•').length, 1);
+    for (let ms = 16; ms <= 96; ms += 16) f.step(0.016, ms, [{ id: 'b', state }]);
+    const heads = f.glyphs(96, {}).filter((g) => g.ch === '•');
+    assert.equal(heads.length, 1, 'still flying');
+    assert.ok(heads[0].x > 31 && heads[0].x < 35, 'past the body, short of the pillar');
   }
 });
 
