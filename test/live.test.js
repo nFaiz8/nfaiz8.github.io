@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { peerEntities, heartEntities, peerColor } from '../src/live.js';
+import { peerEntities, heartEntities, peerColor, arenaTicker } from '../src/live.js';
 
 test('a peer is an @ with its name centred below and its emote above', () => {
   const es = peerEntities([{ id: 'abc', name: 'Sam', x: 10.5, y: 5.5, alpha: 1, emote: '~o/', emoteAge: 0.1 }], { reducedMotion: true });
@@ -83,8 +83,82 @@ test('a heart at the arena photo rises from whoever sent it, not from the ceilin
   const frames = [{ id: 'bg', x: 0, y: 0, w: 242, h: 52, backdrop: true }];
   const posOf = (id) => (id === 'p9' ? { x: 40.5, y: 30.5 } : null);
   const [h] = heartEntities([{ f: 'bg', id: 'p9', age: 0 }], frames, { posOf });
-  assert.deepEqual([h.x, h.y, h.glyph], [40.5, 29.5, '♥']);
+  assert.deepEqual([h.x, h.y, h.glyph], [40.5, 30.5 - 2.2, '♥']);
   const [later] = heartEntities([{ f: 'bg', id: 'p9', age: 0.5 }], frames, { posOf });
   assert.ok(later.y < h.y, 'rises');
   assert.deepEqual(heartEntities([{ f: 'bg', id: 'gone', age: 0 }], frames, { posOf }), [], 'sender gone: nothing');
+});
+
+const snap = (o = {}) => ({ x: 10, y: 27.5, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0, ...o });
+
+test('peerColor never returns a hue in the amber band (20°–60°)', () => {
+  const hue = ([r, g, b]) => {
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    if (!d) return 0;
+    const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+  for (let i = 0; i < 2000; i++) { const h = hue(peerColor(`id${i}x${i * 7}`)); assert.ok(h < 20 - 1 || h > 60 + 1, `hue ${h}`); }
+});
+
+test('the arena ticker: at most 15 a second while moving, nothing while still', () => {
+  const out = [];
+  const tick = arenaTicker((m) => { out.push(m); return true; });
+  for (let t = 0; t <= 1000; t += 1000 / 60) tick(snap({ x: 10 + t / 100, vx: 10, ts: Math.round(t) }), t);
+  assert.ok(out.length >= 14 && out.length <= 16, `${out.length}`);
+  out.length = 0;
+  for (let t = 1000; t <= 2000; t += 1000 / 60) tick(snap({ x: 20, ts: Math.round(t) }), t);
+  assert.ok(out.length <= 1, 'one last send when stopping at most');
+  out.length = 0;
+  for (let t = 2000; t <= 3000; t += 1000 / 60) tick(snap({ x: 20, ts: Math.round(t) }), t);
+  assert.equal(out.length, 0);
+});
+
+test('urgent changes (input bits, ground, facing, knockback) go out after 30 ms, not after 67', () => {
+  const out = [];
+  const tick = arenaTicker((m) => { out.push(m); return true; });
+  tick(snap({ x: 10, vx: 10 }), 0);
+  tick(snap({ x: 10.2, vx: 10, i: 2 }), 16);
+  assert.equal(out.length, 1, 'too soon: waits for the 30 ms mark');
+  tick(snap({ x: 10.3, vx: 10, i: 2 }), 33);
+  assert.equal(out.length, 2);
+  assert.equal(out[1].i, 2);
+  tick(snap({ x: 10.9, vx: 10, i: 2 }), 70, true);
+  assert.equal(out.length, 3, 'a knockback is urgent');
+});
+
+test('never more than 20 a second, even with urgent changes every frame, at any frame rate', () => {
+  for (const fps of [20, 60, 144]) {
+    const out = [];
+    const tick = arenaTicker((m) => { out.push(m); return true; });
+    let i = 0;
+    for (let t = 0; t <= 3000; t += 1000 / fps) tick(snap({ x: t / 100, i: (i++ % 2) * 2, ts: Math.round(t) }), t);
+    const times = out.map((m) => m.ts);
+    for (const t0 of times) assert.ok(times.filter((t) => t >= t0 && t < t0 + 1000).length <= 20, `${fps} fps`);
+  }
+});
+
+test('a send that did not go out is retried', () => {
+  let ok = false;
+  const out = [];
+  const tick = arenaTicker((m) => { if (ok) out.push(m); return ok; });
+  tick(snap({ x: 11 }), 0);
+  ok = true;
+  tick(snap({ x: 11 }), 100);
+  assert.equal(out.length, 1);
+});
+
+test('positionTicker.reset sends the same position again at once (leaving the arena)', () => {
+  const out = [];
+  const tick = positionTicker((m) => { out.push(m); return true; });
+  tick({ x: 5, y: 5 });
+  tick({ x: 5, y: 5 });
+  tick.reset();
+  tick({ x: 5, y: 5 });
+  assert.equal(out.length, 2);
+});
+
+test('a heart at the arena photo rises from above the stickman\'s head', () => {
+  const [h] = heartEntities([{ f: 'bd', id: 'a', age: 0 }], [{ id: 'bd', backdrop: true }], { posOf: () => ({ x: 5, y: 20 }) });
+  assert.equal(h.y, 20 - 2.2);
 });

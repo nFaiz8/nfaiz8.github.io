@@ -91,3 +91,15 @@ test('what someone says shows for 5 s', () => {
   ps.apply({ t: 'c', id: 'ghost', text: 'boo' }, 0);
   assert.equal(ps.list(0).length, 1);
 });
+
+test('positions alone give motion: velocity, facing, and ground when y holds still for 120 ms', () => {
+  const p = createPeers({ delay: 0 });
+  p.apply({ t: 'welcome', id: 'me', peers: [{ id: 'a', name: '', x: 10, y: 20 }] }, 0);
+  for (let t = 50; t <= 400; t += 50) p.apply({ t: 'p', id: 'a', x: 10 - t / 100, y: 20 }, t);
+  const [a] = p.list(400);
+  assert.ok(Math.abs(a.vx + 10) < 0.5, `vx ${a.vx}`);
+  assert.equal(a.facing, -1);
+  assert.equal(a.ground, true);
+  p.apply({ t: 'p', id: 'a', x: 6, y: 18 }, 450);
+  assert.equal(p.list(450)[0].ground, false);
+});

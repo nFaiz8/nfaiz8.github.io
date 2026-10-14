@@ -35,8 +35,12 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
       for (const p of [...peers.values()]) {
         if (p.left != null && now - p.left >= fade) { peers.delete(p.id); continue; }
         const { x, y } = sample(p.track, now - delay);
+        // Motion from positions alone: per-second velocity over 50 ms, ground when y held for 120 ms.
+        const s0 = sample(p.track, now - delay), s1 = sample(p.track, now - delay - 50), s2 = sample(p.track, now - delay - 120);
+        const vx = (s0.x - s1.x) * 20, vy = (s0.y - s1.y) * 20;
+        if (vx) p.facing = vx > 0 ? 1 : -1;
         const showing = p.emote && now - p.emoteAt < emoteFor;
-        out.push({ id: p.id, name: p.name, x, y, dx: p.dx, dy: p.dy, alpha: p.left == null ? 1 : 1 - (now - p.left) / fade,
+        out.push({ id: p.id, name: p.name, x, y, vx, vy, ground: s0.y === s2.y, facing: p.facing, dx: p.dx, dy: p.dy, alpha: p.left == null ? 1 : 1 - (now - p.left) / fade,
           emote: showing ? p.emote : null, emoteAge: showing ? (now - p.emoteAt) / emoteFor : 0,
           say: p.say && now - p.sayAt < sayFor ? p.say : null });
       }
@@ -53,7 +57,7 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
     dropAll(now) { for (const p of peers.values()) if (p.left == null) p.left = now; },
   };
   function add(p, now) {
-    peers.set(p.id, { id: p.id, name: p.name || '', track: [{ t: now, x: p.x, y: p.y }], left: null, emote: null, emoteAt: 0, say: null, sayAt: 0, dx: 0, dy: 1 });
+    peers.set(p.id, { id: p.id, name: p.name || '', track: [{ t: now, x: p.x, y: p.y }], left: null, emote: null, emoteAt: 0, say: null, sayAt: 0, dx: 0, dy: 1, facing: 1 });
   }
   return api;
 }
