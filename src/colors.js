@@ -48,21 +48,39 @@ export function meanHue(hues) {
 
 // Split an ordered list into n runs of near-equal size, nudging each cut to the biggest gap in key()
 // within ±slack items, so rooms break where the colour actually changes.
-function splitAtGaps(list, n, key, slack = 3) {
-  const cuts = [];
-  for (let i = 1; i < n; i++) {
-    const ideal = Math.round((i * list.length) / n);
-    let best = ideal, bestGap = -1;
-    for (let c = Math.max(cuts.at(-1) + 2 || 2, ideal - slack); c <= Math.min(list.length - 2, ideal + slack); c++) {
-      const gap = key(list[c]) - key(list[c - 1]);
-      if (gap > bestGap) { bestGap = gap; best = c; }
-    }
-    cuts.push(best);
+// Rooms follow the colour wheel: a new room wherever the hues jump, small runs folded into the nearer
+// neighbour, and any room still wider than MAX_SPAN degrees (or bigger than MAX_ROOM) cut at its widest gap.
+const BREAK = 15, MAX_SPAN = 30, MIN_ROOM = 4, MAX_ROOM = 16;
+function splitByHue(list, key) {
+  if (!list.length) return [];
+  let runs = [[list[0]]];
+  for (let i = 1; i < list.length; i++) {
+    if (key(list[i]) - key(list[i - 1]) > BREAK) runs.push([]);
+    runs.at(-1).push(list[i]);
   }
-  const out = [];
-  let start = 0;
-  for (const c of [...cuts, list.length]) { out.push(list.slice(start, c)); start = c; }
-  return out.filter((r) => r.length);
+  // Fold small runs into the neighbour whose nearest photo is closest in hue, smallest first.
+  for (;;) {
+    const small = runs.filter((r) => r.length < MIN_ROOM).sort((a, b) => a.length - b.length)[0];
+    if (!small || runs.length === 1) break;
+    const i = runs.indexOf(small);
+    const before = i > 0 ? key(small[0]) - key(runs[i - 1].at(-1)) : Infinity;
+    const after = i < runs.length - 1 ? key(runs[i + 1][0]) - key(small.at(-1)) : Infinity;
+    const j = before <= after ? i - 1 : i + 1;
+    runs[j] = j < i ? [...runs[j], ...small] : [...small, ...runs[j]];
+    runs.splice(i, 1);
+  }
+  const span = (r) => key(r.at(-1)) - key(r[0]);
+  const cut = (r) => {
+    if (r.length < MIN_ROOM * 2 || (span(r) <= MAX_SPAN && r.length <= MAX_ROOM)) return [r];
+    let best = MIN_ROOM, bestGap = -1;
+    for (let c = MIN_ROOM; c <= r.length - MIN_ROOM; c++) {
+      const gap = key(r[c]) - key(r[c - 1]);
+      // Widest gap wins; on a tie, the cut nearer the middle.
+      if (gap > bestGap + 1e-9 || (Math.abs(gap - bestGap) < 1e-9 && Math.abs(c - r.length / 2) < Math.abs(best - r.length / 2))) { bestGap = gap; best = c; }
+    }
+    return [...cut(r.slice(0, best)), ...cut(r.slice(best))];
+  };
+  return runs.flatMap(cut);
 }
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -72,7 +90,7 @@ export function roomColor(h) {
 }
 
 // photos → rooms [{ id, name, subtitle, wing, hue, photos }]
-export function groupByColor(photos, perRoom = 12) {
+export function groupByColor(photos) {
   // Film always hangs in the darkroom; everything else is sorted by colour.
   const film = photos.filter((p) => p.category === 'film');
   const tagged = photos.filter((p) => p.category !== 'film').map((p) => ({ p, c: photoColor(p) }));
@@ -90,7 +108,7 @@ export function groupByColor(photos, perRoom = 12) {
   const wheel = [...colored.slice(gapAt), ...colored.slice(0, gapAt)];
   const base = wheel.length ? wheel[0].c.h : 0;
   const unwrap = (t) => (t.c.h - base + 360) % 360;
-  const runs = wheel.length ? splitAtGaps(wheel, Math.max(1, Math.round(wheel.length / perRoom)), unwrap) : [];
+  const runs = splitByHue(wheel, unwrap);
 
   const rooms = runs.map((run) => {
     const hue = meanHue(run.map((t) => t.c.h));

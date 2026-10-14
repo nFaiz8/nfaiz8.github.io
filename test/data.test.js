@@ -34,6 +34,28 @@ test('rooms group by colour: reds together, blues together, black & white in sil
   assert.equal(where('g9'), 'silver');
 });
 
+test('colour rooms stay narrow: no room spans more than 30° of the colour wheel', () => {
+  const hued = (id, h) => ({ id, category: 'digital', analysis: { hue: h, sat: 0.6, score: 0.5, lum: 0.4 } });
+  // Like the live Gold room: orange through yellow to green, evenly spread.
+  const ps = Array.from({ length: 16 }, (_, i) => hued(`g${i}`, 32 + i * 4.6));
+  const rooms = groupByColor(ps);
+  assert.ok(rooms.length >= 3, `${rooms.length} rooms`);
+  for (const r of rooms) {
+    const hs = r.photos.map((p) => p.analysis.hue);
+    assert.ok(Math.max(...hs) - Math.min(...hs) <= 30, `${r.name}: ${Math.min(...hs)}–${Math.max(...hs)}`);
+    assert.ok(r.photos.length >= 4, `${r.name} has ${r.photos.length}`);
+  }
+});
+
+test('a stray photo joins the nearest room instead of getting a room of its own', () => {
+  const hued = (id, h) => ({ id, category: 'digital', analysis: { hue: h, sat: 0.6, score: 0.5, lum: 0.4 } });
+  const ps = [...Array.from({ length: 8 }, (_, i) => hued(`r${i}`, 2 + i * 3)), ...Array.from({ length: 8 }, (_, i) => hued(`t${i}`, 180 + i * 3)), hued('odd', 240)];
+  const rooms = groupByColor(ps);
+  const home = rooms.find((r) => r.photos.some((p) => p.id === 'odd'));
+  assert.ok(home.photos.length >= 4, `the stray's room has ${home.photos.length}`);
+  assert.ok(home.photos.some((p) => p.id[0] === 't'), 'joins the blue-green photos, the nearer ones');
+});
+
 test('real data: every visible photo lands in exactly one room of a sensible size', () => {
   const d = indexData(real);
   const ids = d.rooms.flatMap((r) => r.photos.map((p) => p.id));
