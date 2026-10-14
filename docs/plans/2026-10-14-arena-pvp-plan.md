@@ -3167,3 +3167,31 @@ Spec: docs/specs/2026-10-14-arena-bigger-zoom.md. Order from here: 14R and 17 (r
 5. Run `npm test`, `cd server && npm test`, and all three e2e scripts through the e2e lock.
 6. Look at desktop and phone screenshots in both renderers, at the deagle and sniper zooms.
 7. Commit with the message `Arena: a bigger room traced on the photo, and a side view that zooms in by gun`.
+
+---
+
+## Amendment (2026-10-14, user request: fighters collide)
+
+Spec: docs/specs/2026-10-14-arena-body-collision.md. Order: … → 19 → 18 → 20 → 16 → final review.
+
+### Task 20: Fighters collide: solid sides, heads you can stand on, sensible exceptions
+
+**Spec:** `docs/specs/2026-10-14-arena-body-collision.md` (binding).
+
+**Files:**
+- Modify:
+  - `src/arena.js`: `stepBody` gains `others`; collision is resolved in the same sub-steps as the grid;
+    overlap recovery; riding a body.
+  - `src/pvp.js`: pass the displayed remote bodies and the dummy as `others`.
+  - `src/fighters.js`: predicted bodies collide with me and with each other.
+- Test: `test/arena.test.js`, `test/fighters.test.js`, `test/pvp.test.js`, and `e2e/multiplayer.mjs` (the
+  two-client check).
+
+**Steps (TDD):**
+1. Write the failing tests from the spec's Tests list.
+2. Watch them fail.
+3. Implement.
+4. Run `npm test`, `cd server && npm test`, and `e2e/run.mjs` and `e2e/multiplayer.mjs` through the e2e
+   lock.
+5. Play two clients locally if you can, and describe how it feels.
+6. Commit with the message `Arena PvP: fighters collide: no walking through people, heads to stand on`.
