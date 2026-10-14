@@ -155,3 +155,51 @@ void main() {
   vec2 cell = u_view + px / u_cellPx;
   o = vec4(texture(u_light, (cell - u_lorigin) / u_lsize).rgb, 1.0);
 }`;
+
+// Pass 4: the figure layer (side view): stick figures and their labels as instanced quads from the figure
+// atlas, in two passes: every glyph's dark outline (and the chat strips), then every glyph's fill. Each
+// quad is snapped to device pixels and is exactly one atlas slot big, so LINEAR filtering stays crisp.
+export const FIGURE_VS = `#version 300 es
+in vec2 a_pos;
+in vec3 i_cell;    // x, y: the glyph's centre in world cells; glyph index, or -1 for a chat strip
+in vec4 i_color;   // rgb, a
+uniform vec2 u_view;       // top-left world cell on screen
+uniform vec2 u_cellPx;     // a cell in device pixels
+uniform vec2 u_slotPx;     // an atlas slot in device pixels: the cell plus the outline on each side
+uniform vec2 u_canvas;     // the canvas in device pixels
+uniform float u_atlasCols;
+uniform float u_outlineAt; // where the outline copies start in the atlas; 0 in the fill pass
+out vec2 v_uv;
+out vec4 v_color;
+out float v_strip;
+void main() {
+  v_strip = i_cell.z < 0.0 ? 1.0 : 0.0;
+  vec2 c = (i_cell.xy - u_view) * u_cellPx;
+  vec2 size = v_strip > 0.5 ? u_cellPx : u_slotPx;
+  vec2 px = mix(floor(c - size * 0.5 + 0.5), floor(c + size * 0.5 + 0.5), a_pos);
+  gl_Position = vec4(px.x / u_canvas.x * 2.0 - 1.0, 1.0 - px.y / u_canvas.y * 2.0, 0.0, 1.0);
+  float g = max(i_cell.z, 0.0) + u_outlineAt;
+  v_uv = vec2(mod(g, u_atlasCols), floor(g / u_atlasCols)) + a_pos;
+  v_color = i_color;
+}`;
+
+export const FIGURE_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec4 v_color;
+in float v_strip;
+uniform sampler2D u_atlas;
+uniform vec2 u_atlasGlyphs; // the atlas in slots (cols, rows)
+uniform float u_pass;       // 0: outlines and strips, 1: fills
+out vec4 o;
+void main() {
+  if (u_pass < 0.5) {
+    float ink = v_strip > 0.5 ? v_color.a : 0.9 * v_color.a * texture(u_atlas, v_uv / u_atlasGlyphs).a;
+    vec3 col = v_strip > 0.5 ? v_color.rgb : vec3(7.0, 8.0, 11.0) / 255.0;
+    o = vec4(col * ink, ink); // premultiplied
+  } else {
+    if (v_strip > 0.5) discard;
+    float ink = v_color.a * texture(u_atlas, v_uv / u_atlasGlyphs).a;
+    o = vec4(v_color.rgb * ink, ink);
+  }
+}`;

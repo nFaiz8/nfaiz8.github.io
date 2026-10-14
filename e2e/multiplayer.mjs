@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
-import { withBrowser, launchBrowser, ready, sleep } from './lib.mjs';
+import { withBrowser, launchBrowser, ready, sleep, SHOTS } from './lib.mjs';
 
 const PORT = 8796;
 const dev = spawn('npx', ['wrangler', 'dev', '--port', String(PORT), '--ip', '127.0.0.1'], { cwd: fileURLToPath(new URL('../server', import.meta.url)) });
@@ -141,14 +141,45 @@ try {
       assert.equal(await b.evaluate(() => document.getElementById('chat-log').textContent.includes('second line')), false, 'muted line shown');
       assert.equal(await b.evaluate(() => window.__ascii.world.entities.map((e) => e.glyph).join('').includes('secondline')), false, 'muted speech drawn');
     });
-    await check('arena: two people inside see each other run and jump; from outside nobody inside is drawn', async () => {
+    await check('arena: two people inside see each other as stickmen (colour, name above the head, chat above the name), run and jump; from outside nobody inside is drawn', async () => {
       const ats = (p) => p.evaluate(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length);
       const entry = await a.evaluate(() => window.__ascii.map.arena.entry);
       await a.evaluate((e) => window.__ascii.teleport(e.x - 20 + 0.5, e.y + 0.5), entry);
       await b.evaluate((e) => window.__ascii.teleport(e.x - 10 + 0.5, e.y + 0.5), entry);
       assert.equal(await a.evaluate(() => window.__ascii.mode()), 'side');
       await a.waitForFunction(() => { const a = window.__ascii.map.arena; return window.__ascii.live().peers.list(performance.now()).some((p) => p.x > a.x && p.x < a.x + a.w && p.y > a.y && p.y < a.y + a.h); }, { timeout: 5000 });
-      await a.waitForFunction(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length === 2, { timeout: 3000 });
+      // B is a stick figure in B's colour on A's screen, not an @, with B's name centred above the head.
+      const bId = await b.evaluate(() => window.__ascii.live().peers.myId);
+      const bodyOf = (id) => a.evaluate((id) => {
+        const w = window.__ascii.world, body = (w.bodies || []).find((x) => x.id === id);
+        if (!body) return null;
+        const same = (c) => c[0] === body.color[0] && c[1] === body.color[1] && c[2] === body.color[2];
+        // Labels over B only: A's own chat (from the last check) may still be showing 10 cells away.
+        const row = (dy) => w.figures.filter((g) => !g.bold && !g.strip && Math.abs(g.y - (body.state.y + dy)) < 0.3 && Math.abs(g.x - body.state.x) < 4.8);
+        return { x: body.state.x, y: body.state.y, color: body.color, head: w.figures.find((g) => g.bold && g.ch === 'O' && same(g.color)) || null,
+          figure: w.figures.filter((g) => g.bold && same(g.color)).length, name: row(-2.2), chat: row(-3.3), strips: w.figures.filter((g) => g.strip).length };
+      }, id);
+      await a.waitForFunction((id) => (window.__ascii.world.bodies || []).some((x) => x.id === id), { timeout: 3000 }, bId);
+      await sleep(600); // past the respawn fly-in
+      let seen = await bodyOf(bId);
+      assert.equal(await ats(a), 0, 'an @ in the side view');
+      assert.ok(seen.figure >= 6 && seen.head, `a stick figure in B's colour (${seen.figure} glyphs)`);
+      assert.notDeepEqual(seen.color, [255, 206, 110], 'B is not amber');
+      assert.equal(seen.name.map((g) => g.ch).join(''), 'Bo', 'B\'s name');
+      assert.ok(seen.name.every((g) => g.y < seen.head.y) && Math.abs(seen.name.reduce((s, g) => s + g.x, 0) / seen.name.length - seen.x) < 0.01, 'the name centred above the head');
+      // B's chat shows above B's name (B muted A earlier, so this way round).
+      await b.focus('#stage');
+      await b.keyboard.press('KeyT');
+      await b.waitForSelector('#chat-form:not([hidden])');
+      await b.keyboard.type('hi from bo');
+      await b.keyboard.press('Enter');
+      await a.waitForFunction((id) => window.__ascii.live().peers.list(performance.now()).find((p) => p.id === id)?.say === 'hi from bo', { timeout: 3000 }, bId);
+      await sleep(100);
+      seen = await bodyOf(bId);
+      const labels = await a.evaluate(() => window.__ascii.world.figures.filter((g) => !g.bold && !g.strip).map((g) => `${g.ch}@${g.y.toFixed(2)}`).join(' '));
+      assert.equal(seen.chat.map((g) => g.ch).join(''), 'hifrombo', `B's chat line (body at ${seen.y.toFixed(2)}; labels ${labels})`);
+      assert.ok(seen.chat[0].y < seen.name[0].y && seen.strips >= 12, 'the chat line above the name, on its strip');
+      await a.screenshot({ path: `${SHOTS}/stick-multiplayer.png` });
       const y0 = (await peersOf(a))[0].y;
       await b.keyboard.down('Space'); await sleep(400); await b.keyboard.up('Space');
       let top = y0;

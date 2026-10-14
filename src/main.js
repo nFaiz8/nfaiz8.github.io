@@ -1,7 +1,7 @@
 import { SITE, ARENA } from './config.js';
 import levelText from './arena.txt?raw';
 import { parseLevel } from './arena.js';
-import { createLive, peerEntities, heartEntities, localEcho } from './live.js';
+import { createLive, peerEntities, heartEntities, localEcho, peerColor } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
 import { cleanName, cleanText } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
@@ -11,6 +11,8 @@ import { createInput } from './input.js';
 import { createCanvasRenderer } from './render/canvas.js';
 import { createGlRenderer } from './render/gl.js';
 import { C } from './render/palette.js';
+import { figureGlyphs } from './render/figures.js';
+import { createMotionMemory } from './stick.js';
 import { createLighting, createArenaLighting } from './light.js';
 import { createViewer } from './viewer.js';
 import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router.js';
@@ -29,6 +31,9 @@ const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').ma
 const padEl = document.getElementById('pad');
 let hintOn = false;
 const debug = new URLSearchParams(location.search).has('debug');
+const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+// ?bots=30 (localhost only): that many local stickmen in the arena, cycling through every act.
+const botCount = onLocalhost ? Math.min(100, Math.max(0, parseInt(new URLSearchParams(location.search).get('bots'), 10) || 0)) : 0;
 const RENDERERS = { canvas: createCanvasRenderer, gl: createGlRenderer };
 
 let map, world, renderer, input, viewer, mapView, grid;
@@ -251,6 +256,9 @@ function loop(now) {
   }
   world.entities = [];
   world.others = [];
+  // In the arena's side view people are stick figures (world.bodies → world.figures); top-down they are @.
+  const side = world.mode === 'side' && !!map.arena;
+  const bodies = [];
   if (live) {
     const now = performance.now();
     live.tick(world.player);
@@ -258,7 +266,7 @@ function loop(now) {
     world.others = list.filter((p) => p.alpha === 1);
     // People in the arena are drawn only in its side view, and the side view shows only them.
     const inside = (p) => inArena(map, p.x, p.y);
-    const shown = list.filter((p) => inside(p) === (world.mode === 'side'));
+    const shown = list.filter((p) => inside(p) === side);
     if (following) {
       const input0 = input.state();
       const target = list.find((p) => p.id === following.id && p.alpha === 1);
@@ -270,10 +278,26 @@ function loop(now) {
       }
     }
     const posOf = (id) => list.find((p) => p.id === id) || null;
-    world.entities.push(...peerEntities(shown, { reducedMotion, muted }), ...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion, posOf }));
+    if (side) for (const p of shown) bodies.push(peerBody(p));
+    else world.entities.push(...peerEntities(shown, { reducedMotion, muted }));
+    world.entities.push(...heartEntities(live.peers.hearts(now), map.frames, { reducedMotion, posOf }));
   }
-  world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
-  world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
+  if (side) {
+    const now = performance.now();
+    for (let i = 0; i < botCount; i++) bodies.push(botBody(i, now / 1000));
+    bodies.push(myBody(now));
+    mine.hearts = mine.hearts.filter((h) => now - h.at < MY_HEART_MS);
+    const hearts = mine.hearts.map((h) => ({ f: h.f, id: 'me', age: (now - h.at) / MY_HEART_MS }));
+    world.entities.push(...heartEntities(hearts, map.frames, { reducedMotion, posOf: () => world.player }));
+    const m = renderer.metrics, cols = innerWidth / m.cw, rows = innerHeight / m.ch;
+    world.figures = figureGlyphs(bodies, { t: now / 1000, reducedMotion, phone: touch, memory,
+      view: { left: world.cam.x - cols / 2, top: world.cam.y - rows / 2, cols, rows }, ceiling: map.arena.y + 1 });
+  } else {
+    world.entities.push(...echo.entities(world.player, map.frames, performance.now(), { reducedMotion }));
+    world.entities.push({ x: world.player.x, y: world.player.y, glyph: '@', color: C.player });
+    world.figures = [];
+  }
+  world.bodies = bodies;
   if (renderer.lost) {
     note('WebGL context lost, switched to the canvas renderer');
     setRenderer('canvas');
@@ -328,13 +352,72 @@ function peerAtCell(cx, cy) {
   return live.peers.list(performance.now()).find((p) => p.alpha === 1 && Math.abs(p.x - (cx + 0.5)) <= 1 && Math.abs(p.y - (cy + 0.5)) <= 1) || null;
 }
 const echo = localEcho();
+// What I said, emoted and hearted lately, for my own label stack in the side view (top-down, the echo
+// draws them). The times are createPeers' defaults, so I see them as long as others do.
+const MY_SAY_MS = 5000, MY_EMOTE_MS = 2500, MY_HEART_MS = 2000;
+const mine = { say: null, sayAt: 0, emote: null, emoteAt: 0, hearts: [] };
 function sendEmote(kind) {
-  if (!echo.emote(kind, performance.now())) return;
+  const now = performance.now();
+  if (!echo.emote(kind, now)) return;
+  mine.emote = EMOTE_GLYPH[kind] || null;
+  mine.emoteAt = now;
   if (live) live.emote(kind);
 }
 function sendHeart(f) {
-  if (!f || !echo.heart(f.id, performance.now())) return;
+  const now = performance.now();
+  if (!f || !echo.heart(f.id, now)) return;
+  mine.hearts.push({ f: f.id, at: now });
   if (live) live.heart(f.id);
+}
+
+// The side view's bodies (stickman spec §5, §6). Each has a state for stickPose; the motion memory fills in
+// landT and spawnT. __ascii.pose (localhost) pins fields of my state, landT and spawnT included.
+let posePin = null;
+const motion = createMotionMemory();
+const memory = {
+  fill(id, s, t) {
+    motion.fill(id, s, t);
+    if (id === 'me' && posePin) {
+      if ('landT' in posePin) s.landT = posePin.landT;
+      if ('spawnT' in posePin) s.spawnT = posePin.spawnT;
+    }
+    return s;
+  },
+};
+function myBody(now) {
+  const p = world.player;
+  const state = { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, act: 'idle', gun: 'deagle', ...posePin };
+  const emoting = mine.emote && now - mine.emoteAt < MY_EMOTE_MS;
+  return { id: 'me', me: true, state, color: C.player, name: '', alpha: 1,
+    say: mine.say && now - mine.sayAt < MY_SAY_MS ? mine.say : null,
+    emote: emoting ? mine.emote : null, emoteAge: emoting ? (now - mine.emoteAt) / MY_EMOTE_MS : 0 };
+}
+// Someone inside, from their positions alone until PvP sends their state.
+function peerBody(p) {
+  return { id: p.id, state: { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: p.ground, act: 'idle' },
+    color: peerColor(p.id), name: p.name, say: p.say && !muted.has(p.id) ? p.say : null,
+    emote: p.emote, emoteAge: p.emoteAge, alpha: p.alpha };
+}
+// ?bots: one local stickman per slot along the floor, each spending 2.4 s on every act in turn.
+const BOT_ACTS = ['idle', 'run', 'jump', 'shoot', 'punch', 'kick', 'hurt', 'roll', 'dead'];
+const BOT_GUNS = ['deagle', 'rifle', 'sniper'];
+function botBody(i, t) {
+  const a = map.arena, k = t + i * 0.37, T = 2.4;
+  const act = BOT_ACTS[(Math.floor(k / T) + i) % BOT_ACTS.length], u = k % T;
+  const x0 = a.x + 5 + ((i + 0.5) * (a.cols - 8)) / botCount, y0 = a.floorY - 1.5;
+  const s = { x: x0, y: y0, vx: 0, vy: 0, facing: i % 2 ? -1 : 1, ground: true, act, actT: u, gun: BOT_GUNS[i % 3], aim: 0 };
+  if (act === 'run') {
+    const d = (u * 30) % 16, out = d < 8;
+    s.act = 'idle'; s.x = x0 - 4 + (out ? d : 16 - d); s.vx = out ? 30 : -30; s.facing = out ? 1 : -1;
+  } else if (act === 'jump') {
+    const j = u % 0.6;
+    s.act = 'idle'; s.ground = false; s.vy = -40 + 133 * j; s.y = y0 - (40 * j - 66.5 * j * j);
+  } else if (act === 'shoot') {
+    s.actT = u % 0.3; s.aim = Math.sin(k * 1.3) * 1.4;
+  } else if (act === 'punch' || act === 'hurt') s.actT = u % 0.5;
+  else if (act === 'kick' || act === 'roll') s.actT = u % 0.6;
+  return { id: `bot${i + 1}`, state: s, color: peerColor(`bot${i + 1}`), name: `bot${i + 1}`, alpha: 1,
+    say: i % 3 === 0 ? 'hello there' : null, emote: i % 4 === 1 ? '★' : null, emoteAge: (u % 2.5) / 2.5 };
 }
 
 async function boot() {
@@ -488,7 +571,10 @@ async function boot() {
     e.preventDefault();
     const text = cleanText(chatInput.value);
     if (text === null) { chatMsg.textContent = chatInput.value.trim() ? 'try different words' : ''; return; }
-    if (!echo.say(text, performance.now())) { chatMsg.textContent = 'one line every 2 s'; return; }
+    const at = performance.now();
+    if (!echo.say(text, at)) { chatMsg.textContent = 'one line every 2 s'; return; }
+    mine.say = text;
+    mine.sayAt = at;
     if (live) live.chat(text);
     addLog(null, '', text);
     chatInput.value = '';
@@ -533,6 +619,8 @@ async function boot() {
   // Test hook for the e2e scripts.
   window.__ascii = { map, world, stats, viewer, mode: () => world.mode, tilting: () => tilting, loaded: (id) => loadedIds.has(id), teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
     open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; } };
+  // Pins fields of my side-view state (act, actT, aim, x, y, landT, spawnT…) until called with null.
+  if (onLocalhost) window.__ascii.pose = (state) => { posePin = state ? { ...state } : null; };
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 

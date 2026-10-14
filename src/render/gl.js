@@ -1,6 +1,6 @@
 // Renderer C: draw a plain top-down scene into an offscreen buffer, then turn every cell of it into a
 // character in a shader. Labels, plaques, frame borders and people are drawn on top as exact glyphs.
-import { cellMetrics, drawGlyph, prepareText } from './glyphs.js';
+import { cellMetrics, drawGlyph, prepareText, FONT_FAMILY } from './glyphs.js';
 import { C, LABEL_COLOR, roomTint } from './palette.js';
 import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
@@ -11,6 +11,8 @@ import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
 const FLOATS = 10; // per glyph instance: x, y, glyph, fg rgb, bg rgba
+const FIG_FLOATS = 7; // per figure instance: x, y, glyph, r, g, b, a
+const FIG_EXTRA = '═╦╤°♥★…'; // figure and label glyphs beyond printable ASCII
 
 export function createGlRenderer() {
   let canvas, gl, map, m, dpr = 1, viewW = 0, viewH = 0, lost = false;
@@ -22,6 +24,7 @@ export function createGlRenderer() {
   const onLoad = new Set();
   let darkRoomIndex = -1;
   let lightTex, glowTex;
+  let figVao, figBuf, figAtlasTex = null, figAtlas = null, figData = new Float32Array(0);
 
   function compile(vs, fs) {
     const p = gl.createProgram();
@@ -53,6 +56,7 @@ export function createGlRenderer() {
       glyph: compile(S.GLYPH_VS, S.GLYPH_FS),
       light: compile(S.ASCII_VS, S.LIGHT_FS),
       backdrop: compile(S.BACKDROP_VS, S.BACKDROP_FS),
+      figure: compile(S.FIGURE_VS, S.FIGURE_FS),
     };
 
     // Full-screen triangle (tiles, ascii) — attribute 0
@@ -84,6 +88,22 @@ export function createGlRenderer() {
     attr('i_cell', 3, 0);
     attr('i_fg', 3, 3);
     attr('i_bg', 4, 6);
+
+    // The figure layer: the same unit quad, its own instance buffer and layout.
+    figVao = gl.createVertexArray();
+    gl.bindVertexArray(figVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    figBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, figBuf);
+    const fp = progs.figure.p;
+    for (const [name, size, offset] of [['i_cell', 3, 0], ['i_color', 4, 3]]) {
+      const loc = gl.getAttribLocation(fp, name);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, FIG_FLOATS * 4, offset * 4);
+      gl.vertexAttribDivisor(loc, 1);
+    }
     gl.bindVertexArray(null);
 
     buildTiles();
@@ -160,6 +180,85 @@ export function createGlRenderer() {
 
   const gi = (ch) => atlas.index.get(ch) ?? atlas.index.get('?');
 
+  // The figure atlas: printable ASCII plus the gun and label extras, bold (figures) and regular (labels),
+  // each as its fill and as its outline (the glyph dilated by the outline radius o). A slot is a cell plus
+  // o on every side, at device resolution. LINEAR, unlike the main atlas.
+  function buildFigureAtlas() {
+    const list = [];
+    for (let c = 32; c < 127; c++) list.push(String.fromCharCode(c));
+    list.push(...FIG_EXTRA);
+    const n = list.length, cols = 32, rows = Math.ceil((4 * n) / cols);
+    const o = Math.max(2, Math.round(0.14 * m.cw * dpr)), w = Math.round(m.cw * dpr), h = Math.round(m.ch * dpr);
+    const sw = w + 2 * o, sh = h + 2 * o;
+    const cv = new OffscreenCanvas(cols * sw, rows * sh);
+    const c = cv.getContext('2d');
+    c.fillStyle = c.strokeStyle = '#fff';
+    const at = (k) => [(k % cols) * sw + o + w / 2, Math.floor(k / cols) * sh + o + h / 2 + m.fontPx * dpr * 0.05];
+    // Slots: [bold fills][regular fills][bold outlines][regular outlines]
+    for (const bold of [true, false]) {
+      prepareText(c, `${bold ? 'bold ' : ''}${m.fontPx * dpr}px ${FONT_FAMILY}`);
+      c.lineJoin = 'round';
+      c.lineWidth = 2 * o;
+      list.forEach((ch, i) => {
+        const k = (bold ? 0 : n) + i;
+        const [x, y] = at(k);
+        c.fillText(ch, x, y);
+        const [ox, oy] = at(k + 2 * n);
+        c.strokeText(ch, ox, oy);
+        c.fillText(ch, ox, oy);
+      });
+    }
+    if (figAtlasTex) gl.deleteTexture(figAtlasTex);
+    figAtlasTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, figAtlasTex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+    setFilter(gl.LINEAR, gl.LINEAR);
+    figAtlas = { index: new Map(list.map((ch, i) => [ch, i])), n, cols, rows, slot: [sw, sh] };
+  }
+
+  const figGlyph = (ch, bold) => (figAtlas.index.get(ch) ?? figAtlas.index.get('?')) + (bold ? 0 : figAtlas.n);
+
+  // The figure layer (side view), over everything else: all the outlines (and chat strips) in list order,
+  // then all the fills.
+  function drawFigures(list, vx, vy) {
+    if (!list.length || !figAtlas) return;
+    if (figData.length < list.length * FIG_FLOATS) figData = new Float32Array(list.length * FIG_FLOATS * 2);
+    let k = 0;
+    for (const g of list) {
+      if (!(g.a > 0)) continue;
+      figData[k++] = g.x;
+      figData[k++] = g.y;
+      figData[k++] = g.strip ? -1 : figGlyph(g.ch, g.bold);
+      figData[k++] = g.color[0] / 255;
+      figData[k++] = g.color[1] / 255;
+      figData[k++] = g.color[2] / 255;
+      figData[k++] = Math.min(1, g.a);
+    }
+    if (!k) return;
+    const pf = progs.figure;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(pf.p);
+    gl.bindVertexArray(figVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, figBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, figData.subarray(0, k), gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, figAtlasTex);
+    gl.uniform1i(pf.u.u_atlas, 1);
+    gl.uniform2f(pf.u.u_view, vx, vy);
+    gl.uniform2f(pf.u.u_cellPx, m.cw * dpr, m.ch * dpr);
+    gl.uniform2f(pf.u.u_slotPx, figAtlas.slot[0], figAtlas.slot[1]);
+    gl.uniform2f(pf.u.u_canvas, canvas.width, canvas.height);
+    gl.uniform1f(pf.u.u_atlasCols, figAtlas.cols);
+    gl.uniform2f(pf.u.u_atlasGlyphs, figAtlas.cols, figAtlas.rows);
+    for (const pass of [0, 1]) {
+      gl.uniform1f(pf.u.u_pass, pass);
+      gl.uniform1f(pf.u.u_outlineAt, pass ? 0 : 2 * figAtlas.n);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, k / FIG_FLOATS);
+    }
+  }
+
   function pushGlyph(out, x, y, ch, fg, bg = null) {
     out.push(x, y, gi(ch), fg[0] / 255, fg[1] / 255, fg[2] / 255,
       bg ? bg[0] / 255 : 0, bg ? bg[1] / 255 : 0, bg ? bg[2] / 255 : 0, bg ? 1 : 0);
@@ -210,6 +309,7 @@ export function createGlRenderer() {
     canvas.height = Math.round(h * dpr);
     m = cellMetrics(w, h);
     buildAtlas();
+    buildFigureAtlas();
     buildStaticGlyphs();
     // Scene covers the view plus a cell of margin on each side
     const cells = [Math.ceil(w / m.cw) + 3, Math.ceil(h / m.ch) + 3];
@@ -395,6 +495,7 @@ export function createGlRenderer() {
     for (const e of world.entities || []) pushGlyph(dynamic, e.x - 0.5, e.y - 0.5, e.glyph, e.color, C.bg);
     if (world.mode === 'side') drawGlyphs(arenaGlyphs); // platforms over the light, at full brightness
     drawGlyphs(new Float32Array(dynamic));
+    drawFigures(world.figures || [], vx, vy);
     gl.bindVertexArray(null);
   }
 
@@ -403,8 +504,15 @@ export function createGlRenderer() {
     return { x: Math.floor(world.cam.x - cols / 2 + px / m.cw), y: Math.floor(world.cam.y - rows / 2 + py / m.ch) };
   }
 
+  // Screen point → map position in fractional cells
+  function pointAt(world, px, py) {
+    const cols = viewW / m.cw, rows = viewH / m.ch;
+    return { x: world.cam.x - cols / 2 + px / m.cw, y: world.cam.y - rows / 2 + py / m.ch };
+  }
+
   function dispose() {
     if (gl && !lost) {
+      if (figAtlasTex) gl.deleteTexture(figAtlasTex);
       photoTex.forEach((t) => gl.deleteTexture(t.tex));
       gl.deleteTexture(lightTex);
       gl.deleteTexture(glowTex);
@@ -414,5 +522,5 @@ export function createGlRenderer() {
     gl = null;
   }
 
-  return { name: 'gl', init, resize, draw, dispose, cellAt, onLoad, get lost() { return lost; }, get metrics() { return m; } };
+  return { name: 'gl', init, resize, draw, dispose, cellAt, pointAt, onLoad, get lost() { return lost; }, get metrics() { return m; } };
 }

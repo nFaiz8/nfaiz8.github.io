@@ -1,5 +1,5 @@
 // Live checks in headless Chrome for Testing. Usage: npm run e2e
-import { withBrowser, ready, sleep } from './lib.mjs';
+import { withBrowser, ready, sleep, SHOTS } from './lib.mjs';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { coverCrop } from '../src/arena.js';
@@ -22,7 +22,8 @@ await withBrowser(async ({ page, url, errors }) => {
         await page.evaluate((e) => window.__ascii.walkTo(e.x, e.y), room);
         await page.waitForFunction(() => { const w = window.__ascii.world; return !w.path && !w.want && !w.frozen; }, { timeout: 90000 });
         const at = await page.evaluate(() => ({ x: Math.floor(window.__ascii.world.player.x), y: Math.floor(window.__ascii.world.player.y) }));
-        assert.deepEqual(at, { x: room.x, y: room.y }, `reached ${room.id}`);
+        // In the arena's side view the 3-row body's centre is a row above the entry's (floor) row.
+        assert.deepEqual(at, { x: room.x, y: room.y - (room.id === 'arena' ? 1 : 0) }, `reached ${room.id}`);
       }
     });
     await check(`${r}: frame rate`, async () => {
@@ -189,7 +190,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.keyboard.up('ArrowLeft');
     await sleep(300);
     const p = await page.evaluate(() => ({ ...window.__ascii.world.player }));
-    assert.ok(Math.abs(p.y - (a.floorY - 0.5)) < 0.01, `on the floor (${p.y})`);
+    assert.ok(Math.abs(p.y - (a.floorY - 1.5)) < 0.01, `on the floor (${p.y})`); // the 3-row body's centre
     await page.keyboard.down('ArrowRight');
     await page.waitForFunction(() => window.__ascii.mode() === 'top', { timeout: 5000 });
     await page.keyboard.up('ArrowRight');
@@ -218,7 +219,7 @@ await withBrowser(async ({ page, url, errors }) => {
       for (let c = 2; c < L.cols - 2; c++) {
         const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] === 1);
         const clear = [1, 2, 3, 4].every((k) => [-1, 0, 1].every((d) => !L.cells[(r + k) * L.cols + c + d]));
-        if (run && clear) return { x: a.x + 1 + c + 0.5, y: a.floorY - 0.5, top: a.y + 1 + r };
+        if (run && clear) return { x: a.x + 1 + c + 0.5, y: a.floorY - 1.5, top: a.y + 1 + r }; // 3-row body
       }
       return null;
     });
@@ -229,7 +230,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(450);
     await page.keyboard.up('Space');
     await sleep(800);
-    assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - (spot.top - 0.5)) < 0.01, 'standing on the platform');
+    assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - (spot.top - 1.5)) < 0.01, 'standing on the platform');
     await page.keyboard.down('ArrowDown');
     await sleep(120);
     await page.keyboard.up('ArrowDown');
@@ -443,6 +444,168 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await page.evaluate(() => window.__ascii.mode()), 'top');
     assert.ok(await page.evaluate(() => !!window.__ascii.world.focus && !window.__ascii.world.focus.backdrop), 'standing at a gallery photo');
   });
+  // The stickman (stickman spec §8): my figure in every pose, pinned with __ascii.pose, with each renderer,
+  // on a computer and on a landscape phone, over the brightest part of the arena photo.
+  const POSES = [
+    ['idle', {}], ['run', { vx: 30 }], ['rise', { ground: false, vy: -20 }], ['fall', { ground: false, vy: 20 }],
+    ['shoot 0', { act: 'shoot', actT: 0.1, aim: 0 }], ['shoot -45', { act: 'shoot', actT: 0.1, aim: -Math.PI / 4 }],
+    ['shoot +45', { act: 'shoot', actT: 0.1, aim: Math.PI / 4 }], ['shoot -90', { act: 'shoot', actT: 0.1, aim: -Math.PI / 2 }],
+    ['punch', { act: 'punch', actT: 0.1 }], ['kick', { act: 'kick', actT: 0.15 }], ['hurt', { act: 'hurt', actT: 0.05 }],
+    ['dead 0.3', { act: 'dead', actT: 0.3 }], ['dead 1.5', { act: 'dead', actT: 1.5 }], ['respawn 0.2', { act: 'idle', spawnT: 0.2 }],
+  ];
+  const isAmber = (R, G, B) => R >= 120 && G >= 0.68 * R && G <= 0.92 * R && B >= 0.25 * R && B <= 0.6 * R;
+  const isWhite = (R, G, B) => Math.min(R, G, B) >= 225;
+  const lum = (d, i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  const raw = async (buf) => { const { data, info } = await sharp(buf).removeAlpha().raw().toBuffer({ resolveWithObject: true }); return { data, w: info.width, h: info.height }; };
+  // The view in cells and where a map cell is on screen (CSS pixels).
+  const viewOf = (p) => p.evaluate(() => {
+    const { world, metrics } = window.__ascii, m = metrics(), a = window.__ascii.map.arena;
+    return { left: world.cam.x - innerWidth / m.cw / 2, top: world.cam.y - innerHeight / m.ch / 2, cw: m.cw, ch: m.ch, W: innerWidth, H: innerHeight,
+      dpr: Math.min(2, devicePixelRatio || 1), a: { x: a.x, y: a.y, cols: a.cols, rows: a.rows }, player: { x: world.player.x, y: world.player.y } };
+  });
+  // The brightest 3×4 cells of the arena on screen (away from the HUD, the caption and the pad).
+  const brightest = async (p, v) => {
+    const cols = Math.floor(v.W / v.cw), rows = Math.floor(v.H / v.ch);
+    const { data } = await sharp(await p.screenshot()).greyscale().resize(cols, rows, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
+    let best = null;
+    for (let cy = Math.ceil(rows * 0.15); cy + 4 <= rows * 0.7; cy++) for (let cx = Math.ceil(cols * 0.1); cx + 3 <= cols * 0.9; cx++) {
+      const mx = v.left + cx, my = v.top + cy;
+      if (mx < v.a.x + 2 || mx + 3 > v.a.x + v.a.cols || my < v.a.y + 2 || my + 4 > v.a.y + v.a.rows) continue;
+      let s = 0;
+      for (let y = 0; y < 4; y++) for (let x = 0; x < 3; x++) s += data[(cy + y) * cols + cx + x];
+      if (!best || s > best.s) best = { s, x: mx + 1.5, y: my + 2, lum: s / 12 };
+    }
+    return best;
+  };
+  for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
+    for (const r of ['canvas', 'gl']) {
+      await check(`${r} on a ${size}: my stick figure in every pose, amber with a dark outline over the brightest part of the photo`, async () => {
+        await page.setViewport(vp);
+        await page.goto('about:blank');
+        await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+        await page.waitForFunction(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id), { timeout: 30000 });
+        await page.evaluate(() => window.__ascii.pose({ act: 'dead', actT: 5 })); // nothing drawn
+        await sleep(1500);
+        const v = await viewOf(page);
+        const spot = await brightest(page, v);
+        assert.ok(spot && spot.lum > 100, `a bright spot (${spot && spot.lum.toFixed(0)})`);
+        const pin = { x: spot.x, y: spot.y, vx: 0, vy: 0, facing: 1, ground: true, act: 'idle', actT: 0, aim: 0, landT: 10, spawnT: 10 };
+        // 8 cells either side, 4.5 rows above to 2.5 below the body's centre.
+        const clip = { x: (spot.x - 8 - v.left) * v.cw, y: (spot.y - 4.5 - v.top) * v.ch, width: 16 * v.cw, height: 7 * v.ch };
+        const shoot = async (o) => { await page.evaluate((s) => window.__ascii.pose(s), { ...pin, ...o }); await sleep(150); return page.screenshot({ clip }); };
+        const base = await raw(await shoot({ act: 'dead', actT: 5 }));
+        const k = base.w / clip.width; // screenshot pixels per CSS pixel
+        const o = Math.max(2, Math.round(0.14 * v.cw * v.dpr)), ringR = Math.ceil((o / v.dpr + 1) * k);
+        const tiles = [], log = [], stats = [];
+        for (const [name, o2] of POSES) {
+          const buf = await shoot(o2);
+          tiles.push(buf);
+          const fig = await raw(buf), { w, h } = fig;
+          const dead = o2.act === 'dead', ink = o2.act === 'hurt' ? isWhite : isAmber;
+          // The body's 2.1 × 3-cell area; the dead pieces scatter, so for them a wider one.
+          const ax = dead ? 7.5 : 1.05, ay0 = dead ? -3.5 : -1.5;
+          const mask = new Uint8Array(w * h);
+          let n = 0;
+          for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+            const dx = x / k / v.cw - 8, dy = y / k / v.ch - 4.5, i = (y * w + x) * 3;
+            if (Math.abs(dx) > ax || dy < ay0 || dy > 1.5) continue;
+            if (ink(fig.data[i], fig.data[i + 1], fig.data[i + 2]) && !ink(base.data[i], base.data[i + 1], base.data[i + 2])) { mask[y * w + x] = 1; n++; }
+          }
+          // The ring: within the outline's reach of those pixels.
+          let ring = 0, dark = 0, baseDark = 0;
+          const seen = new Uint8Array(w * h);
+          for (let j = 0; j < w * h; j++) {
+            if (!mask[j]) continue;
+            const jx = j % w, jy = (j / w) | 0;
+            for (let y = Math.max(0, jy - ringR); y <= Math.min(h - 1, jy + ringR); y++) for (let x = Math.max(0, jx - ringR); x <= Math.min(w - 1, jx + ringR); x++) {
+              const q = y * w + x;
+              if (mask[q] || seen[q]) continue;
+              seen[q] = 1; ring++;
+              if (lum(fig.data, q * 3) < 40) dark++;
+              if (lum(base.data, q * 3) < 40) baseDark++;
+            }
+          }
+          log.push(`${name}: ${n} ${ink === isWhite ? 'white' : 'amber'}, ring ${ring} (${dark} dark, ${baseDark} before)`);
+          // Faded poses (dead after 1.4 s, the respawn's fly-in) fade their outline too.
+          const full = !(dead && o2.actT > 1.4) && !(o2.spawnT < 0.45);
+          stats.push({ name, n, dark: dark - baseDark, full, ink: ink === isWhite ? 'white' : 'amber' });
+        }
+        console.log(`  ${r} ${size}: spot lum ${spot.lum.toFixed(0)}; ${log.join('; ')}`);
+        // A contact sheet of every pose, for looking at.
+        const cols = 7, tw = base.w, th = base.h;
+        await sharp({ create: { width: cols * tw, height: Math.ceil(tiles.length / cols) * th, channels: 3, background: '#000' } })
+          .composite(tiles.map((input, i) => ({ input, left: (i % cols) * tw, top: Math.floor(i / cols) * th }))).png().toFile(`${SHOTS}/stick-${r}-${size}.png`);
+        await page.evaluate((s) => window.__ascii.pose(s), pin);
+        await sleep(150);
+        await page.screenshot({ path: `${SHOTS}/stick-${r}-${size}-view.png` });
+        await page.evaluate(() => window.__ascii.pose(null));
+        for (const st of stats) {
+          assert.ok(st.n >= 4, `${st.name}: ${st.n} ${st.ink} pixels in the body's area`);
+          if (st.full) assert.ok(st.dark >= Math.max(6, 0.1 * st.n), `${st.name}: a dark outline (${st.dark} new dark pixels around ${st.n})`);
+        }
+      });
+    }
+  }
+  await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  for (const r of ['canvas', 'gl']) {
+    await check(`${r}: running, the figure glides (it moves one way, mostly by fractions of a cell); top-down I'm still @`, async () => {
+      await page.goto('about:blank');
+      await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      await page.keyboard.down('ArrowLeft');
+      await sleep(400);
+      // Each frame, just after it's drawn: the centre of the amber pixels around me, in map cells.
+      const xs = await page.evaluate(() => new Promise((resolve) => {
+        const { world, metrics } = window.__ascii, cv = document.querySelector('#stage canvas'), out = [], t0 = performance.now();
+        const tmp = new OffscreenCanvas(8, 8), c = tmp.getContext('2d', { willReadFrequently: true });
+        const amber = (R, G, B) => Math.abs(R - 255) < 30 && Math.abs(G - 206) < 30 && Math.abs(B - 110) < 35;
+        const tick = () => {
+          const m = metrics(), k = cv.width / innerWidth, p = world.player;
+          const left = world.cam.x - innerWidth / m.cw / 2, top = world.cam.y - innerHeight / m.ch / 2;
+          const x0 = Math.floor((p.x - 6 - left) * m.cw * k), y0 = Math.floor((p.y - 2 - top) * m.ch * k);
+          const w = Math.ceil(12 * m.cw * k), h = Math.ceil(4 * m.ch * k);
+          if (tmp.width !== w || tmp.height !== h) { tmp.width = w; tmp.height = h; }
+          c.clearRect(0, 0, w, h);
+          c.drawImage(cv, x0, y0, w, h, 0, 0, w, h);
+          const d = c.getImageData(0, 0, w, h).data;
+          let sx = 0, n = 0;
+          for (let i = 0; i < w * h; i++) if (amber(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) { sx += i % w; n++; }
+          if (n) out.push(left + (x0 + sx / n) / (m.cw * k));
+          if (performance.now() - t0 < 1000) requestAnimationFrame(tick); else resolve(out);
+        };
+        requestAnimationFrame(tick);
+      }));
+      await page.keyboard.up('ArrowLeft');
+      const steps = xs.slice(1).map((x, i) => x - xs[i]);
+      const frac = steps.filter((s) => Math.abs(s - Math.round(s)) > 0.02).length;
+      console.log(`  ${r}: ${xs.length} frames, steps ${Math.min(...steps).toFixed(3)}..${Math.max(...steps).toFixed(3)} cells, ${frac} fractional`);
+      assert.ok(xs.length >= 30, `${xs.length} frames sampled`);
+      // A run frame changing can shift the amber's centre by a little (steps are ~0.25 cells at 120 Hz).
+      assert.ok(steps.every((s) => s <= 0.05) && xs.at(-1) < xs[0] - 10, `moves west only (largest step east ${Math.max(...steps).toFixed(3)})`);
+      assert.ok(frac >= steps.length / 2, `${frac} of ${steps.length} steps are fractions of a cell`);
+      await page.evaluate(() => window.__ascii.teleport(window.__ascii.map.spawn.x, window.__ascii.map.spawn.y));
+      await sleep(400);
+      const v = await viewOf(page);
+      const { data } = await sharp(await page.screenshot({ clip: { x: (v.player.x - 0.5 - v.left) * v.cw, y: (v.player.y - 0.5 - v.top) * v.ch, width: v.cw, height: v.ch } })).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      let n = 0;
+      for (let i = 0; i < data.length; i += 3) if (isAmber(data[i], data[i + 1], data[i + 2])) n++;
+      assert.equal(await page.evaluate(() => window.__ascii.mode()), 'top');
+      assert.ok(n >= 4 && await page.evaluate(() => window.__ascii.world.entities.some((e) => e.glyph === '@') && !window.__ascii.world.figures.length), `the @ (${n} amber pixels)`);
+    });
+    await check(`${r}: ?bots=30 draws thirty more stickmen (frame time logged)`, async () => {
+      await page.goto('about:blank');
+      await page.goto(`${url}?r=${r}&bots=30#/room/arena`); await ready(page);
+      await page.waitForFunction(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id), { timeout: 30000 });
+      await sleep(1000);
+      await page.evaluate(() => { window.__ascii.stats.times.length = 0; });
+      await sleep(2000);
+      const t = await page.evaluate(() => window.__ascii.stats.times.slice());
+      const sorted = [...t].sort((a, b) => a - b), avg = t.reduce((a, b) => a + b, 0) / t.length;
+      const info = await page.evaluate(() => ({ bodies: window.__ascii.world.bodies.length, glyphs: window.__ascii.world.figures.length }));
+      console.log(`  ${r} with 30 bots: ${info.bodies} bodies, ${info.glyphs} glyphs, ${(avg * 1000).toFixed(1)} ms a frame, p95 ${(sorted[Math.floor(sorted.length * 0.95)] * 1000).toFixed(1)} ms`);
+      await page.screenshot({ path: `${SHOTS}/stick-${r}-bots30.png` });
+      assert.equal(info.bodies, 31);
+    });
+  }
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

@@ -1,6 +1,6 @@
 // Renderer A: every cell is drawn as a character on a 2D canvas. Static things (walls, floor, labels,
 // still photos) are baked into chunk canvases; each frame only blits them and draws what moves.
-import { cellMetrics, drawGlyph, prepareText, rgb } from './glyphs.js';
+import { cellMetrics, drawGlyph, prepareText, rgb, FONT_FAMILY } from './glyphs.js';
 import { C, LABEL_COLOR, roomTint } from './palette.js';
 import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
@@ -18,6 +18,7 @@ export function createCanvasRenderer() {
   const onLoad = new Set();
   let lightCv = null, glowCv = null;
   let bakedMode = null; // chunks are baked for one view: the arena's inside differs top-down and side-on
+  const sprites = new Map(); // the figure layer's glyphs: 'ch|r,g,b|bold' → a small canvas, outline baked in
 
   function init(el, theMap) {
     canvas = el;
@@ -42,6 +43,7 @@ export function createCanvasRenderer() {
     canvas.height = Math.round(h * dpr);
     m = cellMetrics(w, h);
     chunks.clear();
+    sprites.clear();
     return m;
   }
 
@@ -282,6 +284,50 @@ export function createCanvasRenderer() {
       ctx.restore();
     }
     ctx.restore();
+    drawFigures(world.figures || [], left, top);
+  }
+
+  // The figure layer (side view): stick figures and their labels, over everything else. Each glyph is a
+  // cached sprite with its dark outline baked in, drawn at a device-pixel-snapped position; a chat strip is a
+  // rect. o is the outline's radius in device pixels.
+  const outlinePx = () => Math.max(2, Math.round(0.14 * m.cw * dpr));
+  function sprite(glyph, color, bold) {
+    const key = `${glyph}|${color[0]},${color[1]},${color[2]}|${bold ? 1 : 0}`;
+    let cv = sprites.get(key);
+    if (cv) return cv;
+    const o = outlinePx(), w = Math.round(m.cw * dpr), h = Math.round(m.ch * dpr);
+    cv = new OffscreenCanvas(w + 2 * o, h + 2 * o);
+    const c = cv.getContext('2d');
+    prepareText(c, `${bold ? 'bold ' : ''}${m.fontPx * dpr}px ${FONT_FAMILY}`);
+    const x = o + w / 2, y = o + h / 2 + m.fontPx * dpr * 0.05;
+    c.lineJoin = 'round';
+    c.lineWidth = 2 * o;
+    c.strokeStyle = 'rgba(7,8,11,0.9)';
+    c.strokeText(glyph, x, y);
+    c.fillStyle = rgb(...color);
+    c.fillText(glyph, x, y);
+    sprites.set(key, cv);
+    return cv;
+  }
+
+  function drawFigures(list, left, top) {
+    if (!list.length) return;
+    const cw = m.cw * dpr, chp = m.ch * dpr, o = outlinePx();
+    const sw = Math.round(cw) + 2 * o, sh = Math.round(chp) + 2 * o;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (const g of list) {
+      if (!(g.a > 0)) continue;
+      const px = (g.x - left) * cw, py = (g.y - top) * chp;
+      ctx.globalAlpha = Math.min(1, g.a);
+      if (g.strip) {
+        const x0 = Math.round(px - cw / 2), y0 = Math.round(py - chp / 2);
+        ctx.fillStyle = rgb(...g.color);
+        ctx.fillRect(x0, y0, Math.round(px + cw / 2) - x0, Math.round(py + chp / 2) - y0);
+      } else {
+        ctx.drawImage(sprite(g.ch, g.color, g.bold), Math.round(px - sw / 2), Math.round(py - sh / 2));
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   // Screen point → cell
@@ -290,10 +336,17 @@ export function createCanvasRenderer() {
     return { x: Math.floor(world.cam.x - cols / 2 + px / m.cw), y: Math.floor(world.cam.y - rows / 2 + py / m.ch) };
   }
 
+  // Screen point → map position in fractional cells
+  function pointAt(world, px, py) {
+    const cols = viewW / m.cw, rows = viewH / m.ch;
+    return { x: world.cam.x - cols / 2 + px / m.cw, y: world.cam.y - rows / 2 + py / m.ch };
+  }
+
   function dispose() {
     chunks.clear();
+    sprites.clear();
     ctx = null;
   }
 
-  return { name: 'canvas', init, resize, draw, dispose, cellAt, onLoad, get metrics() { return m; } };
+  return { name: 'canvas', init, resize, draw, dispose, cellAt, pointAt, onLoad, get metrics() { return m; } };
 }
