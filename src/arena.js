@@ -3,20 +3,8 @@
 
 import { CELL_ASPECT, isWalkable } from './layout.js';
 
-export const AIR = 0, PLATFORM = 1, SOLID = 2;
-export const LEVEL_COLS = 160, LEVEL_ROWS = 34;
-
-// src/arena.txt → one kind per interior cell, top row first. Anything unexpected is air, so a typo can't
-// wall you in.
-export function parseLevel(text, cols = LEVEL_COLS, rows = LEVEL_ROWS) {
-  const cells = new Uint8Array(cols * rows);
-  const lines = String(text).split('\n');
-  for (let r = 0; r < rows; r++) {
-    const chars = [...(lines[r] || '')];
-    for (let c = 0; c < cols; c++) cells[r * cols + c] = chars[c] === '═' ? PLATFORM : chars[c] === '▓' ? SOLID : AIR;
-  }
-  return { cols, rows, cells };
-}
+import { AIR, PLATFORM, SOLID } from './level.js';
+export { AIR, PLATFORM, SOLID, LEVEL_COLS, LEVEL_ROWS, parseLevel } from './level.js';
 
 export const RUN = 30; // cells/s, the gallery's walking speed
 export const SPRINT = 1.5;

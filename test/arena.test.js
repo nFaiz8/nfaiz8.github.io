@@ -5,12 +5,12 @@ import { parseLevel, AIR, PLATFORM, SOLID } from '../src/arena.js';
 
 const text = fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8');
 
-test('the level file is 34 lines of 160 characters, using only space, ═ and ▓', () => {
+test('the level file is 34 lines of 160 characters, using only space, ═, ▓ and the S, R, N markers', () => {
   const lines = text.replace(/\n$/, '').split('\n');
   assert.equal(lines.length, 34);
   lines.forEach((l, i) => {
     assert.equal([...l].length, 160, `line ${i + 1}`);
-    assert.match(l, /^[ ═▓]*$/, `line ${i + 1}`);
+    assert.match(l, /^[ ═▓SRN]*$/, `line ${i + 1}`);
   });
 });
 
@@ -32,16 +32,46 @@ test('every platform and every block top can be reached from the floor', () => {
       if (!top && s >= 0) { surfaces.push({ row: r, x0: s, x1: c - 1 }); s = -1; }
     }
   }
+  const clear = (a, b) => {
+    for (let c = Math.max(a.x0, b.x0 - 12); c <= Math.min(a.x1, b.x1 + 12); c++) {
+      let ok = true;
+      for (let k = 1; k <= 9 && ok; k++) ok = a.row - k < 0 || at(c, a.row - k) !== SOLID;
+      if (ok) return true;
+    }
+    return false;
+  };
   const gap = (a, b) => Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1));
   const seen = new Set([0]), queue = [0];
   while (queue.length) {
     const i = queue.shift();
     surfaces.forEach((s, j) => {
-      if (!seen.has(j) && surfaces[i].row - s.row <= 5 && gap(surfaces[i], s) <= 12) { seen.add(j); queue.push(j); }
+      if (!seen.has(j) && surfaces[i].row - s.row <= 5 && gap(surfaces[i], s) <= 12 && clear(surfaces[i], s)) { seen.add(j); queue.push(j); }
     });
   }
   const lost = surfaces.filter((_, j) => !seen.has(j)).map((s) => `row ${s.row} cols ${s.x0}-${s.x1}`);
   assert.deepEqual(lost, []);
+});
+
+test('headroom: the 3 cells above every standing spot are air (no ▓ and no ═); no standing spot in rows 0–2', () => {
+  const L = parseLevel(text);
+  const at = (c, r) => L.cells[r * L.cols + c];
+  for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
+    if (at(c, r) === AIR || (r > 0 && at(c, r - 1) !== AIR)) continue; // only tops of surfaces
+    assert.ok(r >= 3, `standing spot at row ${r - 1}, col ${c}`);
+    for (let k = 1; k <= 3; k++) assert.equal(at(c, r - k), AIR, `headroom at ${c},${r - k}`);
+  }
+});
+
+test('the gap under any ▓ is 0 or at least 3 rows', () => {
+  const L = parseLevel(text);
+  const at = (c, r) => (r >= L.rows ? SOLID : L.cells[r * L.cols + c]);
+  for (let c = 0; c < L.cols; c++) for (let r = 0; r < L.rows; r++) {
+    if (at(c, r) !== SOLID || at(c, r + 1) === SOLID) continue;
+    let gap = 0;
+    while (r + 1 + gap < L.rows && at(c, r + 1 + gap) === AIR) gap++;
+    if (r + 1 + gap >= L.rows) continue; // over the room's floor: the track bed is 4+ rows
+    assert.ok(gap === 0 || gap >= 3, `a ${gap}-row slot under ▓ at ${c},${r}`);
+  }
 });
 
 test('parseLevel: ═ is a platform, ▓ is solid, anything else is air, and short input is padded', () => {
