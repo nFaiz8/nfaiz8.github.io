@@ -56,7 +56,7 @@ test('headroom: the 3 cells above every standing spot are air (no ▓ and no ═
   const L = parseLevel(text);
   const at = (c, r) => L.cells[r * L.cols + c];
   for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
-    if (at(c, r) === AIR || (r > 0 && at(c, r - 1) !== AIR)) continue; // only tops of surfaces
+    if (r === 0 || at(c, r) === AIR || at(c, r - 1) !== AIR) continue; // only tops of surfaces; the ceiling above row 0 is solid, so a ▓ touching it has no top
     assert.ok(r >= 3, `standing spot at row ${r - 1}, col ${c}`);
     for (let k = 1; k <= 3; k++) assert.equal(at(c, r - k), AIR, `headroom at ${c},${r - k}`);
   }
