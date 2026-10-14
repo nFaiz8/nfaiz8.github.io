@@ -221,3 +221,12 @@ test('nearArena: the corridor and the room are near; spawn and the rest of the g
   assert.ok(!nearArena(map, { x: a.door.x + 5, y: a.floorY + 20 }), 'south of it');
   assert.ok(!nearArena({ ...map, arena: null }, map.spawn), 'no arena');
 });
+
+import { blockGlyph } from '../src/arena.js';
+
+test('blockGlyph: a ▓ block is drawn as its outline, its inside left clear so the photo shows', () => {
+  const L = parseLevel([' '.repeat(6), ' ▓▓▓▓ ', ' ▓▓▓▓ ', ' ▓▓▓▓ ', ' '.repeat(6)].join('\n'), 6, 5);
+  const row = (r) => [...Array(6)].map((_, c) => blockGlyph(L, c, r) || ' ').join('');
+  assert.deepEqual([1, 2, 3].map(row), [' ┌──┐ ', ' │  │ ', ' └──┘ ']);
+  assert.equal(blockGlyph(L, 0, 0), null, 'air');
+});

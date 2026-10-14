@@ -142,3 +142,17 @@ export function nearArena(map, p) {
   const a = map.arena;
   return !!a && p.x < a.x + a.w + NEAR && p.y >= a.y && p.y <= a.floorY + 6;
 }
+
+// A ▓ block is drawn as its outline, its inside left clear so the photo behind it shows.
+export function blockGlyph(L, c, r) {
+  const solid = (x, y) => x >= 0 && y >= 0 && x < L.cols && y < L.rows && L.cells[y * L.cols + x] === SOLID;
+  if (!solid(c, r)) return null;
+  const up = !solid(c, r - 1), down = !solid(c, r + 1), left = !solid(c - 1, r), right = !solid(c + 1, r);
+  if (up && left) return '┌';
+  if (up && right) return '┐';
+  if (down && left) return '└';
+  if (down && right) return '┘';
+  if (up || down) return '─';
+  if (left || right) return '│';
+  return null;
+}

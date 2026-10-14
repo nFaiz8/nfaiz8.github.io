@@ -6,7 +6,7 @@ import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, rangeOf } from '../photos.js';
 import { lightWindow } from '../light.js';
-import { coverCrop, nearArena } from '../arena.js';
+import { coverCrop, nearArena, blockGlyph } from '../arena.js';
 import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
@@ -195,7 +195,9 @@ export function createGlRenderer() {
       const kind = a.level.cells[k];
       if (!kind) continue;
       // No background, so the photo shows through; a dark copy just below reads on a white wall too.
-      const x = a.x + 1 + (k % a.cols), y = a.y + 1 + Math.floor(k / a.cols), g = kind === 1 ? '═' : '▓';
+      const x = a.x + 1 + (k % a.cols), y = a.y + 1 + Math.floor(k / a.cols);
+      const g = kind === 1 ? '═' : blockGlyph(a.level, k % a.cols, Math.floor(k / a.cols));
+      if (!g) continue;
       pushGlyph(plat, x, y + 0.09, g, C.platformShadow);
       pushGlyph(plat, x, y, g, C.platform);
     }

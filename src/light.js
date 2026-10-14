@@ -125,8 +125,10 @@ export function createLighting(map, { ambient = AMBIENT, lights = staticLights(m
 export function createArenaLighting(map) {
   const a = map.arena, halos = [];
   for (let r = 0; r < a.rows; r++) for (let c = 0; c < a.cols; c++) {
-    if (!a.level.cells[r * a.cols + c]) continue;
-    halos.push({ x: a.x + 1 + c + 0.5, y: a.y + 1 + r + 0.5, radius: 7, color: [1.0, 0.36, 0.16], intensity: 0.08 });
+    const kind = a.level.cells[r * a.cols + c];
+    // A ▓ block glows only along its top (its standing surface), so a tall one doesn't flood the photo.
+    if (!kind || (kind === 2 && r > 0 && a.level.cells[(r - 1) * a.cols + c] === 2)) continue;
+    halos.push({ x: a.x + 1 + c + 0.5, y: a.y + 1 + r + 0.5, radius: 5, color: [1.0, 0.36, 0.16], intensity: 0.04 });
   }
   return createLighting(map, { ambient: ARENA_AMBIENT, lights: [], halos, prints: false, lantern: false, area: { x: a.x, y: a.y, w: a.w, h: a.h } });
 }

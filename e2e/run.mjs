@@ -267,26 +267,35 @@ await withBrowser(async ({ page, url, errors }) => {
       // Top-down, from the corridor: the arena's inside, west of the door.
       const outside = await sharp(await page.screenshot({ clip: await cellsClip(page, a.door.x - 40, a.door.y - 12, 30, 12) })).stats();
       const dark = outside.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3;
-      // Side view: the middle of the 18-cell platform 5 rows up near the door (level cols 128–145, row 29).
+      // Side view: 14 cells from the middle of the widest platform 5 rows up from the floor (row 29).
       await page.goto(`${url}?r=${r}#/room/arena`); await ready(page);
+      const c0 = await page.evaluate(() => {
+        const L = window.__ascii.map.arena.level, row = L.rows - 5;
+        let best = [0, 0];
+        for (let c = 0, s = -1; c <= L.cols; c++) {
+          const on = c < L.cols && L.cells[row * L.cols + c] === 1;
+          if (on && s < 0) s = c;
+          if (!on && s >= 0) { if (c - s > best[1] - best[0]) best = [s, c]; s = -1; }
+        }
+        return Math.floor((best[0] + best[1]) / 2) - 7;
+      });
       await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
       await sleep(400);
       const strip = async (row) => {
-        const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + 130, a.y + 1 + row, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
-        let warm = 0;
-        const lum = [];
-        for (let i = 0; i < data.length; i += info.channels) {
-          const [R, G, B] = [data[i], data[i + 1], data[i + 2]];
-          if (R >= 225 && G >= 200 && B >= 165 && R >= B + 20) warm++;
-          lum.push((R + G + B) / 3);
-        }
-        lum.sort((x, y) => x - y);
-        return { warm: warm / lum.length, median: lum[Math.floor(lum.length / 2)] };
+        const { data, info } = await sharp(await page.screenshot({ clip: await cellsClip(page, a.x + 1 + c0, a.y + 1 + row, 14, 1) })).raw().toBuffer({ resolveWithObject: true });
+        const px = [];
+        for (let i = 0; i < data.length; i += info.channels) px.push([data[i], data[i + 1], data[i + 2]]);
+        const lum = px.map(([R, G, B]) => (R + G + B) / 3).sort((x, y) => x - y);
+        // The strokes: the brightest twentieth of the strip, and whether they're warm (red over blue).
+        const bright = px.filter(([R, G, B]) => (R + G + B) / 3 >= lum[Math.floor(lum.length * 0.95)]);
+        const warm = bright.filter(([R, , B]) => R >= B + 20).length / bright.length;
+        return { median: lum[Math.floor(lum.length / 2)], p95: lum[Math.floor(lum.length * 0.95)], warm };
       };
       const plat = await strip(29), above = await strip(28);
-      console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform warm ${(plat.warm * 100).toFixed(1)}%, median ${plat.median.toFixed(0)} (row above ${above.median.toFixed(0)})`);
+      console.log(`  ${r} arena: outside mean ${dark.toFixed(1)}; platform strokes ${plat.p95.toFixed(0)} (${(plat.warm * 100).toFixed(0)}% warm), median ${plat.median.toFixed(0)} (row above ${above.median.toFixed(0)})`);
       assert.ok(dark < 12, `outside, the arena is dark (${dark.toFixed(1)})`);
-      assert.ok(plat.warm > 0.01, 'warm white platform strokes');
+      // Bright against any photo: street photo strokes ~1.9× the row above, the dark station ~2×; no platform ~1×.
+      assert.ok(plat.p95 > 1.4 * above.median && plat.warm > 0.5, 'bright, warm platform strokes');
       assert.ok(plat.median > 0.7 * above.median, 'the photo shows behind the strokes (no dark band)');
     });
   }
@@ -313,10 +322,25 @@ await withBrowser(async ({ page, url, errors }) => {
       const a = await page.evaluate(() => { const a = window.__ascii.map.arena; return { x: a.x, y: a.y, cols: a.cols, rows: a.rows, id: a.backdrop.id }; });
       await page.waitForFunction((fid) => window.__ascii.loaded(fid), { timeout: 30000 }, a.id);
       await sleep(400);
-      // Above the top tier of platforms (level rows 1–6, cols 60–100): only the photo is there.
-      const corr = await likePhoto(page, a, 60, 1, 40, 6);
+      // A gap in the level (rows 20–23, cols 64–83, the train's side): only the photo is there.
+      const corr = await likePhoto(page, a, 64, 20, 20, 4);
       console.log(`  ${r} arena: backdrop vs the photo file, correlation ${corr.toFixed(3)}`);
       assert.ok(corr > 0.9, `the photograph (${corr.toFixed(3)})`);
+      // A ▓ block is only its outline: the photo shows inside it (the tree trunk is one).
+      const b = await page.evaluate(() => {
+        const L = window.__ascii.map.arena.level, k = L.cells.indexOf(2);
+        if (k < 0) return null;
+        const c = k % L.cols, r = Math.floor(k / L.cols);
+        let w = 0, h = 0;
+        while (L.cells[r * L.cols + c + w] === 2) w++;
+        while (L.cells[(r + h) * L.cols + c] === 2) h++;
+        return { c, r, w, h };
+      });
+      if (b && b.w > 2 && b.h > 2) {
+        const inside = await likePhoto(page, a, b.c + 1, b.r + 1, b.w - 2, b.h - 2);
+        console.log(`  ${r} arena: inside a ▓ block vs the photo file, correlation ${inside.toFixed(3)}`);
+        assert.ok(inside > 0.8, `the photo inside the block (${inside.toFixed(3)})`);
+      }
     });
   }
   await check('arena on a landscape phone: ◀ ▶ JUMP ▼ show only inside, are big enough, and work', async () => {

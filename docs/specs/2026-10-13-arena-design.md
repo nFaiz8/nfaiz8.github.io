@@ -57,7 +57,8 @@ comes later and builds on this room.
 
 ## 3. The photo
 
-- `src/config.js` gains `export const ARENA = { enabled: true, photo: 'img-4927' };`.
+- `src/config.js` gains `export const ARENA = { enabled: true, photo: 'dscf9139' };` (Changed 2026-10-14 from
+  'img-4927': the Penn Station platform, whose level is traced on it; see §4).
   - `photo` is a photo id from `photos.json`. Changing it and pushing swaps the backdrop.
   - `enabled: false` removes the arena, its corridor and its sign entirely.
 - **Off the walls, still findable**:
@@ -71,7 +72,7 @@ comes later and builds on this room.
     not characters), under the glowing platforms and the arena's light.
   - The photo is **cover-fitted**: scaled to fill 160 × 34 cells, keeping its aspect ratio, and cropped
     in the middle. It uses the high-resolution image, loaded only once you are near the arena.
-  - IMG_4927 (5066 × 2075, about 2.4:1) needs almost no crop.
+  - DSCF9139 (8256 × 3048, about 2.7:1) loses about 7% from each side.
 - **Caption in the arena**:
   - It shows the photo's caption line with `[E] open` and the ♥.
   - E opens the photo in the viewer. Closing the viewer returns you to the same spot in the arena.
@@ -89,6 +90,13 @@ comes later and builds on this room.
   - `═`: a platform. You can stand on it from above, jump up through it, and drop down through it.
   - `▓`: a solid block, solid from every side.
 - The room's walls, floor and ceiling are always solid and are not in the file.
+- The level is traced on the backdrop photo (Changed 2026-10-14). For DSCF9139:
+  - one platform runs the room's full width along the yellow line at the platform edge (row 29), over the
+    track bed, where the door is;
+  - the two steel pillars are walls: `▓` from the ceiling down to the yellow line. To get past one, drop
+    through the yellow line and run underneath it in the track bed;
+  - floating `═` platforms sit on the scene: the train's door sills, windows and side ribs, the Penn Station
+    sign, the poster, the 6037 sign, the railings, the light fixtures and the ceiling tubes.
 - The bottom 3 rows of the 4 columns next to the door must be air.
 - I draw the first layout. The user can edit the file any time.
 
@@ -165,11 +173,13 @@ Rows are the vertical cell unit and positive y is down. A cell is twice as tall 
 ## 6. Light: halation
 
 - **Arena lights**:
-  - Every `═` and `▓` cell is a small static light: a warm-white core and a soft red-orange halo with a
-    radius of about 3–4 cells. Like film halation, it bleeds onto the photo around it.
+  - Every `═` cell, and the top of every `▓` block, is a small static light: a soft red-orange halo with a
+    radius of about 5 cells. Like film halation, it bleeds onto the photo around it. (Changed 2026-10-14:
+    half as strong and a smaller radius, so a dark photo isn't washed orange.)
   - These lights are cast once when the arena is set up, using `light.js`'s existing static-light buffer
     and the renderers' additive glow layer, so they cost nothing per frame.
-- **Platform glyphs** are drawn in a bright warm white.
+- **Platform glyphs** are drawn in a bright warm white, over the light, with no background. A `▓` block is
+  drawn as its outline (box-drawing edges), so the photo shows inside it.
 - **Ambient light**:
   - The arena has its own ambient light, a neutral **0.75** in place of the gallery's moonlight 0.2. The
     photo reads clearly but is darker than the glowing platforms.

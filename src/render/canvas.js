@@ -6,7 +6,7 @@ import { RAMP } from '../ascii.js';
 import { T } from '../layout.js';
 import { loadImage, cellsFor, hasFailed } from '../photos.js';
 import { lightWindow } from '../light.js';
-import { coverCrop, nearArena } from '../arena.js';
+import { coverCrop, nearArena, blockGlyph } from '../arena.js';
 
 const CW = 48, CH = 24; // chunk size in cells
 
@@ -256,8 +256,9 @@ export function createCanvasRenderer() {
       }
       for (let y = fo.y + 1; y < y1; y++) { put(ctx, '│', fo.x, y, C.frameFocus, C.bg); put(ctx, '│', x1, y, C.frameFocus, C.bg); }
     }
-    // The arena's platforms, over the light at full brightness (box shapes: a couple of rects each). No
-    // background, so the photo shows through; a dark copy just below reads on a white wall too.
+    // The arena's platforms, over the light at full brightness (box shapes: a couple of rects each), and its
+    // ▓ blocks as outlines. No background, so the photo shows through; a dark copy just below reads on a white
+    // wall too.
     if (world.mode === 'side' && map.arena) {
       const a = map.arena;
       const c0 = Math.max(0, Math.floor(left) - a.x - 1), c1 = Math.min(a.cols, Math.ceil(left + cols) - a.x);
@@ -266,7 +267,8 @@ export function createCanvasRenderer() {
         ctx.fillStyle = rgb(...color);
         for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
           const kind = a.level.cells[r * a.cols + c];
-          if (kind) drawGlyph(ctx, kind === 1 ? '═' : '▓', (a.x + 1 + c) * m.cw, (a.y + 1 + r + dy) * m.ch, m.cw, m.ch, m.fontPx);
+          const g = kind === 1 ? '═' : kind ? blockGlyph(a.level, c, r) : null;
+          if (g) drawGlyph(ctx, g, (a.x + 1 + c) * m.cw, (a.y + 1 + r + dy) * m.ch, m.cw, m.ch, m.fontPx);
         }
       }
     }

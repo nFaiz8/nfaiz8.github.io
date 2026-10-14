@@ -11,4 +11,4 @@ export const MULTIPLAYER = { enabled: true, url: 'wss://faiz-live.faiz-live.work
 
 // The arena, west of the lobby: one photo as its back wall (a photo id from photos.json). Change the id and
 // push to change it; enabled: false removes the room.
-export const ARENA = { enabled: true, photo: 'img-4927' };
+export const ARENA = { enabled: true, photo: 'dscf9139' };

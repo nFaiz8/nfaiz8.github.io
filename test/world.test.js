@@ -188,6 +188,8 @@ test('in side view you run and jump; running east out of the door asks to go bac
   for (let i = 0; i < 30; i++) { step(w, 1 / 60, { ...SIDE_IDLE, jump: true }); top = Math.min(top, w.player.y); }
   assert.ok(A.floorY - 0.5 - top > 3, 'jumped');
   for (let i = 0; i < 120; i++) step(w, 1 / 60, SIDE_IDLE);
+  // The jump may land on a platform over the door's floor: ↓ drops back through it first.
+  for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, down: true });
   for (let i = 0; i < 120 && !w.want; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: 1 });
   assert.equal(w.want, 'top');
   exitSide(w);
