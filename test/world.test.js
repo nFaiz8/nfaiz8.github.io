@@ -85,3 +85,40 @@ test('click paths are pulled straight: few legs, each one walkable', () => {
   assert.ok(legs.length < cells.length / 4, `${legs.length} legs for ${cells.length} cells`);
   assert.deepEqual(legs.at(-1), { x: f.stand.x + 0.5, y: f.stand.y + 0.5 });
 });
+
+test('holding Shift runs at double speed', () => {
+  const normal = createWorld(map), fast = createWorld(map);
+  run(normal, 0.5, { x: 1, y: 0 });
+  run(fast, 0.5, { x: 1, y: 0, run: true });
+  assert.ok(fast.player.vx > normal.player.vx * 1.8, `run ${fast.player.vx} vs ${normal.player.vx}`);
+});
+
+test('running into a wall on a slow frame rate stops at the wall instead of passing through', () => {
+  for (const dir of [-1, 1]) {
+    const w = createWorld(map);
+    const room = map.rooms[0];
+    teleport(w, room.x + (dir < 0 ? 3.5 : room.w - 3.5), map.spawn.y);
+    for (let t = 0; t < 3; t += 0.05) step(w, 0.05, { x: dir, y: 0, run: true }); // 20 fps, the dt cap
+    assert.ok(w.player.x > room.x + 1 && w.player.x < room.x + room.w - 1, `left the lobby: x=${w.player.x} (dir ${dir})`);
+  }
+});
+
+test('running on a slow frame rate never skips over a wall anywhere on the map', () => {
+  const crossed = [];
+  for (const room of map.rooms) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const w = createWorld(map);
+      teleport(w, room.x + room.w / 2 + 0.5, room.y + room.h / 2 + 0.5);
+      for (let t = 0; t < 2; t += 0.05) {
+        const a = { x: w.player.x, y: w.player.y };
+        step(w, 0.05, { x: dx, y: dy, run: true });
+        const b = w.player, n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.1);
+        for (let i = 1; i < n; i++) {
+          const x = a.x + ((b.x - a.x) * i) / n, y = a.y + ((b.y - a.y) * i) / n;
+          if (!isWalkable(map, Math.floor(x), Math.floor(y))) { crossed.push(`${room.id} ${dx},${dy} at ${x.toFixed(1)},${y.toFixed(1)}`); break; }
+        }
+      }
+    }
+  }
+  assert.deepEqual(crossed, []);
+});

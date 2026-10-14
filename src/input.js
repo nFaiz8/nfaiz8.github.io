@@ -6,16 +6,16 @@ const KEYS = {
 
 export function createInput(target, { onTap, onKey }) {
   const held = new Set();
-  let walk = false; // Shift held: walk instead of the default brisk pace
+  let run = false; // Shift held: run instead of the default brisk pace
 
   const editable = (e) => e.target.closest && e.target.closest('input, textarea, [contenteditable]');
   window.addEventListener('keydown', (e) => {
     if (editable(e) || e.metaKey || e.ctrlKey || e.altKey) return;
-    walk = e.shiftKey;
+    run = e.shiftKey;
     if (KEYS[e.code]) { held.add(e.code); e.preventDefault(); return; }
     if (onKey(e)) e.preventDefault();
   });
-  window.addEventListener('keyup', (e) => { held.delete(e.code); walk = e.shiftKey; });
+  window.addEventListener('keyup', (e) => { held.delete(e.code); run = e.shiftKey; });
   window.addEventListener('blur', () => held.clear());
 
   // Tap / click to walk (ignore drags)
@@ -32,7 +32,7 @@ export function createInput(target, { onTap, onKey }) {
     state() {
       let x = 0, y = 0;
       for (const code of held) { x += KEYS[code][0]; y += KEYS[code][1]; }
-      return { x: Math.sign(x), y: Math.sign(y), walk };
+      return { x: Math.sign(x), y: Math.sign(y), run };
     },
     clear: () => held.clear(),
   };

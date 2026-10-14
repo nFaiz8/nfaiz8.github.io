@@ -3,7 +3,7 @@ import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
 
-const SPEED = 24; // cells per second horizontally (holding Shift walks at half); vertical is divided by CELL_ASPECT
+const SPEED = 24; // cells per second horizontally (holding Shift runs at double); vertical is divided by CELL_ASPECT
 const HALF = 0.3; // player half-size in cells
 const FOCUS_DIST = 7; // in horizontal-cell units
 const ACCEL = 0.07; // seconds to reach about 63% of the target speed
@@ -132,11 +132,11 @@ function spring(o, axis, target, time, dt) {
   o[axis] = target + (change + temp) * e;
 }
 
-// input: { x: -1..1, y: -1..1, walk: bool }
+// input: { x: -1..1, y: -1..1, run: bool }
 export function step(world, dt, input) {
   world.t += dt;
   const p = world.player;
-  const speed = SPEED * (input.walk ? 0.5 : 1);
+  const speed = SPEED * (input.run ? 2 : 1);
 
   // Where we want to be going, in horizontal-cell units per second.
   let tx = 0, ty = 0;

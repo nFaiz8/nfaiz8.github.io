@@ -157,7 +157,7 @@ function applyRoute(route) {
 
 let last = performance.now();
 const stats = { frames: 0, times: [] };
-const NO_INPUT = { x: 0, y: 0, walk: false };
+const NO_INPUT = { x: 0, y: 0, run: false };
 function loop(now) {
   // Real per-frame dt, capped so a background tab doesn't teleport you on return.
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
