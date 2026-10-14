@@ -34,9 +34,8 @@ export function createPeers({ delay = 250, fade = 3000, emoteFor = 2500, heartFo
       const out = [];
       for (const p of [...peers.values()]) {
         if (p.left != null && now - p.left >= fade) { peers.delete(p.id); continue; }
-        const { x, y } = sample(p.track, now - delay);
         // Motion from positions alone: per-second velocity over 50 ms, ground when y held for 120 ms.
-        const s0 = sample(p.track, now - delay), s1 = sample(p.track, now - delay - 50), s2 = sample(p.track, now - delay - 120);
+        const s0 = sample(p.track, now - delay), { x, y } = s0, s1 = sample(p.track, now - delay - 50), s2 = sample(p.track, now - delay - 120);
         const vx = (s0.x - s1.x) * 20, vy = (s0.y - s1.y) * 20;
         if (vx) p.facing = vx > 0 ? 1 : -1;
         const showing = p.emote && now - p.emoteAt < emoteFor;

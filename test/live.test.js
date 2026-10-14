@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { peerEntities, heartEntities, peerColor, arenaTicker } from '../src/live.js';
+import { peerEntities, heartEntities, peerColor, arenaTicker, createLive } from '../src/live.js';
 
 test('a peer is an @ with its name centred below and its emote above', () => {
   const es = peerEntities([{ id: 'abc', name: 'Sam', x: 10.5, y: 5.5, alpha: 1, emote: '~o/', emoteAge: 0.1 }], { reducedMotion: true });
@@ -161,4 +161,84 @@ test('positionTicker.reset sends the same position again at once (leaving the ar
 test('a heart at the arena photo rises from above the stickman\'s head', () => {
   const [h] = heartEntities([{ f: 'bd', id: 'a', age: 0 }], [{ id: 'bd', backdrop: true }], { posOf: () => ({ x: 5, y: 20 }) });
   assert.equal(h.y, 20 - 2.2);
+});
+
+// createLive against a stubbed WebSocket, location and addEventListener, restored afterwards.
+function withLive(opts, fn) {
+  const saved = {};
+  const socks = [];
+  const warns = [];
+  class FakeWS {
+    constructor() { this.readyState = 1; this.sent = []; socks.push(this); }
+    send(d) { this.sent.push(JSON.parse(d)); }
+    close() {}
+  }
+  const stubs = { WebSocket: FakeWS, location: { hostname: 'localhost', search: '?live=ws://x' }, addEventListener: () => {} };
+  for (const k of Object.keys(stubs)) { saved[k] = Object.getOwnPropertyDescriptor(globalThis, k); Object.defineProperty(globalThis, k, { value: stubs[k], configurable: true, writable: true }); }
+  const warn = console.warn;
+  console.warn = (...a) => warns.push(a.join(' '));
+  try {
+    const live = createLive({ version: 'v', getName: () => '', getPos: () => null, onAnnounce() {}, onCount() {}, onRejected() {}, ...opts });
+    const sock = socks[0];
+    const say = (m) => sock.onmessage({ data: JSON.stringify(m) });
+    const sentP = () => sock.sent.filter((m) => m.t === 'p');
+    fn({ live, say, sock, warns, sentP });
+  } finally {
+    console.warn = warn;
+    for (const k of Object.keys(stubs)) { if (saved[k]) Object.defineProperty(globalThis, k, saved[k]); else delete globalThis[k]; }
+  }
+}
+
+test('a welcome whose fight hash matches turns fighting on', () => {
+  withLive({ fightHash: 'abc' }, ({ live, say, warns }) => {
+    assert.equal(live.fightOk, false);
+    say({ t: 'welcome', id: 'me', peers: [], fight: 'abc' });
+    assert.equal(live.fightOk, true);
+    assert.equal(warns.length, 0);
+  });
+});
+
+test('an old server (no fight field) or a different hash means no fighting, with one warning', () => {
+  withLive({ fightHash: 'abc' }, ({ live, say, warns }) => {
+    say({ t: 'welcome', id: 'me', peers: [] });
+    assert.equal(live.fightOk, false);
+    assert.deepEqual(warns, ['arena: server level differs; no fighting']);
+  });
+  withLive({ fightHash: 'abc' }, ({ live, say, warns }) => {
+    say({ t: 'welcome', id: 'me', peers: [], fight: 'zzz' });
+    assert.equal(live.fightOk, false);
+    assert.equal(warns.length, 1);
+  });
+});
+
+test('arena message types reach onArena; positions and chat do not', () => {
+  const got = [];
+  withLive({ fightHash: 'abc', onArena: (m) => got.push(m.t) }, ({ say }) => {
+    say({ t: 'welcome', id: 'me', peers: [], fight: 'abc' });
+    for (const t of ['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']) say({ t, id: 'x' });
+    say({ t: 'p', id: 'x', x: 1, y: 1 });
+    say({ t: 'e', id: 'x', e: 'heart' });
+  });
+  assert.deepEqual(got, ['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']);
+});
+
+test('inside the arena no position goes out; after leftArena the next tick sends one at once', () => {
+  let inside = true;
+  withLive({ inArena: () => inside }, ({ live, say }) => {
+    say({ t: 'welcome', id: 'me', peers: [] });
+    const ps = [];
+    const orig = live.net.send.bind(live.net);
+    live.net.send = (m) => { if (m.t === 'p') ps.push(m); return orig(m); };
+    live.tick({ x: 5, y: 5 });
+    live.tick({ x: 6, y: 5 });
+    assert.equal(ps.length, 0);
+    inside = false;
+    live.tick({ x: 6, y: 5 });
+    assert.equal(ps.length, 1);
+    live.tick({ x: 6, y: 5 });
+    assert.equal(ps.length, 1, 'unchanged: nothing more');
+    live.leftArena();
+    live.tick({ x: 6, y: 5 });
+    assert.equal(ps.length, 2, 'same position again at once');
+  });
 });
