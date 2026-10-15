@@ -139,7 +139,13 @@ export function parseMessage(text) {
     case 'a': {
       if (!inArena(m.x, m.y) || !within(m.vx, 60) || !within(m.vy, 60) || (m.f !== -1 && m.f !== 1) || (m.g !== 0 && m.g !== 1)) return null;
       if (!Number.isInteger(m.i) || m.i < 0 || m.i > 1023 || !within(m.a, Math.PI / 2 + 1e-9) || !stamp(m.ts)) return null;
-      return { t: 'a', x: round(m.x, 100), y: round(m.y, 100), vx: round(m.vx, 10), vy: round(m.vy, 10), f: m.f, g: m.g, i: m.i, a: round(m.a, 100), ts: m.ts };
+      const s = { t: 'a', x: round(m.x, 100), y: round(m.y, 100), vx: round(m.vx, 10), vy: round(m.vy, 10), f: m.f, g: m.g, i: m.i, a: round(m.a, 100), ts: m.ts };
+      // On the grappling hook (hook addendum): where it caught, both or neither.
+      if (m.hx !== undefined || m.hy !== undefined) {
+        if (!inArena(m.hx, m.hy)) return null;
+        s.hx = round(m.hx, 10); s.hy = round(m.hy, 10);
+      }
+      return s;
     }
     case 'f': {
       if (!inArena(m.x, m.y) || !within(m.a, Math.PI + 1e-9) || !stamp(m.ts)) return null;

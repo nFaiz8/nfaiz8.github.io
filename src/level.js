@@ -7,10 +7,10 @@ export const PICKUP_GUN = { R: 'rifle', N: 'sniper' };
 // The arena's maps (gorge addendum): the train (src/arena.txt) and the gorge (src/gorge.txt), each with its
 // size. steps: a tread a row up is walked onto (the gorge's stairs and terrace); dummy: the column whose
 // floor the practice dummy stands on when you're alone (the train's car A; the gorge's, under the cave by
-// the way in).
+// the way in); hook: G casts a grappling hook (hook addendum: the gorge only).
 export const MAPS = {
-  train: { cols: LEVEL_COLS, rows: LEVEL_ROWS, steps: false, dummy: 50 },
-  gorge: { cols: 212, rows: 112, steps: true, dummy: 160 },
+  train: { cols: LEVEL_COLS, rows: LEVEL_ROWS, steps: false, dummy: 50, hook: false },
+  gorge: { cols: 212, rows: 112, steps: true, dummy: 160, hook: true },
 };
 export const MAP_NAMES = Object.keys(MAPS);
 export const DEFAULT_MAP = 'train';
@@ -18,7 +18,7 @@ export const mapName = (name) => (Object.hasOwn(MAPS, name) ? name : DEFAULT_MAP
 // A map's level, parsed at its own size and carrying its name and rules.
 export function parseMap(name, text) {
   const m = MAPS[mapName(name)];
-  return { ...parseLevel(text, m.cols, m.rows), name: mapName(name), steps: m.steps, dummy: m.dummy };
+  return { ...parseLevel(text, m.cols, m.rows), name: mapName(name), steps: m.steps, dummy: m.dummy, hook: m.hook };
 }
 
 // Anything unexpected is air, so a typo can't wall you in.

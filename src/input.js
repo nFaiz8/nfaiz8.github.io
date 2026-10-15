@@ -1,6 +1,6 @@
 // Keyboard and pointer input. Held keys become a movement vector; taps become commands. In the arena,
-// W/↑/Space jump, S/↓ drop through platforms (and crouch on a floor), Ctrl only crouches; the phone pad
-// presses the same keys virtually.
+// W/↑/Space jump, S/↓ drop through platforms (and crouch on a floor), Ctrl only crouches (on a floor or a
+// platform), G casts the grappling hook (or lets go); the phone pad presses the same keys virtually.
 const KEYS = {
   ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0],
   ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1],
@@ -10,7 +10,7 @@ const UP = ['KeyW', 'ArrowUp', 'Jump']; // takes hold of a ladder and climbs it 
 const DROP = ['KeyS', 'ArrowDown', 'Drop'];
 const CROUCH = ['ControlLeft', 'ControlRight']; // arena only: crouches and crawls, never drops or climbs down
 // The arena's keys still play with Ctrl held (a crawl is Ctrl with ← or →).
-const PLAY = new Set([...Object.keys(KEYS), 'KeyJ', 'KeyK', 'Space']);
+const PLAY = new Set([...Object.keys(KEYS), 'KeyJ', 'KeyK', 'KeyG', 'Space']);
 
 // Two presses of the same direction within `gap` seconds make a roll. Returns the direction, or 0.
 export function createDoubleTap(gap = 0.25) {
@@ -32,7 +32,7 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
   const held = new Set();
   const pad = new Set(); // on-screen buttons held down
   let run = false; // Shift held: sprint instead of walking
-  let strikes = 0, roll = 0;
+  let strikes = 0, roll = 0, hooks = 0;
   let mouseFire = false;
   const dtap = createDoubleTap();
   const mouse = { on: false, px: 0, py: 0 };
@@ -46,13 +46,14 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
     run = e.shiftKey;
     if (e.code === 'KeyJ') { held.add('KeyJ'); mouse.on = false; e.preventDefault(); return; }
     if (e.code === 'KeyK') { if (!e.repeat && arena()) strikes++; e.preventDefault(); return; }
+    if (e.code === 'KeyG' && arena()) { if (!e.repeat) hooks++; e.preventDefault(); return; }
     if (ROLL_DIR[e.code] && !e.repeat) tapRoll(e.code);
     if (KEYS[e.code]) { held.add(e.code); e.preventDefault(); return; }
     if (e.code === 'Space') held.add('Space'); // a jump in the arena; onKey decides what else it does
     if (onKey(e)) e.preventDefault();
   });
   win.addEventListener('keyup', (e) => { held.delete(e.code); run = e.shiftKey; });
-  const clear = () => { held.clear(); pad.clear(); mouseFire = false; strikes = 0; roll = 0; mouse.on = false; dtap.reset(); };
+  const clear = () => { held.clear(); pad.clear(); mouseFire = false; strikes = 0; roll = 0; hooks = 0; mouse.on = false; dtap.reset(); };
   win.addEventListener('blur', clear);
 
   // The mouse aims, left fires, right strikes (arena only; touch never does)
@@ -97,12 +98,14 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
     press(code, on) {
       if (on && !pad.has(code)) {
         if (code === 'Hit') { if (arena()) strikes++; }
+        else if (code === 'Hook') { if (arena()) hooks++; }
         else tapRoll(code);
       }
       if (on) pad.add(code); else pad.delete(code);
     },
     takeStrikes() { const n = strikes; strikes = 0; return n; },
     takeRoll() { const r = roll; roll = 0; return r; },
+    takeHook() { const n = hooks; hooks = 0; return n > 0; }, // a G pressed since the last frame
     mouse,
     clear,
   };

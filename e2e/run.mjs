@@ -153,14 +153,13 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), false);
   });
-  await check('G and #/all open the grid; tapping the kiosk walks you there and opens it', async () => {
+  await check('#/all opens the grid (G no longer does: it is the gorge\'s hook); tapping the kiosk walks you there and opens it', async () => {
     await page.goto(`${url}#/all`);
     await ready(page);
     await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 5000 });
     await page.keyboard.press('Escape');
     await page.keyboard.press('KeyG');
-    assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), true);
-    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), false);
     await page.evaluate(() => { const k = window.__ascii.map.kiosk; window.__ascii.tapCell(k.x + 4, k.y + 1); });
     await page.waitForFunction(() => window.__ascii.grid.isOpen, { timeout: 15000 });
   });
@@ -1395,6 +1394,30 @@ await withBrowser(async ({ page, url, errors }) => {
       assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'glyphs missing from the atlas');
     });
   }
+  // The hook (hook addendum): G with ↑ held, facing left from the ═ by the ladder, catches the ledge over
+  // it and lands me on it, a rope drawn meanwhile; Ctrl crouches on that ═ without dropping through.
+  await check('the gorge: G casts the hook (a rope drawn) and lands me on the ledge; Ctrl crouches on a ═ and stays on it', async () => {
+    await page.goto('about:blank');
+    await page.goto(`${url}?r=canvas&map=gorge#/room/arena`); await ready(page);
+    await sleep(500);
+    await gorgePut(180.5, 76); await sleep(300);
+    await page.keyboard.down('ArrowLeft'); await sleep(40); await page.keyboard.up('ArrowLeft'); await sleep(200);
+    await page.keyboard.down('ArrowUp'); await page.keyboard.press('KeyG'); await sleep(30); await page.keyboard.up('ArrowUp');
+    await sleep(80);
+    const pulled = await page.evaluate(() => ({ hook: !!window.__ascii.world.player.hook, rope: window.__ascii.pvp().glyphs(performance.now()).filter((g) => '─│╱╲'.includes(g.ch)).length }));
+    await page.screenshot({ path: `${SHOTS}/gorge-hook.png` });
+    await sleep(1500);
+    const top = await gorgeAt();
+    assert.ok(pulled.hook && pulled.rope > 3, `on the rope, drawn (${JSON.stringify(pulled)})`);
+    assert.ok(Math.abs(top.feet - 64) < 0.01 && !(await page.evaluate(() => window.__ascii.world.player.hook)), `on the ledge (${JSON.stringify(top)})`);
+    assert.equal(await page.evaluate(() => window.__ascii.grid.isOpen), false, 'G opened the grid');
+    await gorgePut(182.5, 76); await sleep(300);
+    await page.keyboard.down('ControlLeft'); await sleep(500);
+    const low = await page.evaluate(() => window.__ascii.pvp().bodies(performance.now()).find((b) => b.me).state.low);
+    const on = await gorgeAt();
+    await page.keyboard.up('ControlLeft');
+    assert.deepEqual([low, on.feet], [1, 76], 'crouched on the ═, still on it');
+  });
   await check('the gorge on a landscape phone: JUMP held at a ladder\'s foot climbs it', async () => {
     await page.setViewport(PHONE);
     await page.goto('about:blank');
@@ -1405,8 +1428,15 @@ await withBrowser(async ({ page, url, errors }) => {
     const t = await page.touchscreen.touchStart(at.Jump.x, at.Jump.y);
     await sleep(1800); await t.end();
     const top = await gorgeAt();
+    // HOOK is on the pad here (only in the gorge), and a tap of it casts
+    await gorgePut(180.5, 76); await sleep(300);
+    const h = await page.touchscreen.touchStart(at.Hook.x, at.Hook.y);
+    await sleep(60); await h.end();
+    const hooked = await page.evaluate(() => !!window.__ascii.world.player.hook);
     await page.setViewport(DESKTOP);
     assert.ok(!top.climb && top.feet <= 64.01, `climbed (${JSON.stringify(top)})`);
+    assert.ok(at.Hook && at.Hook.x > 0, 'HOOK on the pad');
+    assert.ok(hooked, 'HOOK cast');
   });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });

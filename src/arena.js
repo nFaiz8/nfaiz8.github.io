@@ -4,7 +4,7 @@
 import { isWalkable } from './layout.js';
 
 import { AIR, PLATFORM, SOLID } from './level.js';
-import { ROLL } from './fight.js';
+import { ROLL, rayLength, shoulderOf, absAngle } from './fight.js';
 export { ROLL }; // the referee needs it too, and imports only fight.js and level.js
 export { AIR, PLATFORM, SOLID, LEVEL_COLS, LEVEL_ROWS, parseLevel } from './level.js';
 
@@ -37,7 +37,8 @@ export function doorZone(level, off = { x: 0, y: 0 }) {
 export function newBody(x, y) {
   return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity, low: 0,
     onBody: false, rideId: null, rideX: 0, headDropUntil: 0, // on someone's head: whose (by box id), and where they were
-    climb: null, climbed: 0 }; // the ladder it is on (gorge addendum), and how far it has climbed (for the pose)
+    climb: null, climbed: 0, // the ladder it is on (gorge addendum), and how far it has climbed (for the pose)
+    hook: null, hookT: 0, hookStuck: 0 }; // where its grappling hook caught (hook addendum), since when, and how long it has been held up
 }
 
 export const rolling = (b) => b.rollT >= 0;
@@ -56,11 +57,12 @@ export function knock(b, kx, ky, stun, add = false) {
   b.stun = Math.max(b.stun, stun);
   b.rollT = -1;
   b.climb = null; // a hit knocks you off a ladder
+  b.hook = null; // and off the rope
 }
 
 // Start a roll: on the ground, not stunned, not already rolling, and cooled down.
 export function startRoll(b, dir) {
-  if (!dir || !b.onGround || b.stun > 0 || b.rollT >= 0 || b.rollCool > 0) return false;
+  if (!dir || !b.onGround || b.stun > 0 || b.rollT >= 0 || b.rollCool > 0 || b.hook) return false;
   b.rollT = 0;
   b.rollDir = Math.sign(dir);
   b.vx = b.rollDir * ROLL.speed;
@@ -122,6 +124,64 @@ function climbStep(b, dt, input, kindAt, ladders) {
   return true;
 }
 
+// The grappling hook (hook addendum, the gorge's): cast along the aim from the shoulder, it catches the
+// first ▓ or ═ within HOOK_RANGE (on screen, cells) and pulls the body straight at that point, HOOK_PULL on
+// screen with no gravity, the across part never past HOOK_ACROSS (the wire's 60 cells/s less a margin).
+// Within HOOK_DONE of it, after HOOK_TIME, or held up by a wall for HOOK_STUCK, it lets go; a pull going up
+// lets go with a hop of HOOK_HOP, enough to come up through a ═ and land on it. A fresh jump lets go with
+// that hop too, ↓ lets go, a hit knocks it loose, and G again lets go (pvp.js). On the rope the air jump
+// is refilled.
+export const HOOK_RANGE = 48;
+export const HOOK_PULL = 80;
+export const HOOK_ACROSS = 55;
+export const HOOK_TIME = 1.5;
+export const HOOK_HOP = 32; // rows/s: about 3.85 rows up, so the feet clear a ═ the hook caught under
+export const HOOK_COOL = 0.35; // s between casts
+const HOOK_DONE = 1.2, HOOK_STUCK = 0.1;
+const HOOK_STOP = (k) => k !== AIR;
+
+// Where a hook cast from b along `angle` (on screen, absolute) catches, or null for a miss; reach: the
+// rope's end either way, for the picture of a miss.
+export function hookCast(b, angle, kindAt, facing = b.facing < 0 ? -1 : 1) {
+  const s = shoulderOf(b.x, b.y, facing, b.low || 0);
+  const t = rayLength(kindAt, s.x, s.y, angle, HOOK_RANGE, HOOK_STOP);
+  const at = Math.max(0, t - 0.05); // just short of the cell it caught: in the air before it
+  const end = { x: s.x + at * Math.cos(angle), y: s.y + (at * Math.sin(angle)) / 2 };
+  return { from: s, to: end, hit: t < HOOK_RANGE };
+}
+// Cast and catch: on the rope from now, if it caught (c.hit).
+// aim: on screen, from facing (fight.js's absAngle). Returns the cast (hookCast's) or null when it can't.
+export function grapple(b, aim, kindAt, facing = b.facing < 0 ? -1 : 1) {
+  if (b.stun > 0 || b.rollT >= 0) return null;
+  const c = hookCast(b, absAngle(facing, aim), kindAt, facing);
+  if (!c.hit) return c;
+  b.hook = c.to;
+  b.hookT = b.t;
+  b.hookStuck = 0;
+  b.climb = null;
+  b.low = 0;
+  b.prevJump = true; // a jump pressed with the cast (↑ aims it up) doesn't let go at once
+  return c;
+}
+// Let go of the rope; up: with the hop.
+function unhook(b, up) {
+  b.hook = null;
+  if (up) { b.vy = Math.min(b.vy, -HOOK_HOP); b.cut = false; }
+  b.vx *= 0.6;
+}
+// The pull for this step: the body's velocity straight at the anchor (or it lets go). Returns whether it is
+// still on the rope.
+function pull(b, dt) {
+  const dx = b.hook.x - b.x, dy = b.hook.y - b.y, d = Math.hypot(dx, 2 * dy);
+  if (d <= HOOK_DONE || b.t - b.hookT > HOOK_TIME || b.hookStuck >= HOOK_STUCK) { unhook(b, dy < 0); return false; }
+  let v = Math.min(HOOK_PULL, d / dt); // never past it
+  v = Math.min(v, (HOOK_ACROSS * d) / Math.max(EPS, Math.abs(dx)));
+  b.vx = (v * dx) / d;
+  b.vy = (v * dy) / d; // rows: half the screen distance
+  b.airJumps = AIR_JUMPS;
+  return true;
+}
+
 // Stairs (gorge addendum, the level's steps): walking into a tread a row up (a ═, or a ▓ step) puts you on
 // it, with headroom only rock takes away; walking off one with the next a row down puts you on that.
 function stepOnto(b, dir, kindAt, wasGround, feet0) {
@@ -151,7 +211,7 @@ function stepOnto(b, dir, kindAt, wasGround, feet0) {
 // centres coincide; solid false here means this body passes through everyone; door is doorZone's.
 // ladders and steps: the level's (gorge addendum), for a level that has them.
 export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside = null, others = null, solid = true, door = null, ladders = null, steps = false } = {}) {
-  if (ladders && ladders.length && climbStep(b, dt, input, kindAt, ladders)) return;
+  if (ladders && ladders.length && !b.hook && climbStep(b, dt, input, kindAt, ladders)) return;
   b.climb = null;
   const wasGround = b.onGround, feet0 = b.y + HH;
   b.t += dt;
@@ -171,9 +231,11 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     const jump = !!input.jump, press = jump && !b.prevJump;
     if (press) b.sinceJump = 0; else b.sinceJump += dt;
     // Letting go while rising cuts the jump short.
-    if (!jump && b.prevJump && b.vy < 0 && !b.cut) { b.vy *= 0.5; b.cut = true; }
+    if (!jump && b.prevJump && b.vy < 0 && !b.cut && !b.hook) { b.vy *= 0.5; b.cut = true; }
     b.prevJump = jump;
     b.sinceGround = b.onGround ? 0 : b.sinceGround + dt;
+    // On the rope a fresh jump lets go with a hop (and is spent), ↓ lets go.
+    if (b.hook && (press || input.down)) { unhook(b, press); if (press) b.sinceJump = Infinity; }
     // ↓ on a ═ drops through it; ↓ on a head drops off that head only, onto any ═ just under it.
     if (input.down && b.onGround && b.onPlatform) { if (b.onBody) b.headDropUntil = b.t + DROP; else b.dropUntil = b.t + DROP; b.onGround = false; }
     // A jump pressed a moment before landing, or a moment after running off a ledge, still counts.
@@ -184,7 +246,7 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
       b.sinceJump = b.sinceGround = Infinity;
       b.onGround = false;
       if (b.rollT >= 0) endRoll(b); // a jump out of a roll keeps its speed
-    } else if (press && !b.onGround && b.rollT < 0 && b.airJumps > 0) {
+    } else if (press && b.sinceJump < Infinity && !b.onGround && b.rollT < 0 && b.airJumps > 0) {
       // The air jump: no ground jump to be had, so a fresh press takes it. It replaces vy (it can stop a
       // fall), can be cut short again, and a held direction turns the speed that way at once.
       b.airJumps--;
@@ -197,14 +259,18 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     }
   }
 
-  // Low (crouch addendum §1): ↓ held on solid floor (not a ═, not a head), not stunned or rolling, and no
-  // jump just taken: 1 crouched, 2 prone with ←/→ held. Steering then aims for the crawl's speed.
-  const low = !stunned && !rolled && input.down && b.onGround && !b.onPlatform ? (input.x ? 2 : 1) : 0;
+  // Low (crouch addendum §1): ↓ held on solid floor (not a ═, not a head), or Ctrl (input.crouch) on any
+  // footing, not stunned or rolling, and no jump just taken: 1 crouched, 2 prone with ←/→ held. Steering
+  // then aims for the crawl's speed.
+  const lowHeld = (input.down && !b.onPlatform) || input.crouch;
+  const low = !stunned && !rolled && !b.hook && lowHeld && b.onGround ? (input.x ? 2 : 1) : 0;
 
   // While stunned the door is a wall: the cells outside the arena are solid.
   const kinds = stunned && inside ? (c, r) => (inside(c, r) ? kindAt(c, r) : SOLID) : kindAt;
   let mx;
-  if (rolled) {
+  const hooked = !!b.hook && pull(b, dt);
+  if (hooked) mx = b.vx * dt;
+  else if (rolled) {
     b.vx = b.rollDir * ROLL.speed; // a roll ignores steering, also on the step a jump ends it
     mx = b.vx * Math.min(dt, left);
     if (b.rollT >= 0) b.rollT += dt;
@@ -214,16 +280,22 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
     mx = b.vx * dt;
   }
   const vy0 = b.vy;
-  b.vy = Math.min(MAX_FALL, b.vy + GRAVITY * dt);
+  if (!hooked) b.vy = Math.min(MAX_FALL, b.vy + GRAVITY * dt);
   const my = ((vy0 + b.vy) / 2) * dt; // exact for constant gravity
   // A roll passes through everyone. Otherwise: pushed out of anyone already overlapping, and carried by
   // the one underfoot.
   const block = solid && !rolled && others && others.length ? sortOthers(b, others, door) : null;
   if (block) mx += push(b, dt) + rideDx(b, block);
+  const x0 = b.x, y0 = b.y;
   move(b, mx, my, kinds, block);
-  if (steps) stepOnto(b, rolled ? b.rollDir : Math.sign(input.x || 0), kinds, wasGround, feet0);
+  // Held up on the rope (a wall, a ceiling, the floor): it lets go once that has lasted HOOK_STUCK.
+  if (hooked) {
+    const want = Math.hypot(mx, 2 * my), got = Math.hypot(b.x - x0, 2 * (b.y - y0));
+    b.hookStuck = got < want * 0.3 ? b.hookStuck + dt : 0;
+  }
+  if (steps && !hooked) stepOnto(b, rolled ? b.rollDir : Math.sign(input.x || 0), kinds, wasGround, feet0);
   if (b.onGround) b.airJumps = AIR_JUMPS; // the floor, a platform or a ▓ top
-  b.low = low && b.onGround && !b.onPlatform ? low : 0;
+  b.low = low && b.onGround && (!b.onPlatform || input.crouch) ? low : 0;
   // The roll ends after its time, or when it runs off a ledge (keeping its speed).
   if (b.rollT >= 0 && (b.rollT >= ROLL.time - 1e-9 || !b.onGround)) endRoll(b);
 }

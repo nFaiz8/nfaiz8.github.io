@@ -32,7 +32,8 @@ export const PICKUP_BY_CODE = { r: 'rifle', n: 'sniper', m: 'medkit' };
 // Bumped when the fight's wire changes, so a page and a server of different versions don't fight together
 // (each falls back to the dummy): it goes into the fight hash. 2: pickups at random spots, and medkits.
 // 3: two maps, the train and the gorge, and ladders (input bits 256 ↑ held, 512 on a ladder).
-export const FIGHT_VERSION = 3;
+// 4: the gorge's grappling hook (a state's hx, hy: where it caught).
+export const FIGHT_VERSION = 4;
 export const COMBO_GAP = 0.5;
 export const DODGE = [0.04, 0.26];
 export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
@@ -88,7 +89,8 @@ export function muzzleOf(x, y, facing, aim, gun, low = 0) {
 }
 
 // Bullets. Distance from (x, y) along angle to the first SOLID cell, or max (Amanatides-Woo grid walk).
-export function rayLength(kindAt, x, y, angle, max) {
+// stop: the cell kinds that end it (a bullet's: ▓; the hook's: ▓ and ═).
+export function rayLength(kindAt, x, y, angle, max, stop = (k) => k === SOLID) {
   const dx = Math.cos(angle);
   const dy = Math.sin(angle) / 2;
   let cx = Math.floor(x);
@@ -101,7 +103,7 @@ export function rayLength(kindAt, x, y, angle, max) {
   const ddy = dy === 0 ? Infinity : 1 / Math.abs(dy);
   let t = 0;
   while (t <= max) {
-    if (kindAt(cx, cy) === SOLID) return t;
+    if (stop(kindAt(cx, cy))) return t;
     if (tx < ty) { t = tx; tx += ddx; cx += sx; } else { t = ty; ty += ddy; cy += sy; }
   }
   return max;

@@ -1,4 +1,5 @@
-// The fight's visual effects as glyph lists: bullets, sparks, damage numbers, hp bars, pickups, sniper aim lines.
+// The fight's visual effects as glyph lists: bullets, sparks, damage numbers, hp bars, pickups, sniper aim lines
+// and grappling ropes.
 // Pure: no DOM, no randomness. Positions in and out are map cells; offset is map minus arena-local.
 import { GUNS, MAX_HP, rayLength, bulletRange, bulletAt, bulletGlyphs, along, muzzleOf, absAngle, sweep, inDodge, hurtOf } from './fight.js';
 import { GUN_ART } from './stick.js';
@@ -79,7 +80,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     });
   }
 
-  function glyphs(nowMs, { bodies = [], pickups = [], aims = [] } = {}, out = []) {
+  function glyphs(nowMs, { bodies = [], pickups = [], aims = [], ropes = [] } = {}, out = []) {
     const now = nowMs / 1000;
     const tmp = [];
     for (const b of bullets) {
@@ -132,6 +133,7 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
         out.push({ x: m.x + d.dx, y: m.y + d.dy, ch: '·', color: q.color, a: q.ready ? 0.5 : 0.25 });
       }
     }
+    for (const r of ropes) ropeGlyphs(r, out);
     return out;
   }
 
@@ -142,4 +144,16 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
   }
 
   return { shot, assign, parry, hit, heal, step, glyphs, clear };
+}
+
+// A rope (hook addendum), { from, to, color, a, hit } in map cells: a line of joining glyphs one screen cell
+// apart, the one for its slant, and the hook where it caught.
+export function ropeGlyphs(r, out = []) {
+  const dx = r.to.x - r.from.x, sy = 2 * (r.to.y - r.from.y), len = Math.hypot(dx, sy);
+  const slant = Math.abs(sy) < Math.abs(dx) * 0.41 ? '─' : Math.abs(dx) < Math.abs(sy) * 0.41 ? '│' : dx * sy > 0 ? '╲' : '╱';
+  for (let d = 1; d < len - 0.5; d++) {
+    out.push({ x: r.from.x + (dx * d) / len, y: r.from.y + (sy * d) / len / 2, ch: slant, color: r.color, a: 0.8 * r.a });
+  }
+  if (r.hit) out.push({ x: r.to.x, y: r.to.y, ch: '+', color: r.color, a: r.a });
+  return out;
 }

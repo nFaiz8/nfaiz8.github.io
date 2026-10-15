@@ -15,7 +15,9 @@ const NONE = {};
 const BULLETS = new Set(['d', 'r', 'n']);
 
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
-const inputOf = (i) => ({ x: (i & 2 ? 1 : 0) - (i & 1 ? 1 : 0), jump: !!(i & 4), down: !!(i & 8), run: !!(i & 16), up: !!(i & 256) });
+// Low as sent (64, 128) is held as Ctrl is (crouch), so a body crouched on a ═ stays crouched without bit 8,
+// which would drop it through.
+const inputOf = (i) => ({ x: (i & 2 ? 1 : 0) - (i & 1 ? 1 : 0), jump: !!(i & 4), down: !!(i & 8), crouch: !!(i & 192), run: !!(i & 16), up: !!(i & 256) });
 // The absolute angle back to facing and aim (absAngle's inverse).
 function facingAim(a, facing) {
   const f = Math.abs(a) < Math.PI / 2 ? 1 : Math.abs(a) > Math.PI / 2 ? -1 : facing;
@@ -104,6 +106,8 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
     b.low = lowOf(i, m.g); // crouched or prone as sent; stepBody predicts it from the bits from here on
     // On a ladder as sent (512): on the one there, climbing as the bits say from here on.
     if (i & 512 && ladders) b.climb = ladderAt(b, ladders);
+    // On the rope as sent (hx, hy: where the hook caught, hook addendum): pulled as the sender is from here on.
+    if (num(m.hx) && num(m.hy)) { b.hook = { x: m.hx + offset.x, y: m.hy + offset.y }; b.hookT = old && old.hook ? old.hookT - old.t : 0; }
     if (old) b.climbed = old.climbed;
     // Jump held since the last state is no new press; jump that came on with this state is the take-off.
     b.prevJump = !!((old ? F.bits : i) & 4);
@@ -254,6 +258,7 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
       const hp = F.alive ? regenHp(F.hp, F.hurtAt / 1000, now / 1000) : 0;
       out.push({ id: F.id, kills: F.kills, alive: F.alive, state: {
         x: b.x + F.corr.x, y: b.y + F.corr.y, vx: b.vx, vy: b.vy, facing: F.facing, ground: b.onGround, low: b.low || 0, flipT: flipOf(F, now), ...climbLook(b),
+        hook: b.hook && F.alive ? b.hook : null,
         aim: F.aim, act, actT, hp, safe: now < F.safeUntil, gun: F.gun, aimed: F.aimTo !== 0, // the smoothed aim only nears 0
       } });
     }

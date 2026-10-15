@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <div id="stage" tabindex="0" aria-label="Gallery map. Use the arrow keys or WASD to walk, E to open a photo, G for all photos." role="application"></div>
+    <div id="stage" tabindex="0" aria-label="Gallery map. Use the arrow keys or WASD to walk, E to open a photo." role="application"></div>
     <header class="hud">
       <span class="hud-name" id="hud-name"></span>
       <span class="hud-tools">
@@ -40,6 +40,7 @@
         <button type="button" data-code="ArrowRight" aria-label="Run right">▶</button>
       </div>
       <div class="pad-act">
+        <button type="button" class="pad-hook" data-code="Hook" aria-label="Grappling hook" hidden>HOOK</button>
         <button type="button" class="pad-hit" data-code="Hit" aria-label="Punch or kick">HIT</button>
         <button type="button" class="pad-drop" data-code="Drop" aria-label="Crouch, or drop through a platform">▼</button>
         <button type="button" class="pad-fire" data-code="Fire" aria-label="Shoot">FIRE</button>

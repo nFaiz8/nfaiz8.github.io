@@ -295,7 +295,6 @@ function onKey(e) {
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
   if (e.code === 'KeyI' && shots && !shotsBtn.hidden) { shots.toggle(); return true; }
-  if (e.code === 'KeyG') { openGrid(); return true; }
   if (e.code === 'Backquote' && ARENA.enabled) { admin.toggle(arenaMap); return true; }
   if (e.code === 'KeyF') { toggleFullscreen(); return true; }
   if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
@@ -357,14 +356,14 @@ let last = performance.now();
 const stats = { frames: 0, times: [] };
 const NO_INPUT = { x: 0, y: 0, run: false, jump: false, down: false };
 // Away (a photo, the map, the grid): no movement, and strikes or rolls pressed meanwhile don't wait for the return.
-function idle() { input.takeStrikes(); input.takeRoll(); return NO_INPUT; }
+function idle() { input.takeStrikes(); input.takeRoll(); input.takeHook(); return NO_INPUT; }
 // This frame's input. In the fight pvp.js turns it into movement, shots and strikes (PvP spec §3).
 function controls(t) {
   const s = input.state();
   if (!pvp || world.mode !== 'side') return s;
   const m = input.mouse;
   // W/↑ tilt the shot up (and still jump); Space only jumps. On the pad, FIRE with JUMP held shoots up.
-  return pvp.control({ ...s, strikes: input.takeStrikes(), roll: input.takeRoll(), aimUp: s.y < 0 || padJump, aimDown: s.down,
+  return pvp.control({ ...s, strikes: input.takeStrikes(), roll: input.takeRoll(), hook: input.takeHook(), aimUp: s.y < 0 || padJump, aimDown: s.down,
     mouse: m.on ? { on: true, ...renderer.pointAt(world, m.px, m.py) } : null }, t);
 }
 let padJump = false; // the pad's JUMP is held
@@ -380,7 +379,7 @@ function syncFight(t) {
     // and the gallery would keep drawing me there while I fight.
     if (live) live.tick(world.player);
     pvp.enter(t, fightOnline());
-    if (!touch && !keysNoted) { keysNoted = true; note('J shoot · K hit · Ctrl crouch · mouse aims', 4000); }
+    if (!touch && !keysNoted) { keysNoted = true; note(`J shoot · K hit · Ctrl crouch${map.arena.level.hook ? ' · G hook' : ''} · mouse aims`, 4000); }
   } else if (!want && pvp.entered) leaveFight(t);
 }
 function leaveFight(t) {
@@ -753,6 +752,8 @@ async function boot() {
     padEl.classList.add('no-fight');
     for (const b of padEl.querySelectorAll('.pad-fire, .pad-hit')) b.hidden = true;
   }
+  // The hook's button: only where there is one (the gorge), and only in the fight.
+  padEl.querySelector('.pad-hook').hidden = !(pvp && map.arena.level.hook);
   for (const b of padEl.querySelectorAll('button')) {
     const set = (on) => {
       input.press(b.dataset.code, on);

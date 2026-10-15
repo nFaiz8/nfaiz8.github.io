@@ -72,5 +72,5 @@ npm run e2e      # live checks in headless Chrome
 npm run build    # what the Action runs
 ```
 
-Keys: WASD / arrows to walk (hold Shift to sprint), E to open a photo, M for the map, G for all photos, R to switch
+Keys: WASD / arrows to walk (hold Shift to sprint), E to open a photo, M for the map, R to switch
 between the WebGL and canvas renderers. Add `?debug` to the address for frame rate and position.

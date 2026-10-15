@@ -2,7 +2,7 @@
 // messages, the practice dummy and offline play (a local referee), and what the HUD shows. DOM-free glue:
 // every rule comes from fight.js or the referee. Positions are map cells here and arena-local on the
 // wire; times are ms here and seconds in the rules.
-import { newBody, stepBody, knock, rolling, doorZone, climbLook, ladderAt } from './arena.js';
+import { newBody, stepBody, knock, rolling, doorZone, climbLook, grapple, HOOK_COOL } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
@@ -36,9 +36,13 @@ const AIM_WARN = 0.3; // s: a sniper's aim line brightens this long before its n
 const MAX_PRESSES = 4; // strike presses handled in one frame
 const IDLE = { x: 0, y: 0, run: false, jump: false, down: false };
 const BULLETS = new Set(['d', 'r', 'n']);
+// The hook cast with keys alone (hook addendum): up and forward, steeper with ↑ held (on screen, radians).
+const HOOK_AIM = -Math.PI / 4, HOOK_AIM_UP = -1.25;
+const MISS_MS = 160; // a cast that caught nothing shows its rope this long
 
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const r2 = (v) => Math.round(v * 100) / 100 + 0; // + 0 turns -0 into 0
+const r1 = (v) => Math.round(v * 10) / 10 + 0;
 const sec = (ms) => ms / 1000;
 
 export function createPvp({
@@ -79,6 +83,7 @@ export function createPvp({
   let lastShot = -Infinity, lastPk = -Infinity, lastRs = -Infinity, deadAt = 0;
   let dummyBackAt = 0, dummyUp = false;
   let cutJumpT = null; // the air jump (my body's airJumpT) whose flip a kick, hurt or roll took over
+  let lastHook = -Infinity, missed = null; // my last cast (ms), and the last that caught nothing: { from, to, at }
 
   const isMe = (id) => id != null && id === me.id;
   const name = (id) => (isMe(id) ? 'you' : nameOf(id) || 'someone');
@@ -94,10 +99,13 @@ export function createPvp({
 
   // My state for the wire and the local referee (arena-local). The input bits gain 32 rolling, and 64
   // crouched or 128 prone from what my body does (crouch addendum §4), and 512 on a ladder (gorge addendum).
+  // On the rope, hx and hy: where my hook caught (hook addendum).
   const lowBits = (p) => (p.low === 2 ? 128 : p.low === 1 ? 64 : 0);
   function snap(now, facing = world.player.facing) {
     const p = world.player, l = local(p.x, p.y);
-    return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0) | lowBits(p) | (p.climb ? 512 : 0), a: aim, ts: ts(now) };
+    const s = { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0) | lowBits(p) | (p.climb ? 512 : 0), a: aim, ts: ts(now) };
+    if (p.hook) { s.hx = r1(p.hook.x - off.x); s.hy = r1(p.hook.y - off.y); }
+    return s;
   }
   // A hit's stun, halved when it landed on a body that was low (lo).
   const stunFor = (m) => (stunOf(m.w) || 0) * (m.lo ? LOW_KNOCK : 1);
@@ -229,6 +237,7 @@ export function createPvp({
         feed(m);
         if (m.fled || !me.alive) break;
         Object.assign(me, { alive: false, hp: 0, deadAt: t, gun: 'deagle', ammo: -1 });
+        p.hook = null;
         deadAt = now;
         lastRs = -Infinity;
         act = null;
@@ -343,11 +352,11 @@ export function createPvp({
     if (!entered || !me.alive) { world.aimFacing = 0; aimed = false; bits = 0; return { ...IDLE }; }
     let facing = p.facing < 0 ? -1 : 1;
     const mouse = inp.mouse && inp.mouse.on && num(inp.mouse.x) && num(inp.mouse.y) ? inp.mouse : null;
-    // Ctrl (inp.crouch) is ↓ only where ↓ crouches: on solid floor, off a ladder, so it never drops through
-    // a ═ or takes a ladder down.
-    const down = !!inp.down || (!!inp.crouch && !!p.onGround && !p.onPlatform && !p.climb && !(world.ladders && ladderAt(p, world.ladders)));
-    // Crouching (↓ on solid floor): ↓ doesn't tilt the shot, which stays level (crouch addendum §3).
-    const crouching = down && !!p.onGround && !p.onPlatform;
+    // Ctrl (inp.crouch) only crouches, on a floor or a ═ alike: it never drops through a ═ or takes a ladder
+    // down (it isn't ↓, and isn't sent as bit 8: others see it in the low bits).
+    const down = !!inp.down, crouch = !!inp.crouch && !p.climb;
+    // Crouching (↓ on solid floor, or Ctrl): ↓ doesn't tilt the shot, which stays level (crouch addendum §3).
+    const crouching = !!p.onGround && ((down && !p.onPlatform) || crouch);
     if (mouse) {
       const s = shoulderOf(p.x, p.y, facing, p.low || 0);
       const r = pointAim(s.x, s.y, mouse.x, mouse.y, facing);
@@ -361,6 +370,7 @@ export function createPvp({
       world.aimFacing = 0;
     }
     aimed = !!mouse || !!inp.aimUp || (!!inp.aimDown && !crouching);
+    if (inp.hook && level.hook) hook(facing, mouse ? aim : inp.aimUp ? HOOK_AIM_UP : HOOK_AIM, now);
     const x = num(inp.x) ? inp.x : 0;
     bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (down ? 8 : 0) | (inp.run ? 16 : 0) | (inp.up ? 256 : 0);
     if (!rolling(p)) { // a roll drops shots and strikes for its length
@@ -368,7 +378,19 @@ export function createPvp({
       const n = Math.min(MAX_PRESSES, Math.max(0, inp.strikes | 0));
       for (let k = 0; k < n; k++) strike(now);
     }
-    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down, up: !!inp.up, roll: inp.roll || 0 };
+    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down, crouch, up: !!inp.up, roll: inp.roll || 0 };
+  }
+
+  // G: on the rope, let go; otherwise cast (hook addendum). Either goes out at once.
+  function hook(facing, hookAim, now) {
+    const p = world.player;
+    if (p.hook) { p.hook = null; urgent = true; return; }
+    if (now - lastHook < HOOK_COOL * 1000) return;
+    const c = grapple(p, hookAim, world.kindAt, facing);
+    if (!c) return;
+    lastHook = now;
+    missed = c.hit ? null : { from: c.from, to: c.to, at: now };
+    if (c.hit) urgent = true;
   }
 
   // ---------- the frame ----------
@@ -396,7 +418,13 @@ export function createPvp({
       for (const q of spots) {
         if (now < taken[q.n] || !nearPickup(l.x, l.y, q) || (q.kind === 'medkit' && full)) continue;
         if (!online) runLocal(ref.pickup(me, q.n, t).out, now);
-        else if (now - lastPk >= PK_EVERY) { send({ t: 'pk', n: q.n }); lastPk = now; }
+        else if (now - lastPk >= PK_EVERY) {
+          // The server checks the reach from my last state, up to a tick old: running through, that is
+          // past the reach already. Where I am now goes out first.
+          ticker.force(snap(now), now);
+          send({ t: 'pk', n: q.n });
+          lastPk = now;
+        }
       }
     } else if (now - deadAt >= RESPAWN_TIME * 1000) {
       if (!online) runLocal(ref.respawn(me, t, everyone(now)).out, now);
@@ -427,7 +455,7 @@ export function createPvp({
     const t = sec(now), p = world.player, out = [];
     const a = actNow(act, now, me.alive, deadAt, p), flipT = flipOf(a, p);
     out.push({ id: me.id, me: true, dummy: false, kills, color: colorOf(me.id), state: {
-      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, low: p.low || 0, flipT, aim, act: a.act, actT: a.actT, ...climbLook(p),
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, low: p.low || 0, flipT, aim, act: a.act, actT: a.actT, ...climbLook(p), hook: p.hook,
       hp: me.alive ? regenHp(me.hp, me.hurtAt, t) : 0, safe: me.alive && t < me.safeUntil, combo: me.combo, gun: me.gun, aimed,
     } });
     for (const f of fighters.list(now)) out.push({ id: f.id, me: false, dummy: false, kills: f.kills, color: colorOf(f.id), state: f.state });
@@ -453,7 +481,15 @@ export function createPvp({
       aims.push({ x: s.x, y: s.y, facing: s.facing, aim: s.aim, low: s.low || 0, color: b.color, ready: now - last >= (GUNS.sniper.cooldown - AIM_WARN) * 1000 });
     }
     const pickups = shownPickups(now);
-    return fx.glyphs(now, { bodies: list, pickups, aims }, out);
+    // Ropes: everyone on one, from the shoulder to where it caught, and my last miss for a moment.
+    const ropes = [];
+    for (const b of list) {
+      const s = b.state;
+      if (!s.hook || s.act === 'dead') continue;
+      ropes.push({ from: shoulderOf(s.x, s.y, s.facing, s.low || 0), to: s.hook, color: b.color, a: 1, hit: true });
+    }
+    if (missed && now - missed.at < MISS_MS) ropes.push({ ...missed, color: colorOf(me.id), a: 1 - (now - missed.at) / MISS_MS, hit: false });
+    return fx.glyphs(now, { bodies: list, pickups, aims, ropes }, out);
   }
 
   // Muzzle flashes for the train's light (train level addendum §1): every shot in the last FLASH_MS, at
@@ -491,7 +527,8 @@ export function createPvp({
     Object.assign(me, { combo: 0, strikeAt: -1e9, lastStrike: null });
     act = null;
     aim = 0; aimed = false; bits = 0; urgent = false; wasRolling = false;
-    lastShot = lastPk = lastRs = -Infinity;
+    lastShot = lastPk = lastRs = lastHook = -Infinity;
+    missed = null;
     enteredAt = now;
     ticker = arenaTicker(tickerSend);
     ref.state(me, snap(now), sec(now));
@@ -517,6 +554,7 @@ export function createPvp({
     ref.bullets.length = 0;
     practice.bullets.length = 0;
     awaitAw = entered = dummyUp = aimed = false;
+    world.player.hook = null;
     fighters.clear(); fx.clear();
     act = null; bits = 0;
     world.aimFacing = 0;

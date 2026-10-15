@@ -16,8 +16,9 @@ const SX = 4, SY = 8; // scene texels per cell
 const FLOATS = 10; // per glyph instance: x, y, glyph, fg rgb, bg rgba
 const FIG_FLOATS = 10; // per figure instance: x, y, glyph, r, g, b, a, rot, len, flip (1 or -1)
 // Figure-layer glyphs beyond printable ASCII: the guns, hearts and emotes, a cut name's …, and the fight's
-// hp bars (█ ░), deagle bullet heads (•) and sparks, empty pickups and aim lines (·).
-export const FIG_EXTRA = '═╦╤°♥★…█░•·';
+// hp bars (█ ░), deagle bullet heads (•) and sparks, empty pickups and aim lines (·), and the hook's ropes
+// (─ │ ╱ ╲).
+export const FIG_EXTRA = '═╦╤°♥★…█░•·─│╱╲';
 
 // Every glyph the main atlas holds: the ramp, the gallery's own, printable ASCII (visitors' names), the
 // emotes, the map's labels, plaques and props, and every glyph the train can draw in either look.

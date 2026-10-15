@@ -922,14 +922,14 @@ test('online: hl heals me (my regen carries on) and shows +d over a healed fight
   assert.equal(s.pvp.fx.glyphs(s.now, {}).filter((g) => g.color.join() === '140,235,150').map((g) => g.ch).join(''), '+50+50');
 });
 
-test('Ctrl (crouch) crouches and crawls on a floor as ↓ does, but on a ═ it doesn\'t drop through', () => {
+test('Ctrl (crouch) crouches and crawls on a floor as ↓ does, and on a ═ crouches without dropping through', () => {
   const s = setup({ online: true });
   s.pvp.onMessage(emptyAw(), s.now);
   s.frames(20);
   let n = s.sent.length;
   s.frames(2, { crouch: true });
   const c = s.sent.slice(n).find((m) => m.t === 'a');
-  assert.ok(c && (c.i & 64) && (c.i & 8), JSON.stringify(c));
+  assert.ok(c && (c.i & 64) && !(c.i & 8), JSON.stringify(c)); // low, but not ↓: others don't drop it through a ═
   assert.equal(s.pvp.bodies(s.now)[0].state.low, 1);
   s.frames(3, { crouch: true, x: 1 });
   assert.equal(s.pvp.bodies(s.now)[0].state.low, 2);
@@ -945,6 +945,22 @@ test('Ctrl (crouch) crouches and crawls on a floor as ↓ does, but on a ═ it 
   const y = p.world.player.y;
   p.frames(30, { crouch: true });
   assert.equal(p.world.player.y, y, 'still on it');
+  assert.equal(p.pvp.bodies(p.now)[0].state.low, 1, 'crouched on it');
   p.frames(30, { down: true });
   assert.ok(p.world.player.y > y + 0.5, '↓ drops through');
+});
+
+test('online: running through a pickup, where I am goes out right before the pk (the server checks the reach from my last state)', () => {
+  const q = spotOf('sniper', () => 0.75);
+  for (let d = 0; d < 1; d += 0.1) { // from wherever between two of the ticker's states
+    const s = setup({ online: true, at: { x: q.x - 8 - d, y: q.y }, rand: () => 0.75 });
+    s.pvp.onMessage({ ...emptyAw(), pk: [{ n: q.n, at: 0, x: q.x, y: q.y }] }, s.now);
+    s.frames(10);
+    s.frames(40, { x: 1, run: true });
+    const k = s.sent.findIndex((m) => m.t === 'pk');
+    assert.ok(k > 0, 'a pk went out');
+    const a = s.sent[k - 1];
+    assert.equal(a.t, 'a');
+    assert.ok(Math.abs(a.x - q.x) <= 1 && Math.abs(a.y - q.y) <= 2, `from ${d.toFixed(1)} further: the state before it is out of reach: ${a.x}, ${a.y} vs ${q.x}, ${q.y}`);
+  }
 });
