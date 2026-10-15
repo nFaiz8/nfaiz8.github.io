@@ -23,7 +23,7 @@ import { figureGlyphs } from './render/figures.js';
 import { createMotionMemory } from './stick.js';
 import { createLighting } from './light.js';
 import { createViewer } from './viewer.js';
-import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router.js';
+import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH, STATION_HASH } from './router.js';
 import { createMap } from './map.js';
 import { createShots } from './shots.js';
 import { createGrid } from './grid.js';
@@ -263,6 +263,7 @@ function openGrid() {
 const inKiosk = (x, y) => { const k = map.kiosk; return x >= k.x && x < k.x + k.w && y >= k.y && y < k.y + k.h; };
 
 function onTap(px, py) {
+  if (stationState !== 'off') return;
   if (viewer.isOpen || mapView.isOpen || grid.isOpen || shots?.isOpen) return;
   if (world.mode === 'side' || tilting) return; // in the arena you run and jump
   const cell = renderer.cellAt(world, px, py);
@@ -291,6 +292,7 @@ function toggleFullscreen() {
 }
 
 function onKey(e) {
+  if (stationState !== 'off') return false;
   if (viewer.isOpen || grid.isOpen) return false;
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
@@ -346,6 +348,8 @@ function applyRoute(route) {
     if (!room) { note('room not found'); replaceHash(''); return; }
     if (room.entry) teleport(world, room.entry.x + 0.5, room.entry.y + 0.5);
     else teleport(world, map.spawn.x, map.spawn.y);
+  } else if (route.kind === 'station') {
+    if (stationState === 'off') goDown({ instant: true });
   } else {
     note('page not found');
     replaceHash('');
@@ -390,12 +394,14 @@ function loop(now) {
   // Real per-frame dt, capped so a background tab doesn't teleport you on return.
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
+  if (stationState !== 'off') { requestAnimationFrame(loop); return; } // the station draws; the gallery waits
   const t = performance.now(); // the fight's clock, the same as its messages'
   const away = viewer.isOpen || mapView.isOpen || grid.isOpen || !!shots?.isOpen;
   if (pvp) syncFight(t);
   sideView(t);
   syncView();
   step(world, dt, away ? idle() : controls(t));
+  if (!away && world.mode === 'top' && !world.frozen && onStairs()) goDown();
   if (pvp) { syncFight(t); pvp.frame(dt, t); } // through the door: out of the fight as the tilt starts
   if (world.want) tilt();
   // The exit's first hit (exit addendum): it holds, and says how to get out.
@@ -574,6 +580,69 @@ let train = null, trainGlows = [], decor = DECOR.train;
 let trainAt = null; // __ascii.freezeTrain (localhost): the train held at this time (ms), for screenshots
 const loadedIds = new Set();
 let following = null, followAt = 0;
+// The station (station spec §1): 'off' (the gallery runs), 'down' (fading out, loading), 'in', 'up' (leaving).
+let stationState = 'off', station = null;
+const fadeEl = document.getElementById('fade');
+function fade(on, text = '') {
+  fadeEl.firstElementChild.textContent = text;
+  fadeEl.hidden = false;
+  if (reducedMotion) { fadeEl.classList.toggle('on', on); fadeEl.hidden = !on; return Promise.resolve(); }
+  void fadeEl.offsetWidth; // start the transition from where it is
+  fadeEl.classList.toggle('on', on);
+  return new Promise((done) => setTimeout(() => { if (!on) fadeEl.hidden = true; done(); }, 320));
+}
+const onStairs = () => {
+  const s = map.stairs && map.stairs.inside;
+  if (!s) return false;
+  const x = Math.floor(world.player.x), y = Math.floor(world.player.y);
+  return x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h;
+};
+const standAtStairs = () => teleport(world, map.stairs.front.x, map.stairs.front.y);
+async function goDown({ instant = false } = {}) {
+  if (stationState !== 'off' || !map.stairs) return;
+  stationState = 'down';
+  world.frozen = true;
+  world.path = null;
+  world.onArrive = null;
+  stopFollowing();
+  if (instant) { fadeEl.hidden = false; fadeEl.firstElementChild.textContent = '▼ going down…'; fadeEl.classList.add('on'); }
+  else await fade(true, '▼ going down…');
+  try {
+    const { startStation } = await import('./rpg/index.js');
+    if (stationState !== 'down') return; // the back button won while it loaded
+    station = startStation(stage, { onExit: () => goUp(), keys: () => input.state(), reducedMotion, phone: touch });
+  } catch (err) {
+    console.warn(err);
+    stationState = 'off';
+    standAtStairs();
+    world.frozen = false;
+    if (location.hash === STATION_HASH) replaceHash('');
+    await fade(false);
+    note("the station couldn't load", 3000);
+    return;
+  }
+  if (live) live.net.pause(); // to the gallery, you've left (spec §1)
+  document.body.classList.add('in-station');
+  if (location.hash !== STATION_HASH) history.pushState(null, '', STATION_HASH);
+  stationState = 'in';
+  await fade(false);
+}
+async function goUp({ fromHistory = false } = {}) {
+  if (stationState === 'down') { stationState = 'off'; standAtStairs(); world.frozen = false; await fade(false); return; }
+  if (stationState !== 'in') return;
+  stationState = 'up';
+  await fade(true);
+  station.stop();
+  station = null;
+  document.body.classList.remove('in-station');
+  if (live) live.net.resume();
+  standAtStairs();
+  if (!fromHistory && location.hash === STATION_HASH) replaceHash('');
+  world.frozen = false;
+  stationState = 'off';
+  await fade(false);
+  stage.focus({ preventScroll: true });
+}
 const muted = new Set(); // ids whose chat you've hidden, for this visit
 function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }
 
@@ -972,10 +1041,14 @@ async function boot() {
   });
 
   applyRoute(parseRoute(location.hash));
-  addEventListener('hashchange', () => applyRoute(parseRoute(location.hash)));
+  addEventListener('hashchange', () => {
+    const route = parseRoute(location.hash);
+    if (stationState !== 'off' && (!route || route.kind !== 'station')) { goUp({ fromHistory: true }); return; }
+    applyRoute(route);
+  });
 
   // Test hook for the e2e scripts.
-  window.__ascii = { map, world, stats, viewer, mode: () => world.mode, tilting: () => tilting, loaded: (id) => loadedIds.has(id), teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
+  window.__ascii = { map, world, stats, viewer, mode: () => world.mode, station: () => stationState, tilting: () => tilting, loaded: (id) => loadedIds.has(id), teleport: (x, y) => teleport(world, x, y), walkTo: (x, y) => walkTo(world, x, y),
     open: (id) => openFrame(map.frames.find((f) => f.id === id)), grid, tapCell: (x, y) => { const m = renderer.metrics; onTap((x + 0.5 - world.cam.x) * m.cw + innerWidth / 2, (y + 0.5 - world.cam.y) * m.ch + innerHeight / 2); }, setRenderer, live: () => live, metrics: () => renderer.metrics, get renderer() { return renderer.name; },
     look: () => look, zoom: () => zoom, missing: () => [...(renderer.missing || [])], pointAt: (px, py) => renderer.pointAt(world, px, py) };
   // Pins fields of my side-view state (act, actT, aim, x, y, landT, spawnT…) until called with null.
