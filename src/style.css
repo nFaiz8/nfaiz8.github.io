@@ -155,7 +155,16 @@ html { touch-action: manipulation; }
 }
 @media (prefers-reduced-motion: reduce) { .chat-log { transition: none; } }
 /* Our own focus style for the text boxes, in place of the browser's blue ring. */
-.chat-form input:focus, .name-form input:focus { outline: none; border-color: var(--mute); }
+.chat-form input:focus, .name-form input:focus, .admin-form input:focus { outline: none; border-color: var(--mute); }
+/* The admin panel (gorge addendum): the arena's map, behind a password. */
+.admin-form { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 4; display: flex; flex-wrap: wrap; gap: 8px;
+  align-items: center; padding: 8px 10px; max-width: calc(100vw - 32px); background: var(--bg); border: 1px solid var(--line); color: var(--mute); }
+.admin-form[hidden] { display: none; }
+.admin-form input { font: inherit; color: var(--ink); background: #0d0f14; border: 1px solid var(--line); padding: 4px 6px; width: 14ch; }
+.admin-form b { color: var(--ink); font-weight: normal; }
+.admin-form button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
+.admin-msg { color: var(--ink); }
+@media (max-width: 600px) { .admin-form input { font-size: 16px; } }
 
 /* Arena controls on touch screens: run on the left; on the right HIT ▼ above FIRE JUMP (FIRE beside JUMP, so
    a thumb rolls between them). A 35% dark fill, so a figure under a button at the room's edge stays visible. */

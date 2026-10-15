@@ -5,6 +5,7 @@ const KEYS = {
   ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1],
 };
 const JUMP = ['Space', 'KeyW', 'ArrowUp', 'Jump'];
+const UP = ['KeyW', 'ArrowUp', 'Jump']; // takes hold of a ladder and climbs it (Space only jumps)
 const DROP = ['KeyS', 'ArrowDown', 'Drop'];
 
 // Two presses of the same direction within `gap` seconds make a roll. Returns the direction, or 0.
@@ -84,7 +85,7 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
       let x = 0, y = 0;
       const all = new Set([...held, ...pad]);
       for (const code of all) { const k = KEYS[code]; if (k) { x += k[0]; y += k[1]; } }
-      return { x: Math.sign(x), y: Math.sign(y), run, jump: JUMP.some((c) => all.has(c)), down: DROP.some((c) => all.has(c)),
+      return { x: Math.sign(x), y: Math.sign(y), run, jump: JUMP.some((c) => all.has(c)), down: DROP.some((c) => all.has(c)), up: UP.some((c) => all.has(c)),
         fire: all.has('KeyJ') || all.has('Fire') || (mouseFire && arena()) };
     },
     press(code, on) {

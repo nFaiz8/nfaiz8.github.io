@@ -10,6 +10,7 @@ import { T } from '../layout.js';
 import { loadImage, cellsFor, hasFailed } from '../photos.js';
 import { lightWindow } from '../light.js';
 import { paintWindow, halation, TRAIN_GLYPHS } from '../train.js';
+import { GORGE_GLYPHS } from '../gorge/look.js';
 
 const CW = 48, CH = 24; // chunk size in cells
 
@@ -35,7 +36,7 @@ export function createCanvasRenderer() {
   // M: the metrics in use (the gallery's m, or the side view's by its zoom); atlasM: the ones the sprites and
   // the train's glyph atlas were drawn at (scaled while the zoom eases, redrawn crisp once it settles).
   let M = null, atlasM = null, zoom = null;
-  let trainAtlas = null, trainWin = null, layerCv = null, fgCv = null, bgCv = null, haloCv = null;
+  let trainAtlas = null, trainWin = null, layerCv = null, fgCv = null, bgCv = null, hardCv = null, haloCv = null;
   const halo = { a: new Float32Array(0), b: new Float32Array(0) };
   const chunks = new Map();
   const bitmaps = new Map();
@@ -90,7 +91,7 @@ export function createCanvasRenderer() {
 
   // The train's glyphs, white, one device-pixel cell each at atlasM.
   function buildTrainAtlas() {
-    const list = [...new Set(TRAIN_GLYPHS)];
+    const list = [...new Set(TRAIN_GLYPHS + GORGE_GLYPHS)];
     const cols = 32, gw = Math.round(atlasM.cw * dpr), gh = Math.round(atlasM.ch * dpr);
     const cv = new OffscreenCanvas(cols * gw, Math.ceil(list.length / cols) * gh);
     const c = cv.getContext('2d');
@@ -101,8 +102,9 @@ export function createCanvasRenderer() {
     trainAtlas = { cv, cols, gw, gh, index: new Map(list.map((g, i) => [g, i])) };
   }
 
-  // The train (world.train: { T, F, look, glows }) over the level's box. Side-on it fills the view (the
-  // tunnel runs on past the room's ends); top-down it is clipped to the room. In device pixels.
+  // The train (world.train: { T, F, look, glows, paint }) over the level's box: the train, or the gorge
+  // (paint: its paintWindow). Side-on it fills the view (the tunnel runs on past the room's ends); top-down
+  // it is clipped to the room. In device pixels.
   function drawTrain(world, left, top, cols, rows, clip) {
     const tr = world.train, a = map.arena;
     if (!tr || !a) return;
@@ -113,7 +115,7 @@ export function createCanvasRenderer() {
     if (clip) { x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(a.cols, x1); y1 = Math.min(a.rows, y1); }
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return;
-    trainWin = paintWindow(tr.T, tr.F, tr.look, x0, y0, w, h, trainWin);
+    trainWin = (tr.paint || paintWindow)(tr.T, tr.F, tr.look, x0, y0, w, h, trainWin);
     const cwd = M.cw * dpr, chd = M.ch * dpr;
     const X = (cx) => Math.round((cx - left) * cwd), Y = (cy) => Math.round((cy - top) * chd);
     const px0 = X(ox + x0), py0 = Y(oy + y0), pw = X(ox + x1) - px0, ph = Y(oy + y1) - py0;
@@ -127,6 +129,7 @@ export function createCanvasRenderer() {
     };
     bgCv = field(bgCv, trainWin.bg);
     fgCv = field(fgCv, trainWin.fg);
+    if (trainWin.hard) hardCv = field(hardCv, trainWin.hard); // the gorge: crisp backgrounds over soft ones
     // The glyphs, white, into a layer the size of the canvas; then coloured in one go by the fg field.
     if (!layerCv || layerCv.width !== canvas.width || layerCv.height !== canvas.height) layerCv = new OffscreenCanvas(canvas.width, canvas.height);
     const lc = layerCv.getContext('2d');
@@ -149,8 +152,22 @@ export function createCanvasRenderer() {
     lc.drawImage(fgCv, px0, py0, pw, ph);
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(bgCv, px0, py0, pw, ph);
+    if (trainWin.hard) {
+      // Soft backgrounds (light, mist, foliage) smoothed from cell centres, so pools fade; crisp ones over them.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(px0, py0, pw, ph);
+      ctx.clip();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bgCv, px0, py0, pw, ph);
+      ctx.restore();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(hardCv, px0, py0, pw, ph);
+    } else {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(bgCv, px0, py0, pw, ph);
+    }
     ctx.drawImage(layerCv, 0, 0);
     // Halation: emissive cells, tracers and muzzle flashes, blurred and added (only over the train).
     const extra = (tr.glows || []).map((q) => ({ x: q.x - x0, y: q.y - y0, c: q.c }));

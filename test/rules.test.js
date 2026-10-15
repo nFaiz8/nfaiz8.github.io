@@ -125,7 +125,7 @@ test('arena messages parse; malformed ones do not', () => {
   assert.deepEqual(parseMessage('{"t":"rs"}'), { t: 'rs' });
   assert.deepEqual(parseMessage(JSON.stringify({ t: 'a', x: 10.123, y: 27.5, vx: 30.04, vy: 0, f: 1, g: 1, i: 34, a: 0.789, ts: 1200 })),
     { t: 'a', x: 10.12, y: 27.5, vx: 30, vy: 0, f: 1, g: 1, i: 34, a: 0.79, ts: 1200 });
-  for (const bad of [{ x: 210 }, { y: -2 }, { vx: 61 }, { f: 0 }, { g: 2 }, { i: 256 }, { i: -1 }, { i: 1.5 }, { a: 1.6 }, { ts: -1 }, { x: 'NaN' }])
+  for (const bad of [{ x: 216 }, { y: -2 }, { y: 114 }, { vx: 61 }, { f: 0 }, { g: 2 }, { i: 1024 }, { i: -1 }, { i: 1.5 }, { a: 1.6 }, { ts: -1 }, { x: 'NaN' }])
     assert.equal(parseMessage(JSON.stringify({ t: 'a', x: 10, y: 20, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0, ...bad })), null, JSON.stringify(bad));
   assert.deepEqual(parseMessage('{"t":"f","x":12,"y":27.2,"a":3.1,"ts":5}'), { t: 'f', x: 12, y: 27.2, a: 3.1, ts: 5 });
   assert.equal(parseMessage('{"t":"f","x":12,"y":27.2,"a":3.2,"ts":5}'), null);
@@ -205,22 +205,23 @@ test('a quiet window does not break the sender clock', () => {
   assert.ok(Math.abs(sentAt(clk, 30000, 31000) - 31000) <= 1);
 });
 
-test('a and f are accepted anywhere in the train level (204 × 33) and a step through its door, refused past that', async () => {
-  const { LEVEL_COLS, LEVEL_ROWS } = await import('../src/level.js');
+test('a and f are accepted anywhere in the biggest map (the gorge, 212 × 112) and a step through its door, refused past that', async () => {
+  const { MAPS } = await import('../src/level.js');
+  const { cols, rows } = MAPS.gorge;
   const a = (x, y) => parseMessage(JSON.stringify({ t: 'a', x, y, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, ts: 0 }));
   const f = (x, y) => parseMessage(JSON.stringify({ t: 'f', x, y, a: 0, ts: 0 }));
-  for (const [x, y] of [[203.5, 24.5], [LEVEL_COLS + 0.5, 24.5], [LEVEL_COLS + 2.9, 24.5], [100, LEVEL_ROWS - 0.5], [-0.9, -0.9]]) {
+  for (const [x, y] of [[203.5, 24.5], [cols + 0.5, 106.5], [cols + 2.9, 106.5], [100, rows - 0.5], [-0.9, -0.9]]) {
     assert.ok(a(x, y), `a at ${x}, ${y}`);
     assert.ok(f(x, y), `f at ${x}, ${y}`);
   }
-  for (const [x, y] of [[LEVEL_COLS + 3.5, 24.5], [100, LEVEL_ROWS + 1.5], [-1.5, 5]]) {
+  for (const [x, y] of [[cols + 3.5, 24.5], [100, rows + 1.5], [-1.5, 5]]) {
     assert.equal(a(x, y), null, `a at ${x}, ${y}`);
     assert.equal(f(x, y), null, `f at ${x}, ${y}`);
   }
 });
 
-test('a: the input bits go up to 255 (64 crouched, 128 prone: the crouch addendum)', () => {
-  for (const i of [64, 128, 128 | 8 | 2, 255]) {
+test('a: the input bits go up to 1023 (64 crouched, 128 prone: the crouch addendum; 256 up, 512 on a ladder: the gorge addendum)', () => {
+  for (const i of [64, 128, 128 | 8 | 2, 255, 256 | 4, 512 | 256, 1023]) {
     assert.equal(parseMessage(JSON.stringify({ t: 'a', x: 10, y: 20, vx: 0, vy: 0, f: 1, g: 1, i, a: 0, ts: 0 })).i, i);
   }
 });

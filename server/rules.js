@@ -1,5 +1,5 @@
 import { GUNS } from '../src/fight.js';
-import { LEVEL_COLS, LEVEL_ROWS } from '../src/level.js';
+import { MAPS } from '../src/level.js';
 
 // Checks shared by the multiplayer Worker and its tests. Pure: no Workers or Node APIs.
 export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000, muteS: 600 };
@@ -7,6 +7,16 @@ export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
 
 export function allowedOrigin(origin) {
   return origin === 'https://faiz.pics' || /^http:\/\/localhost(:\d{1,5})?$/.test(origin || '');
+}
+
+// The admin password (gorge addendum), hashed: SHA-256 of 'faiz-admin:' and it. It only keeps visitors
+// from switching the arena's map, so a hash in the open is enough. The Worker checks it; a page with no
+// server (local dev) checks it itself.
+export const ADMIN_HASH = '005feb8a3c7939894940820a4971ee20c6baf1f0b24d44f3260dbc59517c888e';
+export async function adminOk(pw) {
+  if (typeof pw !== 'string') return false;
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`faiz-admin:${pw}`));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('') === ADMIN_HASH;
 }
 
 export const validVersion = (v) => typeof v === 'string' && /^[0-9A-Za-z:.\-]{1,40}$/.test(v);
@@ -102,8 +112,10 @@ const pos = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <=
 
 const num = (n) => typeof n === 'number' && Number.isFinite(n);
 const within = (n, max) => num(n) && Math.abs(n) <= max;
-// The level, a cell around it, and three cells out through the door at its east end.
-const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= LEVEL_COLS + 3 && y >= -1 && y <= LEVEL_ROWS + 1;
+// The level, a cell around it, and three cells out through the door at its east end: the biggest map's
+// (the room's own level is the Worker's to check: a body in its walls is dropped).
+const COLS = Math.max(...Object.values(MAPS).map((m) => m.cols)), ROWS = Math.max(...Object.values(MAPS).map((m) => m.rows));
+const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= COLS + 3 && y >= -1 && y <= ROWS + 1;
 const stamp = (n) => Number.isInteger(n) && n >= 0 && n <= 1e9;
 const round = (n, k) => Math.round(n * k) / k;
 
@@ -126,7 +138,7 @@ export function parseMessage(text) {
     case 'ae': case 'al': case 'rs': return { t: m.t };
     case 'a': {
       if (!inArena(m.x, m.y) || !within(m.vx, 60) || !within(m.vy, 60) || (m.f !== -1 && m.f !== 1) || (m.g !== 0 && m.g !== 1)) return null;
-      if (!Number.isInteger(m.i) || m.i < 0 || m.i > 255 || !within(m.a, Math.PI / 2 + 1e-9) || !stamp(m.ts)) return null;
+      if (!Number.isInteger(m.i) || m.i < 0 || m.i > 1023 || !within(m.a, Math.PI / 2 + 1e-9) || !stamp(m.ts)) return null;
       return { t: 'a', x: round(m.x, 100), y: round(m.y, 100), vx: round(m.vx, 10), vy: round(m.vy, 10), f: m.f, g: m.g, i: m.i, a: round(m.a, 100), ts: m.ts };
     }
     case 'f': {
@@ -135,12 +147,14 @@ export function parseMessage(text) {
     }
     case 'm': return (m.k === 'p' || m.k === 'k') && stamp(m.ts) ? { t: 'm', k: m.k, ts: m.ts } : null;
     case 'pk': return Number.isInteger(m.n) && m.n >= 0 && m.n <= 15 ? { t: 'pk', n: m.n } : null;
+    // The admin's map switch (gorge addendum): the map and the password, checked by the Worker.
+    case 'am': return Object.hasOwn(MAPS, m.map) && typeof m.pw === 'string' && m.pw.length <= 40 ? { t: 'am', map: m.map, pw: m.pw } : null;
     default: return null;
   }
 }
 
 // Token buckets: capacity and refill per second. 'ae' covers both ae and al.
-const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5], a: [24, 20], pk: [2, 2], m: [2, 3.4], ae: [4, 1], rs: [2, 1] };
+const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5], a: [24, 20], pk: [2, 2], m: [2, 3.4], ae: [4, 1], rs: [2, 1], am: [3, 0.1] };
 export function newBuckets(now) {
   return Object.fromEntries(Object.entries(RATES).map(([k, [cap]]) => [k, { tokens: cap, at: now }]));
 }

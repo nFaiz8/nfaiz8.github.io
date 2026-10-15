@@ -34,6 +34,9 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     inset: null, // { bottom, side } in rows and cells: on touch the side camera keeps the figure clear of the pad
     kindAt: map.arena ? kindsFor(map) : null,
     inside: map.arena ? insideFor(map) : null,
+    // The level's ladders in map cells, and whether it has stairs to walk up (gorge addendum).
+    ladders: map.arena ? (map.arena.level.ladders || []).map((L) => ({ x: L.x + map.arena.x + 1, top: L.top + map.arena.y + 1, bot: L.bot + map.arena.y + 1 })) : null,
+    steps: !!(map.arena && map.arena.level.steps),
     aimFacing: 0, // -1 or 1: in the side view you face this way (the mouse's side), not the way you run
     collide: null, // in the fight, the other fighters I bump into: stepBody's { others, solid, door } (pvp.js)
     shake: null, // { until, amp } in world seconds (pvp.js: kicked or popped)
@@ -287,7 +290,7 @@ function shakeCamera(world) {
 function stepSide(world, dt, input) {
   const p = world.player;
   if (!world.frozen) {
-    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside, ...world.collide });
+    stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside, ladders: world.ladders, steps: world.steps, ...world.collide });
     holdAtExit(world);
     p.moving = Math.abs(p.vx) > 0.5 || !p.onGround;
     if (world.aimFacing) p.facing = world.aimFacing < 0 ? -1 : 1;

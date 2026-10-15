@@ -489,6 +489,35 @@ try {
       assert.ok(aEnd > bAt.x + 1 && seen1 > bNow.x + 1 && bSeen < aEnd - 1, 'through B, on both screens');
       assert.ok(Math.abs(bNow.x - bAt.x) < 0.05, 'B was not pushed');
     });
+    // The admin panel (gorge addendum): ` opens it; the server checks the password and every page follows the
+    // map, a page in the arena coming back into it. Ends on the train, as wrangler dev keeps the map.
+    const mapOf = (p) => p.evaluate(() => ({ map: window.__ascii.map.arena.level.name, mode: window.__ascii.mode(), fightOk: window.__ascii.live()?.fightOk }));
+    const adminSwitch = async (to, pw) => {
+      if (await a.$eval('#admin-form', (f) => f.hidden)) { // a wrong password leaves it open
+        await a.focus('#stage');
+        await a.keyboard.press('Backquote');
+        await a.waitForFunction(() => !document.getElementById('admin-form').hidden, { timeout: 1000 });
+      }
+      await a.$eval('#admin-pw', (e) => { e.value = ''; });
+      await a.type('#admin-pw', pw);
+      await a.click(`#admin-form button[value="${to}"]`);
+    };
+    await check('admin: a wrong password is refused; "uzbek" switches both pages to the gorge and back, each staying in the arena', async () => {
+      await adminSwitch('gorge', 'kazakh');
+      await a.waitForFunction(() => /wrong password/.test(document.getElementById('admin-msg').textContent), { timeout: 3000 });
+      for (const to of ['gorge', 'train']) {
+        const nav = Promise.allSettled([a.waitForNavigation({ timeout: 15000 }), b.waitForNavigation({ timeout: 15000 })]);
+        await adminSwitch(to, 'uzbek');
+        const navs = (await nav).map((r) => (r.status === 'fulfilled' ? 'reloaded' : r.reason.message));
+        assert.deepEqual(navs, ['reloaded', 'reloaded'], `both pages reload into the ${to}`);
+        for (const p of [a, b]) {
+          await ready(p);
+          await p.waitForFunction(() => window.__ascii.live()?.fightOk, { timeout: 10000 });
+          assert.deepEqual(await mapOf(p), { map: to, mode: 'side', fightOk: true });
+        }
+        await a.waitForFunction(() => window.__ascii.pvp().fighters.ids().length === 1 && !window.__ascii.pvp().bodies(performance.now()).some((x) => x.dummy), { timeout: 5000 });
+      }
+    });
     // Last of the live checks: it kills wrangler dev.
     await check('stopping the server (wrangler dev is killed here) mid-fight: both get the dummy, and both stay walkable', async () => {
       for (const p of [a, b]) assert.equal(await p.evaluate(() => window.__ascii.mode()), 'side', 'in the arena as it stops');

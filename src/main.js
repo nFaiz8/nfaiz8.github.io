@@ -1,14 +1,16 @@
 import { SITE, ARENA } from './config.js';
-import levelText from './arena.txt?raw';
-import { parseLevel, sideZoom } from './arena.js';
-import { buildTrain, frameAt, flashGlows } from './train.js';
-import { levelHash } from './level.js';
+import trainText from './arena.txt?raw';
+import gorgeText from './gorge.txt?raw';
+import { sideZoom, climbLook } from './arena.js';
+import { buildTrain, frameAt as trainFrameAt, paintWindow as trainPaint, flashGlows } from './train.js';
+import { buildGorge, frameAt as gorgeFrameAt, paintWindow as gorgePaint } from './gorge/look.js';
+import { levelHash, parseMap, mapName, MAP_NAMES } from './level.js';
 import { FIGHT_VERSION } from './fight.js';
 import { createPvp } from './pvp.js';
 import { createFightHud } from './fighthud.js';
-import { createLive, peerEntities, heartEntities, localEcho, peerColor } from './live.js';
+import { createLive, peerEntities, heartEntities, localEcho, peerColor, fetchArenaMap } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
-import { cleanName, cleanText, hasSlur, LIMITS } from '../server/rules.js';
+import { cleanName, cleanText, hasSlur, LIMITS, adminOk } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout, isWalkable } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt, enterSide, exitSide, inArena, snapCamera } from './world.js';
@@ -25,6 +27,7 @@ import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router
 import { createMap } from './map.js';
 import { createShots } from './shots.js';
 import { createGrid } from './grid.js';
+import { createAdmin } from './admin.js';
 
 const stage = document.getElementById('stage');
 const captionEl = document.getElementById('caption');
@@ -49,6 +52,40 @@ const RENDERERS = { museum: createMuseumRenderer, canvas: createCanvasRenderer, 
 const RENDERER_KEY = 'ascii-renderer-2'; // new key: everyone starts in the museum look, whatever they picked before
 
 let map, world, renderer, input, viewer, mapView, grid, pvp = null, fightHud = null;
+// The arena's maps (gorge addendum): each level's text, and the decor drawn over it (train.js's interface).
+const LEVEL_TEXT = { train: trainText, gorge: gorgeText };
+const DECOR = {
+  train: { build: buildTrain, frameAt: trainFrameAt, paint: trainPaint },
+  gorge: { build: buildGorge, frameAt: gorgeFrameAt, paint: gorgePaint },
+};
+// The map up is the server's (an admin switches it for everyone): asked for before the page builds, and
+// kept in this browser for when the server can't be asked. On localhost ?map=gorge (or train) picks it.
+const MAP_KEY = 'arena-map', BACK_KEY = 'arena-back';
+let arenaMap = 'train';
+async function chooseMap() {
+  const asked = new URLSearchParams(location.search).get('map');
+  if (onLocalhost && asked) return mapName(asked);
+  const server = await fetchArenaMap();
+  try {
+    if (server) localStorage.setItem(MAP_KEY, mapName(server));
+    return mapName(server || localStorage.getItem(MAP_KEY));
+  } catch { return mapName(server); }
+}
+// The server says another map is up (the welcome, or an admin just switched it): build that one, by
+// reloading; whoever was in the arena is put back in it.
+let switching = false;
+let admin = { answer() {}, toggle() {}, open() {}, isOpen: false }; // the admin panel, once the page is built
+function followMap(name) {
+  if (switching || !MAP_NAMES.includes(name) || name === arenaMap) return;
+  switching = true;
+  try { localStorage.setItem(MAP_KEY, name); if (world && world.mode === 'side') sessionStorage.setItem(BACK_KEY, '1'); } catch {}
+  note(`the arena is now the ${name}`, 3000);
+  const url = new URL(location.href);
+  url.searchParams.delete('map');
+  // The same address (an arena link's #/room/arena, say) would only move to its hash: reload it instead.
+  setTimeout(() => (url.href === location.href ? location.reload() : location.replace(url.href)), 1200);
+}
+const fightHashOf = (name) => `${levelHash(LEVEL_TEXT[name])}.${FIGHT_VERSION}`; // as the server's: the level and the wire version
 
 function note(text, ms = 3000) {
   noteEl.textContent = text;
@@ -118,7 +155,7 @@ function showR() {
   if (inArenaView()) {
     const other = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
     long.textContent = ` ${other}`;
-    rendererBtn.title = `Switch the train to ${other} (R)`;
+    rendererBtn.title = `Switch the ${arenaMap} to ${other} (R)`;
   } else {
     long.textContent = ` ${renderer.name}`;
     rendererBtn.title = 'Switch renderer (R)';
@@ -259,6 +296,7 @@ function onKey(e) {
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
   if (e.code === 'KeyI' && shots && !shotsBtn.hidden) { shots.toggle(); return true; }
   if (e.code === 'KeyG') { openGrid(); return true; }
+  if (e.code === 'Backquote' && ARENA.enabled) { admin.toggle(arenaMap); return true; }
   if (e.code === 'KeyF') { toggleFullscreen(); return true; }
   if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
   if (e.code === 'KeyE') { // only E opens (not Enter or Space)
@@ -482,12 +520,12 @@ function loop(now) {
   world.bodies = bodies;
   // The train, both side-on and top-down: its frame of the moment, the look, muzzle flashes and glows.
   if (train) {
-    const F = frameAt(trainAt ?? t, { reducedMotion });
+    const F = decor.frameAt(trainAt ?? t, { reducedMotion });
     if (side && fight.length) {
       F.flashes = pvp.flashes(t); // they light the train (lightAt) and glow (the halation), as tracers do
       trainGlows.push(...flashGlows(F.flashes));
     }
-    world.train = { T: train, F, look, glows: trainGlows };
+    world.train = { T: train, F, look, glows: trainGlows, paint: decor.paint };
   }
   trainGlows = [];
   if (fightHud) fightHud.render(fight.length ? pvp.hud(t) : null);
@@ -533,7 +571,7 @@ function showShotsBtn() {
   shotsBtn.querySelector('.n').textContent = shots.count ? ` ${shots.count}` : '';
 }
 let lightingTop = null, tilting = false, lastMode = 'top';
-let train = null, trainGlows = [];
+let train = null, trainGlows = [], decor = DECOR.train;
 let trainAt = null; // __ascii.freezeTrain (localhost): the train held at this time (ms), for screenshots
 const loadedIds = new Set();
 let following = null, followAt = 0;
@@ -605,7 +643,7 @@ const memory = {
 // fight: my state from pvp.js, when I'm in the fight.
 function myBody(now, fight = null) {
   const p = world.player;
-  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, low: p.low || 0, flipT: p.t - p.airJumpT, act: 'idle', gun: 'deagle' };
+  const own = fight || { x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing, ground: !!p.onGround, low: p.low || 0, flipT: p.t - p.airJumpT, act: 'idle', gun: 'deagle', ...climbLook(p) };
   // A pinned pose is drawn as pinned: unprotected unless `safe` is pinned too.
   const state = posePin ? { ...own, safe: false, ...posePin } : { ...own };
   const emoting = mine.emote && now - mine.emoteAt < MY_EMOTE_MS;
@@ -660,17 +698,20 @@ function botBody(i, t) {
 async function boot() {
   let data;
   try {
-    data = await loadData(undefined, ARENA.enabled ? [ARENA.photo] : []);
+    const mapAsked = ARENA.enabled ? chooseMap() : null;
+    data = await loadData(undefined, ARENA.enabled ? Object.values(ARENA.photos) : []); // both maps' photos live in the arena
+    if (mapAsked) arenaMap = await mapAsked;
   } catch (err) {
     fatal(err);
     return;
   }
-  const arenaPhoto = ARENA.enabled ? data.byId.get(ARENA.photo) || null : null;
-  if (ARENA.enabled && !arenaPhoto) console.warn(`ARENA.photo "${ARENA.photo}" isn't in photos.json: the arena has a plain dark backdrop`);
-  map = buildLayout(data, SITE, { arena: ARENA.enabled ? { photo: arenaPhoto, level: parseLevel(levelText) } : null });
+  const arenaPhoto = ARENA.enabled ? data.byId.get(ARENA.photos[arenaMap]) || null : null;
+  if (ARENA.enabled && !arenaPhoto) console.warn(`ARENA.photos.${arenaMap} "${ARENA.photos[arenaMap]}" isn't in photos.json: the arena has a plain dark backdrop`);
+  map = buildLayout(data, SITE, { arena: ARENA.enabled ? { photo: arenaPhoto, level: parseMap(arenaMap, LEVEL_TEXT[arenaMap]) } : null });
   world = createWorld(map, { reducedMotion });
   lightingTop = createLighting(map);
-  train = map.arena ? buildTrain(map.arena.level) : null;
+  decor = DECOR[arenaMap];
+  train = map.arena ? decor.build(map.arena.level) : null;
   world.lighting = lightingTop;
   input = createInput(stage, { onTap, onKey, arena: () => !!pvp && world.mode === 'side' });
   if (PVP && map.arena) {
@@ -855,6 +896,7 @@ async function boot() {
   const mutedText = () => `chat muted for ${Math.ceil(mutedFor() / 60000)} min`;
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (chatInput.value.trim() === '/admin' && ARENA.enabled) { chatInput.value = ''; closeChat(); admin.open(arenaMap); return; }
     if (hasSlur(chatInput.value)) { muteChat(LIMITS.muteS); chatInput.value = ''; }
     if (mutedFor() > 0) { chatMsg.textContent = mutedText(); return; }
     const text = cleanText(chatInput.value);
@@ -874,7 +916,7 @@ async function boot() {
   const syncOnline = () => { if (pvp && live) pvp.setOnline(fightOnline(), performance.now()); };
   live = createLive({
     version: data.generated,
-    fightHash: pvp ? `${levelHash(levelText)}.${FIGHT_VERSION}` : '', // as the server's: the level and the wire version
+    fightHash: pvp ? fightHashOf(arenaMap) : '',
     inArena: () => !!pvp && pvp.entered && pvp.online, // the arena stream replaces my position messages
     onArena: (m) => { if (pvp) pvp.onMessage(m, performance.now()); },
     onState: () => { linkUp = false; syncOnline(); },
@@ -896,8 +938,23 @@ async function boot() {
     onChat: ({ id, name, text }) => { if (!muted.has(id)) addLog(id, name, text); },
     onChatRejected: () => note('try different words'),
     onChatMuted: (s) => { muteChat(s); note(mutedText()); },
+    onMap: (name) => { if (ARENA.enabled) followMap(name); },
+    onAdmin: (ok, name) => admin.answer(ok, name),
   });
   if (live) { emoteBtn.hidden = false; nameBtn.hidden = false; chatBtn.hidden = false; }
+  const adminForm = document.getElementById('admin-form');
+  admin = createAdmin({
+    form: adminForm, input: document.getElementById('admin-pw'), msg: document.getElementById('admin-msg'),
+    now: document.getElementById('admin-now'), buttons: adminForm.querySelectorAll('button'),
+    send: (name, pw) => (live ? live.admin(name, pw) === true || null : false), // null: there's a server, but not connected
+    check: adminOk,
+    local: (name) => followMap(name),
+    onClose: () => stage.focus({ preventScroll: true }),
+  });
+  // Back in the arena after a map switch reloaded the page (followMap).
+  let back = false;
+  try { back = sessionStorage.getItem(BACK_KEY) === '1'; sessionStorage.removeItem(BACK_KEY); } catch {}
+  if (back && map.arena) teleport(world, map.arena.entry.x + 0.5, map.arena.floorY - 1.5);
   if (debug) debugEl.hidden = false;
 
   // A hidden list of every photo, so screen readers have a way in.

@@ -2,7 +2,7 @@
 // messages, the practice dummy and offline play (a local referee), and what the HUD shows. DOM-free glue:
 // every rule comes from fight.js or the referee. Positions are map cells here and arena-local on the
 // wire; times are ms here and seconds in the rules.
-import { newBody, stepBody, knock, rolling, doorZone } from './arena.js';
+import { newBody, stepBody, knock, rolling, doorZone, climbLook } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
@@ -48,7 +48,7 @@ export function createPvp({
   const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
   const DUMMY_SPOT = floorSpot(level, DUMMY_COL);
   const door = doorZone(level, off); // nobody collides in the doorway
-  const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt, door, me: (now) => myBox(now) });
+  const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt, door, me: (now) => myBox(now), ladders: world.ladders, steps: world.steps });
   const fx = createFx({ kindAt: levelKind(level), offset: off, reducedMotion });
   // My own referee: my cap, ammo and combo always, and offline the whole fight (the dummy too). Online the
   // dummy lives in a second one, against a stand-in of me, so its hits never touch what the server owns.
@@ -93,11 +93,11 @@ export function createPvp({
   const impact = (m) => { if (!reducedMotion && !m.fled && (isMe(m.by) || isMe(m.id))) onImpact({ me: isMe(m.id), text: popLine(m) }); };
 
   // My state for the wire and the local referee (arena-local). The input bits gain 32 rolling, and 64
-  // crouched or 128 prone from what my body does (crouch addendum §4).
+  // crouched or 128 prone from what my body does (crouch addendum §4), and 512 on a ladder (gorge addendum).
   const lowBits = (p) => (p.low === 2 ? 128 : p.low === 1 ? 64 : 0);
   function snap(now, facing = world.player.facing) {
     const p = world.player, l = local(p.x, p.y);
-    return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0) | lowBits(p), a: aim, ts: ts(now) };
+    return { x: l.x, y: l.y, vx: p.vx, vy: p.vy, f: facing < 0 ? -1 : 1, g: p.onGround ? 1 : 0, i: bits | (rolling(p) ? 32 : 0) | lowBits(p) | (p.climb ? 512 : 0), a: aim, ts: ts(now) };
   }
   // A hit's stun, halved when it landed on a body that was low (lo).
   const stunFor = (m) => (stunOf(m.w) || 0) * (m.lo ? LOW_KNOCK : 1);
@@ -137,7 +137,7 @@ export function createPvp({
   // Shown in the side view whenever no real fighter is known (online: once the welcome said so; not just
   // after a dropped connection).
   function dummyShown(now) {
-    const on = entered && !awaitAw && fighters.ids().length === 0 && now >= dummyBackAt;
+    const on = level.dummy !== false && entered && !awaitAw && fighters.ids().length === 0 && now >= dummyBackAt; // none in the gorge
     if (on && !dummyUp) resetDummy(now);
     dummyUp = on;
     return on;
@@ -359,13 +359,13 @@ export function createPvp({
     }
     aimed = !!mouse || !!inp.aimUp || (!!inp.aimDown && !crouching);
     const x = num(inp.x) ? inp.x : 0;
-    bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (inp.down ? 8 : 0) | (inp.run ? 16 : 0);
+    bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (inp.down ? 8 : 0) | (inp.run ? 16 : 0) | (inp.up ? 256 : 0);
     if (!rolling(p)) { // a roll drops shots and strikes for its length
       if (inp.fire) fire(facing, now);
       const n = Math.min(MAX_PRESSES, Math.max(0, inp.strikes | 0));
       for (let k = 0; k < n; k++) strike(now);
     }
-    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down: !!inp.down, roll: inp.roll || 0 };
+    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down: !!inp.down, up: !!inp.up, roll: inp.roll || 0 };
   }
 
   // ---------- the frame ----------
@@ -424,7 +424,7 @@ export function createPvp({
     const t = sec(now), p = world.player, out = [];
     const a = actNow(act, now, me.alive, deadAt, p), flipT = flipOf(a, p);
     out.push({ id: me.id, me: true, dummy: false, kills, color: colorOf(me.id), state: {
-      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, low: p.low || 0, flipT, aim, act: a.act, actT: a.actT,
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, facing: p.facing < 0 ? -1 : 1, ground: !!p.onGround, low: p.low || 0, flipT, aim, act: a.act, actT: a.actT, ...climbLook(p),
       hp: me.alive ? regenHp(me.hp, me.hurtAt, t) : 0, safe: me.alive && t < me.safeUntil, combo: me.combo, gun: me.gun, aimed,
     } });
     for (const f of fighters.list(now)) out.push({ id: f.id, me: false, dummy: false, kills: f.kills, color: colorOf(f.id), state: f.state });

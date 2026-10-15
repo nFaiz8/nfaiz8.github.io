@@ -9,6 +9,7 @@ import { T } from '../layout.js';
 import { loadImage, rangeOf } from '../photos.js';
 import { lightWindow } from '../light.js';
 import { paintWindow, halation, TRAIN_GLYPHS } from '../train.js';
+import { GORGE_GLYPHS } from '../gorge/look.js';
 import * as S from './shaders.js';
 
 const SX = 4, SY = 8; // scene texels per cell
@@ -30,6 +31,7 @@ export function atlasChars(map) {
   map.frames.forEach((f) => add(f.plaque.text));
   map.glyphs.forEach((g) => add(g.ch));
   add(TRAIN_GLYPHS);
+  add(GORGE_GLYPHS);
   return [...chars];
 }
 
@@ -389,10 +391,39 @@ export function createGlRenderer() {
     if (clip) { x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(a.cols, x1); y1 = Math.min(a.rows, y1); }
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return;
-    trainWin = paintWindow(tr.T, tr.F, tr.look, x0, y0, w, h, trainWin);
+    trainWin = (tr.paint || paintWindow)(tr.T, tr.F, tr.look, x0, y0, w, h, trainWin);
     const n = w * h;
     if (trainData.length < n * FLOATS) trainData = new Float32Array(n * FLOATS * 1.5);
-    const { ch, fg, bg } = trainWin;
+    const { ch, fg, bg, hard } = trainWin;
+    const pl = progs.light;
+    const px = (cx) => Math.round((cx - vx) * M.cw * dpr), py = (cy) => Math.round((cy - vy) * M.ch * dpr);
+    const sx0 = px(ox + x0), sx1 = px(ox + x1), sy0 = py(oy + y0), sy1 = py(oy + y1);
+    // A texture over the window, one texel per cell, smoothed (only over the window: past it the texture's
+    // edge would smear across the screen), blended as given.
+    const field = (data, src, dst) => {
+      gl.useProgram(pl.p);
+      gl.bindVertexArray(quadVao);
+      gl.uniform2f(pl.u.u_view, vx, vy);
+      gl.uniform2f(pl.u.u_cellPx, M.cw * dpr, M.ch * dpr);
+      gl.uniform2f(pl.u.u_lorigin, ox + x0, oy + y0);
+      gl.uniform2f(pl.u.u_lsize, w, h);
+      gl.uniform1f(pl.u.u_canvasH, canvas.height);
+      gl.uniform1i(pl.u.u_light, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, trainTex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+      setFilter(gl.LINEAR, gl.LINEAR);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(src, dst);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(sx0, canvas.height - sy1, sx1 - sx0, sy1 - sy0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.SCISSOR_TEST);
+    };
+    // The gorge's soft backgrounds (light, mist, foliage) first, smoothed so pools fade; its glyphs then
+    // carry only the crisp ones (hard's alpha).
+    if (hard) field(bg, gl.ONE, gl.ZERO);
     let k = 0;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const i = y * w + x, j = i * 4;
@@ -400,35 +431,12 @@ export function createGlRenderer() {
       trainData[k++] = oy + y0 + y;
       trainData[k++] = gi(ch[i]);
       trainData[k++] = fg[j] / 255; trainData[k++] = fg[j + 1] / 255; trainData[k++] = fg[j + 2] / 255;
-      trainData[k++] = bg[j] / 255; trainData[k++] = bg[j + 1] / 255; trainData[k++] = bg[j + 2] / 255; trainData[k++] = 1;
+      trainData[k++] = bg[j] / 255; trainData[k++] = bg[j + 1] / 255; trainData[k++] = bg[j + 2] / 255; trainData[k++] = hard ? hard[j + 3] / 255 : 1;
     }
     drawGlyphs(trainData.subarray(0, k));
     // Halation: emissive cells, tracers and muzzle flashes, blurred and added (only over the train).
     const extra = (tr.glows || []).map((g) => ({ x: g.x - x0, y: g.y - y0, c: g.c }));
-    const glow = halation(trainWin.glow, w, h, extra, undefined, halo);
-    const pl = progs.light;
-    gl.useProgram(pl.p);
-    gl.bindVertexArray(quadVao);
-    gl.uniform2f(pl.u.u_view, vx, vy);
-    gl.uniform2f(pl.u.u_cellPx, M.cw * dpr, M.ch * dpr);
-    gl.uniform2f(pl.u.u_lorigin, ox + x0, oy + y0);
-    gl.uniform2f(pl.u.u_lsize, w, h);
-    gl.uniform1f(pl.u.u_canvasH, canvas.height);
-    gl.uniform1i(pl.u.u_light, 0);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, trainTex);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, glow);
-    setFilter(gl.LINEAR, gl.LINEAR);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE);
-    // Only over the window: past it the texture's edge would smear across the screen.
-    const px = (cx) => Math.round((cx - vx) * M.cw * dpr), py = (cy) => Math.round((cy - vy) * M.ch * dpr);
-    const sx0 = px(ox + x0), sx1 = px(ox + x1), sy0 = py(oy + y0), sy1 = py(oy + y1);
-    gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(sx0, canvas.height - sy1, sx1 - sx0, sy1 - sy0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.disable(gl.SCISSOR_TEST);
+    field(halation(trainWin.glow, w, h, extra, undefined, halo), gl.ONE, gl.ONE);
   }
 
   function draw(world) {

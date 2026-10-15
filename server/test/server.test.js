@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import fs from 'node:fs';
 import { parseLevel, levelHash, levelKind } from '../../src/level.js';
 import { newBody, stepBody, DOUBLE_V, AIR_JUMPS } from '../../src/arena.js';
-import { muzzleOf } from '../../src/fight.js';
+import { muzzleOf, FIGHT_VERSION } from '../../src/fight.js';
 
 const PORT = 8797;
 const BASE = `ws://127.0.0.1:${PORT}/room/2026-10-13T00:00:00.000Z`;
@@ -237,8 +237,48 @@ test('welcome carries the level hash', async () => {
   const ws = client({ room: room() });
   await ws.opened;
   ws.send2({ t: 'hi', name: '' });
-  assert.equal((await ws.next('welcome')).fight, levelHash(LEVEL_TEXT));
+  const w = await ws.next('welcome');
+  assert.equal(w.fight, `${levelHash(LEVEL_TEXT)}.${FIGHT_VERSION}`);
+  assert.equal(w.map, 'train');
   ws.close();
+});
+
+// The arena's map (gorge addendum): the site's, switched by an admin with the password, told to everyone.
+test('an admin switches the map for every instance; a wrong password does nothing; /map tells a page', async () => {
+  const r = room();
+  const http = `http://127.0.0.1:${PORT}/map`;
+  const getMap = async () => (await (await fetch(http, { headers: { Origin: 'https://faiz.pics' } })).json()).map;
+  assert.equal((await fetch(http, { headers: { Origin: 'https://evil.example' } })).status, 403);
+  assert.equal(await getMap(), 'train');
+  const admin = client({ room: r, n: 1 }), other = client({ room: r, n: 2 });
+  await admin.opened; await other.opened;
+  admin.send2({ t: 'hi', name: 'Ad' }); await admin.next('welcome');
+  other.send2({ t: 'hi', name: 'Ot' }); await other.next('welcome');
+  admin.send2({ t: 'am', map: 'gorge', pw: 'kazakh' });
+  await admin.next('am-no');
+  assert.equal(await getMap(), 'train');
+  admin.send2({ t: 'am', map: 'moon', pw: 'uzbek' }); // no such map: dropped
+  await sleepMs(300);
+  assert.ok(!admin.inbox.some((m) => m.t === 'am-ok'));
+  admin.send2({ t: 'am', map: 'gorge', pw: 'uzbek' });
+  assert.equal((await admin.next('am-ok')).map, 'gorge');
+  const gorgeHash = `${levelHash(fs.readFileSync(new URL('../../src/gorge.txt', import.meta.url), 'utf8'))}.${FIGHT_VERSION}`;
+  assert.deepEqual(await admin.next('map'), { t: 'map', map: 'gorge', fight: gorgeHash });
+  assert.deepEqual(await other.next('map'), { t: 'map', map: 'gorge', fight: gorgeHash }, 'another instance hears it');
+  assert.equal(await getMap(), 'gorge');
+  const late = client({ room: r, n: 3 }); await late.opened;
+  late.send2({ t: 'hi', name: '' });
+  const w = await late.next('welcome');
+  assert.equal(w.map, 'gorge');
+  assert.equal(w.fight, gorgeHash);
+  // the fight is the gorge's: its door
+  late.send2({ t: 'ae' });
+  assert.equal((await late.next('aw')).lv, gorgeHash);
+  await sleepMs(10500); // the am bucket: 3, then one every 10 s
+  admin.send2({ t: 'am', map: 'train', pw: 'uzbek' });
+  await admin.next('am-ok');
+  assert.equal(await getMap(), 'train');
+  admin.close(); other.close(); late.close();
 });
 
 test('two fighters entering get aw and aj; someone outside gets none of it', async () => {
@@ -247,7 +287,7 @@ test('two fighters entering get aw and aj; someone outside gets none of it', asy
   await out.opened; out.send2({ t: 'hi', name: '' }); await out.next('welcome');
   const a = await fighter(r, 'Ann');
   assert.deepEqual(a.aw.fighters, []);
-  assert.equal(a.aw.lv, levelHash(LEVEL_TEXT));
+  assert.equal(a.aw.lv, `${levelHash(LEVEL_TEXT)}.${FIGHT_VERSION}`);
   const b = await fighter(r, 'Bo');
   assert.equal(b.aw.fighters.length, 1);
   assert.equal((await a.next('aj')).id, b.id);

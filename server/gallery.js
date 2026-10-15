@@ -3,35 +3,40 @@
 // The one exception is the arena fight: the referee (bullets in flight, when each pickup was taken) and
 // a 33 ms tick while bullets fly live in memory. Losing them to an eviction costs nothing. And a chat mute
 // (a slur: chat filter addendum) is kept in storage by IP, so reconnecting doesn't lift it.
+// The arena's map (gorge addendum) is the whole site's: one instance, named CONFIG, keeps it in storage and
+// answers /map; an admin's change (am, behind the password) is stored there and announced to every instance
+// of the admin's version, which drops its fight and tells its people (map).
 import { DurableObject } from 'cloudflare:workers';
 import {
-  LIMITS, cleanName, cleanText, hasSlur, parseMessage, newBuckets, take, takeShot, clampMove, senderClock, sentAt, newFlood, dropped,
+  LIMITS, cleanName, cleanText, hasSlur, parseMessage, adminOk, newBuckets, take, takeShot, clampMove, senderClock, sentAt, newFlood, dropped,
 } from './rules.js';
 import { createReferee, newFighter } from '../src/referee.js';
-import { parseLevel, levelKind, levelHash, SOLID } from '../src/level.js';
+import { parseMap, levelKind, levelHash, mapName, SOLID, DEFAULT_MAP } from '../src/level.js';
 import { GUNS, FIGHT_VERSION } from '../src/fight.js';
-import levelText from '../src/arena.txt';
+import trainText from '../src/arena.txt';
+import gorgeText from '../src/gorge.txt';
 
 const KIND = { p: 'p', e: 'e', r: 'r', n: 'n', c: 'c' };
 const ARENA = new Set(['ae', 'al', 'a', 'f', 'm', 'pk', 'rs']);
-const LEVEL = parseLevel(levelText);
-const LEVEL_HASH = `${levelHash(levelText)}.${FIGHT_VERSION}`; // the level and the fight's wire version
-const kindAt = levelKind(LEVEL);
 const TICK_MS = 33;
 const KICK_GAP = 0.5; // s: after a kick, the next strike waits this long (the 0.55 s cooldown less jitter)
 const GAP_MAX = 300; // ms: a pause banks no more speed than this
-// The door is the level's D: the 3 rows of the east wall ending on its row (src/layout.js lines the corridor
-// up with it); a body standing in it is centred there. Every honest entrance (walking in, an arena link, a
-// teleport) puts you there.
-const DOOR_AT = LEVEL.door || { r: LEVEL.rows - 1, x: LEVEL.cols - 0.5, y: LEVEL.rows - 1.5 };
-const DOOR = { x: DOOR_AT.x, y: DOOR_AT.y };
-
-// A body's centre inside a wall: a ▓, or anywhere outside the grid but the door.
-function inWall(x, y) {
-  const c = Math.floor(x), r = Math.floor(y);
-  if (c >= LEVEL.cols && r >= DOOR_AT.r - 2 && r <= DOOR_AT.r) return false;
-  return kindAt(c, r) === SOLID;
+// Each map's level: its hash (with the fight's wire version), its cells, and its door: the level's D, the 3
+// rows of the east wall ending on its row (src/layout.js lines the corridor up with it); a body standing in
+// it is centred there. Every honest entrance (walking in, an arena link, a teleport) puts you there.
+function levelOf(name, text) {
+  const level = parseMap(name, text), at = level.door || { r: level.rows - 1, x: level.cols - 0.5, y: level.rows - 1.5 };
+  const kindAt = levelKind(level);
+  // A body's centre inside a wall: a ▓, or anywhere outside the grid but the door.
+  const inWall = (x, y) => {
+    const c = Math.floor(x), r = Math.floor(y);
+    if (c >= level.cols && r >= at.r - 2 && r <= at.r) return false;
+    return kindAt(c, r) === SOLID;
+  };
+  return { name, level, hash: `${levelHash(text)}.${FIGHT_VERSION}`, door: { x: at.x, y: at.y }, inWall };
 }
+const LEVELS = { train: levelOf('train', trainText), gorge: levelOf('gorge', gorgeText) };
+const CONFIG = 'config'; // the instance that keeps the map
 const far = (p, q) => Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y));
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -42,14 +47,43 @@ async function ipTag(ip) {
 const randomId = () => [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(36).padStart(2, '0')).join('').slice(0, 8);
 
 export class Gallery extends DurableObject {
+  // The map up, as CONFIG has it (read once while awake; an announce changes it).
+  async mapName() {
+    if (this.map) return this.map;
+    let name;
+    try {
+      const res = await this.env.GALLERY.get(this.env.GALLERY.idFromName(CONFIG)).fetch('https://do/map');
+      name = (await res.json()).map;
+    } catch {}
+    return (this.map = mapName(name));
+  }
+  async arenaLevel() { return LEVELS[await this.mapName()]; }
+
   async fetch(req) {
+    const path = new URL(req.url).pathname;
+    // CONFIG: what the map is, and setting it (only ever from an instance that checked the password).
+    if (path === '/map') {
+      if (req.method === 'POST') {
+        const { map } = await req.json();
+        await this.ctx.storage.put('map', mapName(map));
+      }
+      return Response.json({ map: mapName(await this.ctx.storage.get('map')) });
+    }
+    // An instance: the map changed. Out of the fight, everyone; the new map goes to all.
+    if (path === '/announce') {
+      const { map } = await req.json();
+      this.setMap(mapName(map));
+      return new Response('ok');
+    }
+    const room = path.match(/^\/room\/([^/]+)\/(\d{1,2})$/);
     const tag = await ipTag(req.headers.get('CF-Connecting-IP') || 'unknown');
     if (this.ctx.getWebSockets(tag).length >= LIMITS.perIp) return new Response('too many connections', { status: 429 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server, [tag]);
     const now = Date.now();
     const muteUntil = (await this.ctx.storage.get(`mute:${tag}`)) || 0;
-    server.serializeAttachment({ id: randomId(), name: '', x: 0, y: 0, here: false, buckets: newBuckets(now), flood: newFlood(now), muteUntil, tag });
+    server.serializeAttachment({ id: randomId(), name: '', x: 0, y: 0, here: false, buckets: newBuckets(now), flood: newFlood(now), muteUntil, tag,
+      version: room ? decodeURIComponent(room[1]) : '' }); // whose instances an admin's change is announced to
     if (this.ctx.getWebSockets().length > LIMITS.people) {
       server.send(JSON.stringify({ t: 'full' }));
       server.close(4000, 'full');
@@ -89,11 +123,13 @@ export class Gallery extends DurableObject {
       me.clk = senderClock();
       ws.serializeAttachment(me);
       const peers = this.others(ws).map((o) => { const a = o.deserializeAttachment(); return { id: a.id, name: a.name, x: a.x, y: a.y }; });
-      ws.send(JSON.stringify({ t: 'welcome', id: me.id, peers, fight: LEVEL_HASH }));
+      const L = await this.arenaLevel();
+      ws.send(JSON.stringify({ t: 'welcome', id: me.id, peers, fight: L.hash, map: L.name }));
       this.broadcast(ws, { t: 'join', id: me.id, name: me.name, x: me.x, y: me.y });
       return;
     }
-    if (ARENA.has(m.t)) return this.fight(ws, me, m, now, drop);
+    if (ARENA.has(m.t)) return this.fight(ws, me, m, now, drop, await this.arenaLevel());
+    if (m.t === 'am') return this.admin(ws, me, m, now, drop);
     if (!me.here || !take(me.buckets, KIND[m.t], now)) return drop();
     if (m.t === 'p') { me.x = m.x; me.y = m.y; this.broadcast(ws, { t: 'p', id: me.id, x: m.x, y: m.y }); }
     else if (m.t === 'e') this.broadcast(ws, { t: 'e', id: me.id, e: m.e });
@@ -116,10 +152,45 @@ export class Gallery extends DurableObject {
     ws.serializeAttachment(me);
   }
 
+  // The admin's map switch: the password checked here, the map kept by CONFIG, then announced to every
+  // instance of this version (this one too). A wrong password says so; the bucket keeps guessing slow.
+  async admin(ws, me, m, now, drop) {
+    if (!me.here || !take(me.buckets, 'am', now)) return drop();
+    ws.serializeAttachment(me);
+    if (!(await adminOk(m.pw))) return ws.send(JSON.stringify({ t: 'am-no' }));
+    const body = JSON.stringify({ map: m.map });
+    await this.env.GALLERY.get(this.env.GALLERY.idFromName(CONFIG)).fetch('https://do/map', { method: 'POST', body });
+    ws.send(JSON.stringify({ t: 'am-ok', map: m.map }));
+    this.setMap(m.map);
+    const others = [];
+    for (let n = 1; n <= LIMITS.instances; n++) {
+      const name = `${me.version}#${n}`, id = this.env.GALLERY.idFromName(name);
+      if (id.equals(this.ctx.id)) continue;
+      others.push(this.env.GALLERY.get(id).fetch('https://do/announce', { method: 'POST', body }).catch(() => {}));
+    }
+    await Promise.all(others);
+  }
+  // A new map: the fight starts over (nobody is in it; the referee is the new level's), and everyone here
+  // hears it (map, with its fight hash: the page switches to it).
+  setMap(name) {
+    this.map = name;
+    this.ref = null;
+    if (this.tickTimer) { clearInterval(this.tickTimer); this.tickTimer = null; }
+    const msg = JSON.stringify({ t: 'map', map: name, fight: LEVELS[name].hash });
+    for (const o of this.ctx.getWebSockets()) {
+      const a = o.deserializeAttachment();
+      if (!a?.here) continue;
+      if (a.fx) { a.fx = newFighter(a.id, Date.now() / 1000); try { o.serializeAttachment(a); } catch {} }
+      try { o.send(msg); } catch {}
+    }
+  }
+
   // The arena. Fighter records live in the attachments: each handler reads them, the referee changes
   // them in place, and every one it may have touched is written back before the handler returns.
-  referee() {
-    return this.ref || (this.ref = createReferee({ level: LEVEL, rand: Math.random }));
+  referee(L) {
+    if (this.ref && this.refMap !== L.name) this.ref = null;
+    this.refMap = L.name;
+    return this.ref || (this.ref = createReferee({ level: L.level, rand: Math.random }));
   }
   // Everyone in the fight as [socket, attachment] pairs, the sender's (already read) attachment included.
   arena(ws, me) {
@@ -158,9 +229,10 @@ export class Gallery extends DurableObject {
     }, TICK_MS);
   }
 
-  fight(ws, me, m, now, drop) {
+  fight(ws, me, m, now, drop, L) {
     if (!me.here) return drop();
-    const ref = this.referee();
+    const ref = this.referee(L);
+    const DOOR = L.door;
     const t = now / 1000;
     const F = me.fx;
     const fighters = (pairs) => pairs.map(([, a]) => a.fx);
@@ -187,7 +259,7 @@ export class Gallery extends DurableObject {
       if (!F.placed) { F.x = DOOR.x; F.y = DOOR.y; }
       me.clk = senderClock(); // ts restarts at each ae
       ws.send(JSON.stringify({
-        t: 'aw', lv: LEVEL_HASH, you: { hp: F.hp, kills: F.kills, w: GUNS[F.gun].code, ammo: F.ammo },
+        t: 'aw', lv: L.hash, you: { hp: F.hp, kills: F.kills, w: GUNS[F.gun].code, ammo: F.ammo },
         pk: ref.pickups(t), fighters: others.map(([, a]) => ref.view(a.fx, t)),
       }));
       this.tell(others, out);
@@ -218,7 +290,7 @@ export class Gallery extends DurableObject {
       const from = F.fresh && !(F.placed && far(F, m) < far(DOOR, m)) ? DOOR : F;
       const c = clampMove(from, m, Math.min(GAP_MAX, Math.max(0, sent - (F.sentPrev ?? sent))));
       const s = c === m ? m : { ...c, x: r2(c.x), y: r2(c.y) };
-      if (inWall(s.x, s.y)) return ws.serializeAttachment(me); // dropped, but the bucket and clock moved
+      if (L.inWall(s.x, s.y)) return ws.serializeAttachment(me); // dropped, but the bucket and clock moved
       ref.state(F, s, t, sent / 1000);
       F.sentPrev = Math.max(F.sentPrev ?? sent, sent); // a backdated stamp never moves it back
       F.fresh = false;
@@ -268,7 +340,7 @@ export class Gallery extends DurableObject {
     const me = ws.deserializeAttachment();
     if (me?.here && me.fx?.arena) {
       const pairs = this.arena(ws, me);
-      const out = this.referee().leave(me.fx, Date.now() / 1000, pairs.map(([, a]) => a.fx));
+      const out = (this.ref || this.referee(LEVELS[this.map || DEFAULT_MAP])).leave(me.fx, Date.now() / 1000, pairs.map(([, a]) => a.fx));
       this.tell(pairs, out, ws);
       this.save(pairs.filter(([o]) => o !== ws));
     }

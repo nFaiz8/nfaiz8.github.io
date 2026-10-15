@@ -52,6 +52,15 @@
       <button class="vbtn" type="submit">save</button>
       <span class="name-msg" id="name-msg" role="status"></span>
     </form>
+    <form class="admin-form" id="admin-form" hidden aria-label="Admin">
+      <label for="admin-pw">admin</label>
+      <input id="admin-pw" type="password" maxlength="40" autocomplete="off" spellcheck="false" placeholder="password" />
+      <span class="admin-maps">arena: <b id="admin-now"></b> · switch to
+        <button class="vbtn" type="submit" value="train">train</button>
+        <button class="vbtn" type="submit" value="gorge">gorge</button>
+      </span>
+      <span class="admin-msg" id="admin-msg" role="status"></span>
+    </form>
     <div class="caption" id="caption" aria-live="polite"></div>
     <div class="note" id="note" role="status"></div>
     <div class="sr-only" id="fight-sr" role="status" aria-live="polite"></div>

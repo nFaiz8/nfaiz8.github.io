@@ -143,7 +143,7 @@ function createMuseumLook(name) {
     const AR = ROOMS.find((k) => k.kind === 'arena');
     if (AR) {
       const r = AR.r, put = (text, y, col) => [...text].forEach((ch, k) => { const x = r.x + Math.floor((r.w - text.length) / 2) + k; if (ch !== ' ' && inMap(x, y)) { CH[at(x, y)] = ch; setFG(at(x, y), col); } });
-      put('════ Arena ════', r.y + 3, AR.accent); put('the train runs when you walk in', r.y + 4, [120, 130, 146]);
+      put('════ Arena ════', r.y + 3, AR.accent); put(map.arena && map.arena.level.name === 'gorge' ? 'the gorge opens when you walk in' : 'the train runs when you walk in', r.y + 4, [120, 130, 146]);
     }
     // frames: a thin dim frame, the print (the site's own cells, once loaded), a lamp bar on the wall
     LAMPS = [];

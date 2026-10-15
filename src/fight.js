@@ -31,7 +31,8 @@ export const PICKUP_CODE = { rifle: 'r', sniper: 'n', medkit: 'm' };
 export const PICKUP_BY_CODE = { r: 'rifle', n: 'sniper', m: 'medkit' };
 // Bumped when the fight's wire changes, so a page and a server of different versions don't fight together
 // (each falls back to the dummy): it goes into the fight hash. 2: pickups at random spots, and medkits.
-export const FIGHT_VERSION = 2;
+// 3: two maps, the train and the gorge, and ladders (input bits 256 ↑ held, 512 on a ladder).
+export const FIGHT_VERSION = 3;
 export const COMBO_GAP = 0.5;
 export const DODGE = [0.04, 0.26];
 export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds

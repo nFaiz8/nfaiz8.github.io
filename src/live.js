@@ -99,11 +99,31 @@ export function arenaTicker(send, { every = 67, gap = 30, cap = 20 } = {}) {
 
 const ARENA_T = new Set(['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']);
 
-export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onChatMuted = () => {}, onState = () => {}, fightHash = '', onArena = () => {}, inArena = () => false }) {
-  // Local dev and tests never join the real gallery: on localhost only ?live=<ws url> connects.
+// Where the multiplayer server is: local dev and tests never join the real gallery (on localhost only
+// ?live=<ws url> connects); null when it's off.
+export function liveTarget(url = MULTIPLAYER.url) {
   const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const target = onLocalhost ? new URLSearchParams(location.search).get('live') : url;
-  if (!MULTIPLAYER.enabled || !target) return null;
+  return MULTIPLAYER.enabled && target ? target : null;
+}
+
+// The arena's map as the server has it (gorge addendum), asked over HTTP before the page builds, so the
+// right one is built from the start: a map name, or null if there's no server or it doesn't answer soon.
+export async function fetchArenaMap(ms = 1500) {
+  const target = liveTarget();
+  if (!target) return null;
+  try {
+    const res = await fetch(`${target.replace(/^ws/, 'http')}/map`, { signal: AbortSignal.timeout(ms), cache: 'no-store' });
+    const m = await res.json();
+    return typeof m.map === 'string' ? m.map : null;
+  } catch { return null; }
+}
+
+// onMap(name): the server's arena map, from the welcome and whenever an admin switches it. onAdmin(ok,
+// map): the answer to admin().
+export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onChatMuted = () => {}, onState = () => {}, fightHash = '', onArena = () => {}, inArena = () => false, onMap = () => {}, onAdmin = () => {} }) {
+  const target = liveTarget(url);
+  if (!target) return null;
   const peers = createPeers();
   let count = 0, fightOk = false;
   const net = createNet({
@@ -118,12 +138,15 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
       if (m.t === 'name-rejected') return onRejected();
       if (m.t === 'chat-rejected') return onChatRejected();
       if (m.t === 'chat-muted') return onChatMuted(Number(m.s) || 0);
+      if (m.t === 'am-ok' || m.t === 'am-no') return onAdmin(m.t === 'am-ok', m.map);
+      if (m.t === 'map') return onMap(m.map);
       if (m.t === 'join') onAnnounce('join', m);
       if (m.t === 'leave') { const p = peers.get(m.id); if (p) onAnnounce('leave', { ...m, name: p.name, x: p.track.at(-1).x, y: p.track.at(-1).y }); }
       peers.apply(m, now);
       if (m.t === 'welcome') {
         fightOk = !!fightHash && m.fight === fightHash;
         if (fightHash && !fightOk) console.warn('arena: server level differs; no fighting'); // fighting off: nothing to differ
+        if (typeof m.map === 'string') onMap(m.map);
       }
       if (ARENA_T.has(m.t)) onArena(m);
       if (m.t === 'c') { const p = peers.get(m.id); if (p) onChat({ id: m.id, name: p.name, text: m.text }); }
@@ -147,6 +170,7 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
     emote: (e) => net.send({ t: 'e', e }),
     heart: (f) => net.send({ t: 'r', f }),
     chat: (text) => net.send({ t: 'c', text }),
+    admin: (map, pw) => net.send({ t: 'am', map, pw }),
     setName: (n) => net.setName(n),
     get state() { return net.state; },
   };

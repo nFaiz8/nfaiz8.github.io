@@ -1361,6 +1361,45 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(h.first > h.lastFig, `hearts after the figures (${h.first} vs ${h.lastFig})`);
     assert.equal(h.entities, 0, 'hearts still in world.entities');
   });
+  // The gorge (gorge addendum): ?map= picks it on localhost. Stairs and a ladder with real keys, no dummy,
+  // every glyph in the atlas, and on a phone JUMP climbs.
+  const gorgeAt = () => page.evaluate(() => { const a = window.__ascii.map.arena, p = window.__ascii.world.player; return { x: p.x - a.x - 1, feet: p.y + 1.5 - a.y - 1, climb: !!p.climb }; });
+  const gorgePut = (x, feet) => page.evaluate((x, feet) => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + x, a.y + 1 + feet - 1.5); }, x, feet);
+  for (const r of ['museum', 'canvas', 'gl']) {
+    await check(`${r}: the gorge: no dummy; up the stairs and a ladder with real keys; every glyph drawn`, async () => {
+      await page.goto('about:blank');
+      await page.goto(`${url}?r=${r}&map=gorge#/room/arena`); await ready(page);
+      await sleep(500);
+      const info = await page.evaluate(() => ({ mode: window.__ascii.mode(), name: window.__ascii.map.arena.level.name, dummies: window.__ascii.pvp().bodies(performance.now()).filter((b) => b.dummy).length }));
+      assert.deepEqual(info, { mode: 'side', name: 'gorge', dummies: 0 });
+      await gorgePut(111.5, 106); await sleep(300);
+      await page.keyboard.down('ArrowRight'); await sleep(1300); await page.keyboard.up('ArrowRight');
+      const stairs = await gorgeAt();
+      assert.ok(stairs.feet <= 98.01, `up the stairs from the courtyard (feet ${stairs.feet})`);
+      await gorgePut(175.5, 76); await sleep(300);
+      await page.keyboard.down('ArrowUp'); await sleep(500);
+      const mid = await gorgeAt();
+      await sleep(1300); await page.keyboard.up('ArrowUp');
+      const top = await gorgeAt();
+      assert.ok(mid.climb && mid.feet < 76 && mid.feet > 64, `on the ladder (${JSON.stringify(mid)})`);
+      assert.ok(!top.climb && top.feet <= 64.01, `stepped off at the top (${JSON.stringify(top)})`);
+      await page.screenshot({ path: `${SHOTS}/gorge-${r}.png` });
+      assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'glyphs missing from the atlas');
+    });
+  }
+  await check('the gorge on a landscape phone: JUMP held at a ladder\'s foot climbs it', async () => {
+    await page.setViewport(PHONE);
+    await page.goto('about:blank');
+    await page.goto(`${url}?r=canvas&map=gorge#/room/arena`); await ready(page);
+    await sleep(500);
+    await gorgePut(175.5, 76); await sleep(300);
+    const at = await page.$$eval('#pad button', (bs) => Object.fromEntries(bs.map((b) => { const q = b.getBoundingClientRect(); return [b.dataset.code, { x: q.x + q.width / 2, y: q.y + q.height / 2 }]; })));
+    const t = await page.touchscreen.touchStart(at.Jump.x, at.Jump.y);
+    await sleep(1800); await t.end();
+    const top = await gorgeAt();
+    await page.setViewport(DESKTOP);
+    assert.ok(!top.climb && top.feet <= 64.01, `climbed (${JSON.stringify(top)})`);
+  });
   await check('no page errors', async () => assert.deepEqual(errors, []));
 });
 

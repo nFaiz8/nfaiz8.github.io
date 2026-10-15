@@ -36,7 +36,8 @@ export function doorZone(level, off = { x: 0, y: 0 }) {
 
 export function newBody(x, y) {
   return { x, y, vx: 0, vy: 0, onGround: false, onPlatform: false, sinceGround: Infinity, sinceJump: Infinity, prevJump: false, cut: false, dropUntil: 0, t: 0, stun: 0, rollT: -1, rollDir: 0, rollCool: 0, airJumps: AIR_JUMPS, airJumpT: -Infinity, low: 0,
-    onBody: false, rideId: null, rideX: 0, headDropUntil: 0 }; // on someone's head: whose (by box id), and where they were
+    onBody: false, rideId: null, rideX: 0, headDropUntil: 0, // on someone's head: whose (by box id), and where they were
+    climb: null, climbed: 0 }; // the ladder it is on (gorge addendum), and how far it has climbed (for the pose)
 }
 
 export const rolling = (b) => b.rollT >= 0;
@@ -54,6 +55,7 @@ export function knock(b, kx, ky, stun, add = false) {
   }
   b.stun = Math.max(b.stun, stun);
   b.rollT = -1;
+  b.climb = null; // a hit knocks you off a ladder
 }
 
 // Start a roll: on the ground, not stunned, not already rolling, and cooled down.
@@ -73,10 +75,85 @@ export function insideFor(map) {
 
 const endRoll = (b) => { b.rollT = -1; b.rollCool = ROLL.cooldown; };
 
+// Ladders (gorge addendum): each { x (its column's middle), top (the row you stand on up there), bot (the
+// one under its foot) } in kindAt's cells. ↑ within GRAB cells of one takes hold of it (↓ from its top);
+// on it ↑/↓ climb at CLIMB_V, the top or the foot steps off onto the tread there, and a fresh jump with ←/→
+// lets go to that side. A knock lets go too.
+export const CLIMB_V = 11; // rows/s
+const GRAB = 1.5;
+export function ladderAt(b, ladders) {
+  const f = b.y + HH;
+  for (const L of ladders) if (Math.abs(b.x - L.x) < GRAB && f > L.top - 0.05 && f < L.bot + 0.05) return L;
+  return null;
+}
+// How a body on a ladder is drawn: in the air, its limbs going as a jump's do with vy, swinging with how far
+// it has climbed (so they move while it climbs and hold while it waits). null off a ladder.
+export const climbLook = (b) => (b.climb ? { vx: 0, vy: 30 * Math.sin(b.climbed * 2.2), ground: false } : null);
+
+// Whether this step was the ladder's: taking hold, climbing, stepping off or letting go.
+function climbStep(b, dt, input, kindAt, ladders) {
+  if (!b.climb) {
+    if (b.stun > 0 || b.rollT >= 0 || !(input.up || input.down)) return false;
+    const L = ladderAt(b, ladders), f = b.y + HH;
+    if (!L || !((input.up && f > L.top + 0.05) || (input.down && b.onGround && Math.abs(f - L.top) < 0.05))) return false;
+    b.climb = L;
+  }
+  const L = b.climb, jump = !!input.jump, press = jump && !b.prevJump;
+  b.t += dt;
+  b.rollCool = Math.max(0, b.rollCool - dt);
+  b.x += (L.x - b.x) * Math.min(1, dt * 14);
+  const v = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  b.y += v * CLIMB_V * dt;
+  b.climbed += Math.abs(v) * CLIMB_V * dt;
+  b.vx = b.vy = 0;
+  b.onGround = b.onPlatform = b.onBody = false;
+  b.rideId = null;
+  b.airJumps = AIR_JUMPS;
+  b.sinceGround = 0;
+  b.sinceJump = Infinity;
+  b.prevJump = jump; // a key held on the ladder isn't a fresh jump when you step off
+  b.low = 0;
+  b.cut = false;
+  const off = (row) => { b.climb = null; b.onGround = true; b.onPlatform = kindAt(Math.floor(b.x), row) === PLATFORM; };
+  const f = b.y + HH;
+  if (f <= L.top) { b.y = L.top - HH; off(L.top); }
+  else if (f >= L.bot) { b.y = L.bot - HH; off(L.bot); }
+  else if (press && input.x) { b.climb = null; b.vy = -JUMP_V * 0.6; b.vx = Math.sign(input.x) * RUN * 0.5; b.sinceGround = Infinity; }
+  return true;
+}
+
+// Stairs (gorge addendum, the level's steps): walking into a tread a row up (a ═, or a ▓ step) puts you on
+// it, with headroom only rock takes away; walking off one with the next a row down puts you on that.
+function stepOnto(b, dir, kindAt, wasGround, feet0) {
+  if (b.onGround && dir) {
+    const feet = Math.round(b.y + HH), c = Math.floor(b.x + dir * 0.39), k = kindAt(c, feet - 1);
+    // A ▓ step stops the body at its face, half a body short of the probe: look just past the face, and
+    // lift onto it a little over the edge so the step holds it.
+    const cs = Math.floor(b.x + dir * 0.45), solidStep = k === AIR && kindAt(cs, feet - 1) === SOLID;
+    const cc = solidStep ? cs : c;
+    if ((k !== AIR || solidStep) && kindAt(cc, feet - 2) !== SOLID && kindAt(cc, feet - 3) !== SOLID && kindAt(cc, feet - 4) !== SOLID) {
+      b.y -= 1;
+      b.onPlatform = k === PLATFORM;
+      if (solidStep) b.x += dir * 0.08;
+    }
+  }
+  if (!b.onGround && wasGround && b.vy >= 0 && b.t >= b.dropUntil) {
+    const f0 = Math.round(feet0);
+    for (let c = Math.floor(b.x - 0.39); c <= Math.floor(b.x + 0.39); c++) {
+      const k = kindAt(c, f0 + 1);
+      if (k !== AIR && kindAt(c, f0) === AIR) { b.y = f0 + 1 - HH; b.vy = 0; b.onGround = true; b.onPlatform = k === PLATFORM; b.airJumps = AIR_JUMPS; break; }
+    }
+  }
+}
+
 // Other fighters (body collision addendum): others are their boxes, { x, y, vx, vy, solid, tie }, with
 // solid false for anyone who passes through (rolling, protected, dead) and tie the way to go if our
 // centres coincide; solid false here means this body passes through everyone; door is doorZone's.
-export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside = null, others = null, solid = true, door = null } = {}) {
+// ladders and steps: the level's (gorge addendum), for a level that has them.
+export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside = null, others = null, solid = true, door = null, ladders = null, steps = false } = {}) {
+  if (ladders && ladders.length && climbStep(b, dt, input, kindAt, ladders)) return;
+  b.climb = null;
+  const wasGround = b.onGround, feet0 = b.y + HH;
   b.t += dt;
   const stunned = b.stun > 0;
   const heldJump = !!input.jump;
@@ -144,6 +221,7 @@ export function stepBody(b, dt, input, kindAt, { reducedMotion = false, inside =
   const block = solid && !rolled && others && others.length ? sortOthers(b, others, door) : null;
   if (block) mx += push(b, dt) + rideDx(b, block);
   move(b, mx, my, kinds, block);
+  if (steps) stepOnto(b, rolled ? b.rollDir : Math.sign(input.x || 0), kinds, wasGround, feet0);
   if (b.onGround) b.airJumps = AIR_JUMPS; // the floor, a platform or a ▓ top
   b.low = low && b.onGround && !b.onPlatform ? low : 0;
   // The roll ends after its time, or when it runs off a ledge (keeping its speed).
