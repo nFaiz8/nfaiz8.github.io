@@ -1,7 +1,7 @@
 // Impact frames (parry addendum §2): each kill I'm in is kept as a picture, the frame of it as the impact
 // shows it (a black-and-white negative), to look at and save. Kept in memory only: a reload loses them.
 // I or the HUD button opens the list; Esc, I or a click outside closes it. Its switch turns impact frames
-// off (no flash, no freeze, nothing kept), remembered in this browser.
+// on (the flash, the freeze, the keeping): off by default, remembered in this browser.
 
 export const IMPACT_FILTER = 'invert(1) grayscale(1) contrast(4)'; // the same as #stage.impact canvas
 export const KEEP = 20; // the newest this many are kept
@@ -42,12 +42,12 @@ export function shotName(at) {
   return `impact-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}.png`;
 }
 
-const ON_KEY = 'ascii-impact'; // 'off' when turned off
+const ON_KEY = 'ascii-impact'; // 'on' once turned on
 
 export function createShots({ onOpen, onClose, onCount } = {}) {
   const shots = []; // newest first: { url, at, text }
-  let on = true;
-  try { on = localStorage.getItem(ON_KEY) !== 'off'; } catch {}
+  let on = false;
+  try { on = localStorage.getItem(ON_KEY) === 'on'; } catch {}
   const root = document.createElement('div');
   root.className = 'map shots';
   root.hidden = true;
@@ -107,7 +107,7 @@ export function createShots({ onOpen, onClose, onCount } = {}) {
     if (shots.length) return list.replaceChildren(...shots.map(card));
     const p = document.createElement('p');
     p.className = 'shots-none';
-    p.textContent = on ? 'none yet: pop someone (or the dummy) and the frame of it is kept here' : 'impact frames are off';
+    p.textContent = on ? 'none yet: pop someone (or the dummy) and the frame of it is kept here' : 'impact frames are off: turn them on to freeze on each kill and keep the frame here';
     list.replaceChildren(p);
   }
 

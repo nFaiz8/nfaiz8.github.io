@@ -34,8 +34,8 @@ kill". The details below are choices made without them (§3). This addendum amen
 
 ## 2. The impact frame on a kill
 
-When I pop someone (the dummy too), or someone pops me, the fight's picture freezes for a moment, the way a
-fighting game's hitstop does:
+When impact frames are on (they are off by default, see the switch below), and I pop someone (the dummy
+too) or someone pops me, the fight's picture freezes for a moment, the way a fighting game's hitstop does:
 
 - **When.** `IMPACT.delay` = 250 ms after the kill, so it lands on the body in pieces in mid-air. The death's
   pop is 0.08 s, then the bones and the head fly up and out, highest and furthest apart about 0.2 s later.
@@ -66,10 +66,13 @@ fighting game's hitstop does:
   - The button shows in the arena always, and elsewhere once a picture has been kept. Opening it takes you
     out of the fight, as the map does. The first picture kept gives a note: "impact frame kept · I to see
     and save it".
-- **Off switch.** The user asked: "add a disable button for impact frames". At the top of the `[I]` panel,
-  `impact frames: on/off` turns off the flash, the hold and the keeping. It is remembered in this browser
-  (`localStorage` `ascii-impact`), unlike the train's look: a switch that turned itself back on at every
-  visit would be no use.
+- **The switch, off by default.** The user asked: "add a disable button for impact frames", then "impact
+  frame should be off by default too".
+  - `impact frames: on/off` at the top of the `[I]` panel turns the flash, the hold and the keeping on or off
+    together.
+  - They are off until it is turned on. The choice is remembered in this browser (`localStorage`
+    `ascii-impact` = `'on'`), unlike the train's look: a switch that reset at every visit would be no use.
+  - While they are off, the panel says how to turn them on.
 
 ## 3. Choices made for you
 
