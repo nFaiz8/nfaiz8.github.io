@@ -601,9 +601,11 @@ const standAtStairs = () => teleport(world, map.stairs.front.x, map.stairs.front
 let downGen = 0;
 // A photo, the grid, the map or the impact frames may be open (the forward button): close them the way their
 // own buttons do. Their onClose handlers rewrite the hash to the room, so the caller puts #/station back.
-async function closePanels() {
-  // The viewer only closes once it's open; one still opening (or closing) is waited out, for a few seconds at most.
-  for (let i = 0; viewer.isOpen && i < 100; i++) { await viewer.close(); if (viewer.isOpen) await new Promise((r) => setTimeout(r, 50)); }
+async function closePanels(cancelled) {
+  // The viewer only closes once it's open (viewer.js has no cancel), so one still opening or closing is waited out,
+  // but not past a cancelled trip (the back button): then the caller drops out and the viewer closes on its own.
+  for (let i = 0; viewer.isOpen && !cancelled(); i++) { await viewer.close(); if (viewer.isOpen && !cancelled()) await new Promise((r) => setTimeout(r, 50)); }
+  if (cancelled()) return;
   if (grid.isOpen) grid.close();
   if (mapView.isOpen) mapView.toggle();
   if (shots?.isOpen) shots.toggle();
@@ -619,7 +621,8 @@ async function goDown({ instant = false } = {}) {
   if (instant) { fadeEl.hidden = false; fadeEl.firstElementChild.textContent = '▼ going down…'; fadeEl.classList.add('on'); }
   else await fade(true, '▼ going down…');
   try {
-    await closePanels();
+    await closePanels(() => stationState !== 'down' || gen !== downGen);
+    if (stationState !== 'down' || gen !== downGen) return; // the back button won while the panels closed
     if (instant && location.hash !== STATION_HASH) replaceHash(STATION_HASH); // the panels' close handlers rewrote it
     const { startStation } = await import('./rpg/index.js');
     if (stationState !== 'down' || gen !== downGen) return; // the back button won while it loaded
@@ -642,7 +645,12 @@ async function goDown({ instant = false } = {}) {
   await fade(false);
 }
 async function goUp({ fromHistory = false } = {}) {
-  if (stationState === 'down') { stationState = 'off'; standAtStairs(); world.frozen = false; await fade(false); return; }
+  if (stationState === 'down') {
+    stationState = 'off'; standAtStairs(); world.frozen = false;
+    await fade(false);
+    if (fromHistory && location.hash && location.hash !== STATION_HASH) applyRoute(parseRoute(location.hash));
+    return;
+  }
   if (stationState !== 'in') return;
   stationState = 'up';
   await fade(true);
