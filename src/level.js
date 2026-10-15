@@ -5,11 +5,12 @@ export const LEVEL_COLS = 204, LEVEL_ROWS = 33;
 export const PICKUP_GUN = { R: 'rifle', N: 'sniper' };
 
 // The arena's maps (gorge addendum): the train (src/arena.txt) and the gorge (src/gorge.txt), each with its
-// size. steps: a tread a row up is walked onto (the gorge's stairs and terrace); dummy: the practice dummy
-// stands in it when you're alone.
+// size. steps: a tread a row up is walked onto (the gorge's stairs and terrace); dummy: the column whose
+// floor the practice dummy stands on when you're alone (the train's car A; the gorge's, under the cave by
+// the way in).
 export const MAPS = {
-  train: { cols: LEVEL_COLS, rows: LEVEL_ROWS, steps: false, dummy: true },
-  gorge: { cols: 212, rows: 112, steps: true, dummy: false },
+  train: { cols: LEVEL_COLS, rows: LEVEL_ROWS, steps: false, dummy: 50 },
+  gorge: { cols: 212, rows: 112, steps: true, dummy: 160 },
 };
 export const MAP_NAMES = Object.keys(MAPS);
 export const DEFAULT_MAP = 'train';

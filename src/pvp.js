@@ -2,7 +2,7 @@
 // messages, the practice dummy and offline play (a local referee), and what the HUD shows. DOM-free glue:
 // every rule comes from fight.js or the referee. Positions are map cells here and arena-local on the
 // wire; times are ms here and seconds in the rules.
-import { newBody, stepBody, knock, rolling, doorZone, climbLook } from './arena.js';
+import { newBody, stepBody, knock, rolling, doorZone, climbLook, ladderAt } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
@@ -17,7 +17,7 @@ import { arenaTicker } from './live.js';
 import { enterSide } from './world.js';
 
 const DUMMY = 'dummy';
-const DUMMY_COL = 50; // the dummy stands on car A's floor here
+const DUMMY_COL = 50; // the dummy stands on car A's floor here, unless the level says (parseMap)
 const FLASH_MS = 110; // a muzzle flash lights the train this long
 // Where a body stands on the lowest floor under column c (arena-local): the dummy's spot, from the level.
 export function floorSpot(level, c) {
@@ -46,7 +46,7 @@ export function createPvp({
   onNote = () => {}, onFeed = () => {}, onImpact = () => {}, reducedMotion = false, rand = Math.random, myId = () => 'me',
 }) {
   const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
-  const DUMMY_SPOT = floorSpot(level, DUMMY_COL);
+  const DUMMY_SPOT = floorSpot(level, Number.isInteger(level.dummy) ? level.dummy : DUMMY_COL);
   const door = doorZone(level, off); // nobody collides in the doorway
   const fighters = createFighters({ kindAt: world.kindAt, inside: world.inside, offset: off, rtt, door, me: (now) => myBox(now), ladders: world.ladders, steps: world.steps });
   const fx = createFx({ kindAt: levelKind(level), offset: off, reducedMotion });
@@ -137,7 +137,7 @@ export function createPvp({
   // Shown in the side view whenever no real fighter is known (online: once the welcome said so; not just
   // after a dropped connection).
   function dummyShown(now) {
-    const on = level.dummy !== false && entered && !awaitAw && fighters.ids().length === 0 && now >= dummyBackAt; // none in the gorge
+    const on = entered && !awaitAw && fighters.ids().length === 0 && now >= dummyBackAt;
     if (on && !dummyUp) resetDummy(now);
     dummyUp = on;
     return on;
@@ -343,8 +343,11 @@ export function createPvp({
     if (!entered || !me.alive) { world.aimFacing = 0; aimed = false; bits = 0; return { ...IDLE }; }
     let facing = p.facing < 0 ? -1 : 1;
     const mouse = inp.mouse && inp.mouse.on && num(inp.mouse.x) && num(inp.mouse.y) ? inp.mouse : null;
+    // Ctrl (inp.crouch) is ↓ only where ↓ crouches: on solid floor, off a ladder, so it never drops through
+    // a ═ or takes a ladder down.
+    const down = !!inp.down || (!!inp.crouch && !!p.onGround && !p.onPlatform && !p.climb && !(world.ladders && ladderAt(p, world.ladders)));
     // Crouching (↓ on solid floor): ↓ doesn't tilt the shot, which stays level (crouch addendum §3).
-    const crouching = !!inp.down && !!p.onGround && !p.onPlatform;
+    const crouching = down && !!p.onGround && !p.onPlatform;
     if (mouse) {
       const s = shoulderOf(p.x, p.y, facing, p.low || 0);
       const r = pointAim(s.x, s.y, mouse.x, mouse.y, facing);
@@ -359,13 +362,13 @@ export function createPvp({
     }
     aimed = !!mouse || !!inp.aimUp || (!!inp.aimDown && !crouching);
     const x = num(inp.x) ? inp.x : 0;
-    bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (inp.down ? 8 : 0) | (inp.run ? 16 : 0) | (inp.up ? 256 : 0);
+    bits = (x < 0 ? 1 : 0) | (x > 0 ? 2 : 0) | (inp.jump ? 4 : 0) | (down ? 8 : 0) | (inp.run ? 16 : 0) | (inp.up ? 256 : 0);
     if (!rolling(p)) { // a roll drops shots and strikes for its length
       if (inp.fire) fire(facing, now);
       const n = Math.min(MAX_PRESSES, Math.max(0, inp.strikes | 0));
       for (let k = 0; k < n; k++) strike(now);
     }
-    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down: !!inp.down, up: !!inp.up, roll: inp.roll || 0 };
+    return { x, y: num(inp.y) ? inp.y : 0, run: !!inp.run, jump: !!inp.jump, down, up: !!inp.up, roll: inp.roll || 0 };
   }
 
   // ---------- the frame ----------

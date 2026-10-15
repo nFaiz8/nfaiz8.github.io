@@ -610,7 +610,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.goto(`${url}#/room/arena`); await ready(page);
     const entered = () => page.evaluate(() => window.__ascii.pvp().entered);
     await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
-    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · ↓ crouch · mouse aims');
+    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · Ctrl crouch · mouse aims');
     // A photo.
     await page.keyboard.press('KeyE');
     await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });
@@ -1361,17 +1361,17 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(h.first > h.lastFig, `hearts after the figures (${h.first} vs ${h.lastFig})`);
     assert.equal(h.entities, 0, 'hearts still in world.entities');
   });
-  // The gorge (gorge addendum): ?map= picks it on localhost. Stairs and a ladder with real keys, no dummy,
-  // every glyph in the atlas, and on a phone JUMP climbs.
+  // The gorge (gorge addendum): ?map= picks it on localhost. Stairs and a ladder with real keys, its dummy,
+  // Ctrl crouching, every glyph in the atlas, and on a phone JUMP climbs.
   const gorgeAt = () => page.evaluate(() => { const a = window.__ascii.map.arena, p = window.__ascii.world.player; return { x: p.x - a.x - 1, feet: p.y + 1.5 - a.y - 1, climb: !!p.climb }; });
   const gorgePut = (x, feet) => page.evaluate((x, feet) => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + x, a.y + 1 + feet - 1.5); }, x, feet);
   for (const r of ['museum', 'canvas', 'gl']) {
-    await check(`${r}: the gorge: no dummy; up the stairs and a ladder with real keys; every glyph drawn`, async () => {
+    await check(`${r}: the gorge: its dummy; up the stairs and a ladder with real keys; Ctrl crouches, Ctrl+A crawls; every glyph drawn`, async () => {
       await page.goto('about:blank');
       await page.goto(`${url}?r=${r}&map=gorge#/room/arena`); await ready(page);
       await sleep(500);
       const info = await page.evaluate(() => ({ mode: window.__ascii.mode(), name: window.__ascii.map.arena.level.name, dummies: window.__ascii.pvp().bodies(performance.now()).filter((b) => b.dummy).length }));
-      assert.deepEqual(info, { mode: 'side', name: 'gorge', dummies: 0 });
+      assert.deepEqual(info, { mode: 'side', name: 'gorge', dummies: 1 });
       await gorgePut(111.5, 106); await sleep(300);
       await page.keyboard.down('ArrowRight'); await sleep(1300); await page.keyboard.up('ArrowRight');
       const stairs = await gorgeAt();
@@ -1384,6 +1384,14 @@ await withBrowser(async ({ page, url, errors }) => {
       assert.ok(mid.climb && mid.feet < 76 && mid.feet > 64, `on the ladder (${JSON.stringify(mid)})`);
       assert.ok(!top.climb && top.feet <= 64.01, `stepped off at the top (${JSON.stringify(top)})`);
       await page.screenshot({ path: `${SHOTS}/gorge-${r}.png` });
+      const low = () => page.evaluate(() => window.__ascii.pvp().bodies(performance.now()).find((b) => b.me).state.low);
+      await gorgePut(150.5, 106); await sleep(300);
+      await page.keyboard.down('ControlLeft'); await sleep(200);
+      const crouched = await low();
+      await page.keyboard.down('KeyA'); await sleep(300);
+      const crawled = await low();
+      await page.keyboard.up('KeyA'); await page.keyboard.up('ControlLeft'); await sleep(200);
+      assert.deepEqual([crouched, crawled, await low()], [1, 2, 0], 'Ctrl crouches, Ctrl+A crawls, letting go stands');
       assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'glyphs missing from the atlas');
     });
   }

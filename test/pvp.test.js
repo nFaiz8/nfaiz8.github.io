@@ -921,3 +921,30 @@ test('online: hl heals me (my regen carries on) and shows +d over a healed fight
   s.pvp.onMessage({ t: 'hl', id: 'b', hp: 70, d: 50 }, s.now);
   assert.equal(s.pvp.fx.glyphs(s.now, {}).filter((g) => g.color.join() === '140,235,150').map((g) => g.ch).join(''), '+50+50');
 });
+
+test('Ctrl (crouch) crouches and crawls on a floor as ↓ does, but on a ═ it doesn\'t drop through', () => {
+  const s = setup({ online: true });
+  s.pvp.onMessage(emptyAw(), s.now);
+  s.frames(20);
+  let n = s.sent.length;
+  s.frames(2, { crouch: true });
+  const c = s.sent.slice(n).find((m) => m.t === 'a');
+  assert.ok(c && (c.i & 64) && (c.i & 8), JSON.stringify(c));
+  assert.equal(s.pvp.bodies(s.now)[0].state.low, 1);
+  s.frames(3, { crouch: true, x: 1 });
+  assert.equal(s.pvp.bodies(s.now)[0].state.low, 2);
+  // a ═ with three rows of air over it, away from the door
+  let spot = null;
+  for (let r = 4; r < level.rows - 1 && !spot; r++) for (let c2 = 20; c2 < 150 && !spot; c2++) {
+    const k = (cc, rr) => level.cells[rr * level.cols + cc];
+    if (k(c2, r) === 1 && [1, 2, 3].every((d) => k(c2, r - d) === 0 && k(c2 - 1, r - d) === 0 && k(c2 + 1, r - d) === 0)) spot = { x: c2 + 0.5, y: r - 1.5 };
+  }
+  const p = setup({ at: spot });
+  p.frames(20);
+  assert.ok(p.world.player.onPlatform, 'standing on a ═');
+  const y = p.world.player.y;
+  p.frames(30, { crouch: true });
+  assert.equal(p.world.player.y, y, 'still on it');
+  p.frames(30, { down: true });
+  assert.ok(p.world.player.y > y + 0.5, '↓ drops through');
+});

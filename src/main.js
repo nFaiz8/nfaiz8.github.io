@@ -380,7 +380,7 @@ function syncFight(t) {
     // and the gallery would keep drawing me there while I fight.
     if (live) live.tick(world.player);
     pvp.enter(t, fightOnline());
-    if (!touch && !keysNoted) { keysNoted = true; note('J shoot · K hit · ↓ crouch · mouse aims', 4000); }
+    if (!touch && !keysNoted) { keysNoted = true; note('J shoot · K hit · Ctrl crouch · mouse aims', 4000); }
   } else if (!want && pvp.entered) leaveFight(t);
 }
 function leaveFight(t) {

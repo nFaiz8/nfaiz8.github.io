@@ -18,7 +18,7 @@ test('src/gorge.txt is what the scene generates (regenerate it after changing sr
   assert.equal(text, gorgeLevelText());
 });
 
-test('the gorge map: 212 × 112, ten spawns, three pickups, a door, three ladders, stairs, no dummy', () => {
+test('the gorge map: 212 × 112, ten spawns, three pickups, a door, three ladders, stairs, the dummy\'s column', () => {
   assert.deepEqual([L.cols, L.rows, W, H], [212, 112, 212, 112]);
   assert.equal(L.name, 'gorge');
   assert.equal(L.spawns.length, 10);
@@ -26,7 +26,7 @@ test('the gorge map: 212 × 112, ten spawns, three pickups, a door, three ladder
   assert.ok(L.door);
   assert.deepEqual(L.ladders, [{ x: 132.5, top: 17, bot: 25 }, { x: 132.5, top: 35, bot: 47 }, { x: 175.5, top: 64, bot: 76 }]);
   assert.equal(L.steps, true);
-  assert.equal(L.dummy, false);
+  assert.equal(L.dummy, 160);
   for (const s of L.spawns) assert.notEqual(kind(s.c, s.r + 1), 0, `spawn ${s.c},${s.r} stands on something`);
 });
 
@@ -35,7 +35,7 @@ test('mapName: an unknown map is the train; parseMap carries the map\'s rules', 
   assert.equal(mapName('nope'), 'train');
   assert.equal(mapName('__proto__'), 'train');
   const T = parseMap('train', fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
-  assert.deepEqual([T.cols, T.rows, T.steps, T.dummy, T.ladders.length], [MAPS.train.cols, MAPS.train.rows, false, true, 0]);
+  assert.deepEqual([T.cols, T.rows, T.steps, T.dummy, T.ladders.length], [MAPS.train.cols, MAPS.train.rows, false, 50, 0]);
 });
 
 test('H markers: a column of H is one ladder, from the tread over its top to the row under its foot; H is air', () => {
@@ -114,15 +114,18 @@ test('the gorge\'s look: deterministic, every glyph is in the atlas, and crisp b
   assert.deepEqual(paintWindow(T, frameAt(1, { reducedMotion: true }), 'line', 0, 0, W, H).ch, paintWindow(T, frameAt(99999, { reducedMotion: true }), 'line', 0, 0, W, H).ch);
 });
 
-test('the gorge has no practice dummy, even alone and offline', () => {
+test('the gorge\'s practice dummy, alone and offline: on the floor under the cave, by the way in, clear of the spawns', () => {
   const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
   const data = indexData(fixture, ['IMG_1003']);
   const map = buildLayout(data, { name: 'X' }, { arena: { photo: data.byId.get('IMG_1003'), level: L } });
-  const A = map.arena, world = createWorld(map);
-  teleport(world, A.x + 1 + L.spawns[0].x, A.y + 1 + L.spawns[0].y);
+  const A = map.arena, world = createWorld(map), off = { x: A.x + 1, y: A.y + 1 };
+  teleport(world, off.x + L.spawns[0].x, off.y + L.spawns[0].y);
   const pvp = createPvp({ world, map, level: L, send: () => true, onNote() {}, onFeed() {}, onImpact() {}, rand: () => 0.5, myId: () => 'me' });
   pvp.enter(0, false);
   for (let k = 1; k < 200; k++) pvp.frame(1 / 60, k * 16);
-  assert.equal(pvp.bodies(4000).filter((b) => b.dummy).length, 0);
-  assert.equal(kind(-1, 50), SOLID);
+  const d = pvp.bodies(4000).filter((b) => b.dummy);
+  assert.equal(d.length, 1);
+  assert.deepEqual([d[0].state.x - off.x, d[0].state.y - off.y], [160.5, FLOOR - 1.5]);
+  for (const s of L.spawns) assert.ok(Math.hypot(s.x - 160.5, s.y - (FLOOR - 1.5)) > 6, `spawn ${s.c},${s.r} too close`);
+  for (let r = FLOOR - 6; r < FLOOR; r++) assert.equal(kind(160, r), 0, `clear over the dummy at row ${r}`);
 });

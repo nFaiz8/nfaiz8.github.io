@@ -23,6 +23,10 @@ step.
   - It does not work on someone's head: there ↓ still drops off it.
   - It does not work while stunned or rolling, or in the air.
   - Crouched and still, you are 2 rows tall.
+  - **Ctrl** (either one) crouches too (2026-10-15: "ctrl for crouch"), in the arena only. It is ↓ only
+    where ↓ crouches: on a ═, on a head or at a ladder it does nothing, so it never drops you or takes a
+    ladder down. With Ctrl held, ←/→/A/D, J, K and Space still play (Ctrl+A crawls). The first-entry note
+    says "Ctrl crouch".
 - **Crawl (prone):** crouched, with ← or → held. You lie down: 1 row tall and about 3.5 cells long.
   - You crawl at 10 cells/s (`CRAWL`). Shift does nothing.
   - Letting go of ←/→ brings you back to a crouch.

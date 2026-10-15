@@ -14,7 +14,9 @@ the arena specs (`2026-10-13-arena-design.md`, `2026-10-14-arena-train-level.md`
 - `parseMap(name, text)` parses a level at its map's size and adds its rules:
   - `steps`: a tread one row up is walked onto (the gorge's stairs and terrace). The train has none, so
     its physics are unchanged.
-  - `dummy`: the practice dummy stands in the arena when you're alone. The gorge has none.
+  - `dummy`: the column whose floor the practice dummy stands on when you're alone: 50 on the train (car
+    A), 160 in the gorge (the cave mouth under the rock, between its lanterns, by the way in). The user
+    first asked for none in the gorge, then on 2026-10-15: "add a dummy to gorge".
 - **The gorge's level is generated.** `src/gorge/scene.js` builds the scene (cells, roles, collision) and
   `gorgeLevelText()` writes `src/gorge.txt` from it, with the spawns, pickups, door and ladders. After
   changing the scene, regenerate it:
@@ -64,7 +66,7 @@ the arena specs (`2026-10-13-arena-design.md`, `2026-10-14-arena-train-level.md`
 | question | choice |
 | --- | --- |
 | How much of the gorge is the arena? | All of it, 212 × 112: the courtyard, the stairs, the caves, the ladders, the bridge on top. |
-| Bots? | None in the gorge, and no practice dummy. |
+| Bots? | None in the gorge. Its practice dummy (added later) stands in the cave mouth by the way in. |
 | How does a switch reach people already on the page? | Their page reloads into the new map (and back into the arena if they were in it). |
 | Where is the map kept? | In the Worker's `config` Durable Object, so a deploy or a quiet night doesn't reset it. |
 
@@ -77,11 +79,11 @@ the arena specs (`2026-10-13-arena-design.md`, `2026-10-14-arena-train-level.md`
   - the full climb from the courtyard to the bridge at 20, 60 and 144 fps;
   - the train's rules unchanged (no steps, no ladders);
   - the look is deterministic and every glyph is in the atlas;
-  - no dummy.
+  - the dummy at column 160, on the floor, clear of the spawns.
 - `test/rules.test.js`: the bits up to 1023, the biggest map's bounds, and `am`.
 - `server/test/server.test.js`: the welcome carries the map; a wrong password gets `am-no`; the right one
   switches it.
-- `e2e/run.mjs`, in each renderer: in the gorge, up the stairs and a ladder with real keys, no dummy, no
-  missing glyphs; on a phone, JUMP held climbs a ladder.
+- `e2e/run.mjs`, in each renderer: in the gorge, its dummy, up the stairs and a ladder with real keys, Ctrl
+  crouching, no missing glyphs; on a phone, JUMP held climbs a ladder.
 - `e2e/multiplayer.mjs`: a wrong password is refused; "uzbek" switches both pages to the gorge and back,
   each staying in the arena.

@@ -1,5 +1,6 @@
 // Keyboard and pointer input. Held keys become a movement vector; taps become commands. In the arena,
-// W/↑/Space jump and S/↓ drop through platforms; the phone pad presses the same keys virtually.
+// W/↑/Space jump, S/↓ drop through platforms (and crouch on a floor), Ctrl only crouches; the phone pad
+// presses the same keys virtually.
 const KEYS = {
   ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0],
   ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1],
@@ -7,6 +8,9 @@ const KEYS = {
 const JUMP = ['Space', 'KeyW', 'ArrowUp', 'Jump'];
 const UP = ['KeyW', 'ArrowUp', 'Jump']; // takes hold of a ladder and climbs it (Space only jumps)
 const DROP = ['KeyS', 'ArrowDown', 'Drop'];
+const CROUCH = ['ControlLeft', 'ControlRight']; // arena only: crouches and crawls, never drops or climbs down
+// The arena's keys still play with Ctrl held (a crawl is Ctrl with ← or →).
+const PLAY = new Set([...Object.keys(KEYS), 'KeyJ', 'KeyK', 'Space']);
 
 // Two presses of the same direction within `gap` seconds make a roll. Returns the direction, or 0.
 export function createDoubleTap(gap = 0.25) {
@@ -36,7 +40,9 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
 
   const editable = (e) => e.target.closest && e.target.closest('input, textarea, [contenteditable]');
   win.addEventListener('keydown', (e) => {
-    if (editable(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (editable(e)) return;
+    if (CROUCH.includes(e.code)) { if (arena()) { held.add(e.code); e.preventDefault(); } return; }
+    if (e.metaKey || e.altKey || (e.ctrlKey && !(arena() && PLAY.has(e.code)))) return;
     run = e.shiftKey;
     if (e.code === 'KeyJ') { held.add('KeyJ'); mouse.on = false; e.preventDefault(); return; }
     if (e.code === 'KeyK') { if (!e.repeat && arena()) strikes++; e.preventDefault(); return; }
@@ -85,7 +91,7 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
       let x = 0, y = 0;
       const all = new Set([...held, ...pad]);
       for (const code of all) { const k = KEYS[code]; if (k) { x += k[0]; y += k[1]; } }
-      return { x: Math.sign(x), y: Math.sign(y), run, jump: JUMP.some((c) => all.has(c)), down: DROP.some((c) => all.has(c)), up: UP.some((c) => all.has(c)),
+      return { x: Math.sign(x), y: Math.sign(y), run, jump: JUMP.some((c) => all.has(c)), down: DROP.some((c) => all.has(c)), crouch: CROUCH.some((c) => all.has(c)), up: UP.some((c) => all.has(c)),
         fire: all.has('KeyJ') || all.has('Fire') || (mouseFire && arena()) };
     },
     press(code, on) {

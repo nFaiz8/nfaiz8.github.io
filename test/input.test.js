@@ -136,3 +136,25 @@ test('strikes and rolls are not counted outside the arena', async () => {
   assert.equal(input.takeRoll(), 0);
   delete globalThis.window;
 });
+
+test('Ctrl crouches in the arena only; with it held ← and J still play; outside the arena Ctrl shortcuts are the browser\'s', async () => {
+  const win = fakeTarget(), stage = fakeTarget();
+  globalThis.window = win;
+  const { createInput } = await import('../src/input.js?ctrl');
+  let inArena = true, prevented = 0;
+  const input = createInput(stage, { onTap() {}, onKey: () => false, arena: () => inArena });
+  const key = (type, code, extra = {}) => win.fire(type, { code, target: {}, preventDefault() { prevented++; }, shiftKey: false, ...extra });
+  key('keydown', 'ControlLeft', { ctrlKey: true });
+  key('keydown', 'ArrowLeft', { ctrlKey: true });
+  key('keydown', 'KeyJ', { ctrlKey: true });
+  let s = input.state();
+  assert.deepEqual([s.crouch, s.down, s.x, s.fire], [true, false, -1, true]);
+  assert.equal(prevented, 3);
+  key('keyup', 'ControlLeft'); key('keyup', 'ArrowLeft'); key('keyup', 'KeyJ');
+  assert.equal(input.state().crouch, false);
+  inArena = false;
+  key('keydown', 'ControlLeft', { ctrlKey: true });
+  key('keydown', 'KeyD', { ctrlKey: true });
+  s = input.state();
+  assert.deepEqual([s.crouch, s.x], [false, 0]);
+});
