@@ -6,7 +6,7 @@ import {
   MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, GUN_BY_CODE, STRIKES, stunOf,
   shoulderOf, muzzleOf, rayLength, bulletRange, bulletAt, sweep,
   regenHp, fleeKiller, nextStrike, strikeBox, boxHits, strikeKnock, bulletKnock, inDodge, pickSpawn, nearPickup,
-  HEADSHOT, isHeadshot, ROLL, hurtOf, lowOf, LOW_KNOCK,
+  HEADSHOT, isHeadshot, ROLL, hurtOf, lowOf, LOW_KNOCK, PARRY_TIME,
 } from './fight.js';
 
 const EST_MAX = 0.1; // how far ahead a fighter's last state is moved on by its velocity, then held
@@ -21,6 +21,11 @@ const TOUCH = 1e-6; // cells: a body flush against the wall a bullet stops at is
 
 const r2 = (v) => Math.round(v * 100) / 100 + 0;
 const r1 = (v) => Math.round(v * 10) / 10 + 0; // + 0 turns -0 into 0
+// A strike's box as a centre offset from the body and half sizes, for the parry's sweep (parry addendum §1).
+function parryBox(T) {
+  const b = strikeBox(0, 0, T.f, T.lastStrike);
+  return { dx: (b.x0 + b.x1) / 2, dy: (b.y0 + b.y1) / 2, hw: (b.x1 - b.x0) / 2, hh: (b.y1 - b.y0) / 2 };
+}
 const shownHp = (hp) => (hp > 0 ? Math.max(1, Math.round(hp)) : 0); // alive never shows 0
 
 // A plain record: it survives structuredClone and JSON (Durable Object attachments).
@@ -50,9 +55,10 @@ export function createReferee({ level, rand }) {
   const low = (F) => lowOf(F.i, F.g); // crouched or prone, as of the last state (crouch addendum §4)
   const target = (T, t) => T.arena && T.alive && t >= T.safeUntil && !inDodge(T.rollAt, t);
 
-  // hs: a headshot; h and the k it causes carry hs: 1, and leave it out otherwise. A body hit while low takes
-  // half the knock, and lo: 1 tells everyone to halve its stun too.
-  function hurt(T, by, w, n, d, kx, ky, stun, now, all, hs = false) {
+  // hs: a headshot; h and the k it causes carry hs: 1, and leave it out otherwise; pr: 1 the same way for a
+  // round that was parried. A body hit while low takes half the knock, and lo: 1 tells everyone to halve
+  // its stun too.
+  function hurt(T, by, w, n, d, kx, ky, stun, now, all, hs = false, pr = false) {
     const lo = low(T) > 0;
     if (lo) { kx *= LOW_KNOCK; ky *= LOW_KNOCK; }
     T.hp = regenHp(T.hp, T.hurtAt, now) - d;
@@ -66,12 +72,16 @@ export function createReferee({ level, rand }) {
     const out = [{ t: 'h', id: T.id, by, w, n: n ?? -1, d, hp: shownHp(T.hp), kx: r1(kx), ky: r1(ky) }];
     if (hs) out[0].hs = 1;
     if (lo) out[0].lo = 1;
+    if (pr) out[0].pr = 1;
     if (T.hp <= 0) {
       T.alive = false; T.deadAt = now; T.hp = 0;
       toDeagle(T);
       const K = all.find((o) => o.id === by);
       if (K) K.kills++;
-      out.push(hs ? { t: 'k', id: T.id, by, kills: K ? K.kills : 0, hs: 1 } : { t: 'k', id: T.id, by, kills: K ? K.kills : 0 });
+      const k = { t: 'k', id: T.id, by, kills: K ? K.kills : 0 };
+      if (hs) k.hs = 1;
+      if (pr) k.pr = 1;
+      out.push(k);
     }
     return out;
   }
@@ -101,7 +111,8 @@ export function createReferee({ level, rand }) {
 
   function fire(F, m, now, all) {
     const G = GUNS[F.gun];
-    if (!ready(F) || bullets.filter((b) => b.owner === F.id).length >= G.max) return { ok: false, out: [] };
+    // A round F parried is F's, but not against F's cap.
+    if (!ready(F) || bullets.filter((b) => b.owner === F.id && !b.pr).length >= G.max) return { ok: false, out: [] };
     const e = estimate(F, now), l = low(F);
     const mz = muzzleOf(e.x, e.y, F.f, F.a, F.gun, l);
     const near = Math.abs(m.x - mz.x) <= ORIGIN.x && Math.abs(m.y - mz.y) <= ORIGIN.y; // false for NaN
@@ -147,8 +158,22 @@ export function createReferee({ level, rand }) {
     return { ok: true, out };
   }
 
+  // When in [from, to] a round of b flies into T's strike box while it still parries, or Infinity. A round
+  // already inside the box when its parry starts is not parried: it has to fly in.
+  function parryAt(b, T, from, to) {
+    if (T.id === b.owner || !T.arena || !T.alive || !T.lastStrike) return Infinity;
+    const ta = Math.max(from, T.strikeAt), tb = Math.min(to, T.strikeAt + PARRY_TIME);
+    if (!(tb > ta)) return Infinity;
+    const P = parryBox(T), q0 = bulletAt(b, ta), q1 = bulletAt(b, tb), c0 = estimate(T, ta), c1 = estimate(T, tb);
+    c0.x += P.dx; c0.y += P.dy; c1.x += P.dx; c1.y += P.dy;
+    if (Math.abs(q0.x - c0.x) < P.hw && Math.abs(q0.y - c0.y) < P.hh) return Infinity;
+    const s = sweep(q0, q1, c0, c1, P.hw, P.hh);
+    return s < 0 ? Infinity : ta + s * (tb - ta);
+  }
+
   // Each bullet moves from last to min(now, its end). The earliest body its motion touches,
-  // relative to that body's own motion over the same span, takes the hit.
+  // relative to that body's own motion over the same span, takes the hit. A sniper round that meets a
+  // strike box first is parried instead (parry addendum §1).
   function tick(now, all) {
     const out = [];
     for (let j = 0; j < bullets.length; j++) {
@@ -169,13 +194,32 @@ export function createReferee({ level, rand }) {
           const t = b.last + s * (t1 - b.last);
           if (t < hitT && target(T, t)) { hit = T; hitT = t; }
         }
+        let parrier = null, parryT = Infinity;
+        if (G.parry) {
+          for (const T of all) {
+            const t = parryAt(b, T, b.last, t1);
+            if (t < parryT) { parrier = T; parryT = t; }
+          }
+        }
+        if (parrier && parryT <= hitT) {
+          // Straight back from where it met the box, the parrier's now, with a fresh range; it flies on from
+          // there in this same tick.
+          const p = bulletAt(b, parryT), x = r2(p.x), y = r2(p.y);
+          const angle = b.angle > 0 ? b.angle - Math.PI : b.angle + Math.PI;
+          const n = seq, range = bulletRange(b.gun);
+          seq = (seq + 1) % 65536;
+          out.push({ t: 'pr', id: parrier.id, n: b.n, n2: n, x, y, a: r2(angle), w: G.code });
+          Object.assign(b, { n, owner: parrier.id, x, y, angle, t0: parryT, last: parryT, pr: true, len: Math.min(rayLength(kindAt, x, y, angle, range), range) });
+          j--;
+          continue;
+        }
         if (hit) {
           // Where it struck: the bullet at the hit time against the target's estimate then (clamped into
           // the stance's box by isHeadshot). The head takes HEADSHOT times the damage; knock and stun stay.
           const p = bulletAt(b, hitT), c = estimate(hit, hitT);
           const hs = isHeadshot({ dx: p.x - c.x, dy: p.y - c.y }, low(hit), hit.f);
           const { kx, ky } = bulletKnock(b.gun, b.angle);
-          out.push(...hurt(hit, b.owner, G.code, b.n, hs ? G.damage * HEADSHOT : G.damage, kx, ky, stunOf(G.code), hitT, all, hs));
+          out.push(...hurt(hit, b.owner, G.code, b.n, hs ? G.damage * HEADSHOT : G.damage, kx, ky, stunOf(G.code), hitT, all, hs, !!b.pr));
           bullets.splice(j--, 1);
           continue;
         }

@@ -330,12 +330,12 @@ test('headshot: a level deagle bullet at the head row does 50 with hs: 1; knockb
   assert.deepEqual({ ...h, n: undefined }, { t: 'h', id: 'b', by: 'a', w: 'd', n: undefined, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 });
 });
 
-test('headshot: ×2 for the rifle too (18)', () => {
+test('headshot: ×2 for the rifle (the smg) too (12)', () => {
   const R = ref(), A = F('a', 20.5, 23.5), B = F('b', 30.5);
   A.gun = 'rifle'; A.ammo = 40;
   shoot(R, A, 1, [A, B]);
   const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
-  assert.deepEqual([h.d, h.hp, h.hs], [18, 82, 1]);
+  assert.deepEqual([h.d, h.hp, h.hs], [12, 88, 1]);
 });
 
 test('a level bullet at the torso does 1× with no hs; melee never has hs', () => {
@@ -545,4 +545,101 @@ test('crouch: the bits count only on the ground and not rolling; a prone body\'s
   const R3 = ref(), S3 = Object.assign(F('s', 20.5), { i: 128 }), T3 = Object.assign(F('t', 30.5, 24.5, 1), { i: 128 });
   lowShoot(R3, S3, 1, [S3, T3], 2);
   assert.equal(run(R3, 1, 2, [S3, T3]).find((q) => q.t === 'h').hs, undefined, 'facing away: the feet');
+});
+
+// Parry (parry addendum §1). A sniper at 20.5 fires level at B at 60.5, who faces it: the round meets B's
+// punch box (x 57.9–59.7 for a punch facing -1) about 0.16 s after it was fired.
+const sniperAt = (id, x, f = 1) => Object.assign(F(id, x, 24.5, f), { gun: 'sniper', ammo: 5 });
+function parryRun({ strikeAt = 1.05, f = -1, gun = 'sniper', kind = 'p', to = 1.8 } = {}) {
+  const R = ref(), A = sniperAt('a', 20.5), B = F('b', 60.5, 24.5, f);
+  if (gun !== 'sniper') { A.gun = gun; A.ammo = GUNS[gun].ammo; }
+  const all = [A, B];
+  const s = shoot(R, A, 1, all).out[0];
+  const out = [...run(R, 1, strikeAt - 0.001, all)];
+  if (kind) out.push(...R.strike(B, { k: kind }, strikeAt, all).out);
+  out.push(...run(R, strikeAt, to, all));
+  return { R, A, B, s, out };
+}
+
+test('parry: a punch facing a sniper round within 0.2 s sends it back; it hits the shooter, by the parrier, with pr: 1', () => {
+  const { A, B, s, out } = parryRun();
+  const pr = out.find((m) => m.t === 'pr');
+  assert.ok(pr, 'pr sent');
+  assert.equal(pr.id, 'b');
+  assert.equal(pr.n, s.n);
+  assert.notEqual(pr.n2, s.n);
+  assert.equal(pr.w, 'n');
+  assert.ok(Math.abs(Math.abs(pr.a) - Math.PI) < 0.01, `straight back: ${pr.a}`);
+  assert.ok(pr.x > 57.5 && pr.x < 60, `met the box: ${pr.x}`);
+  const hs = out.filter((m) => m.t === 'h');
+  assert.equal(hs.filter((h) => h.id === 'b').length, 0, 'the parrier is not hit');
+  const back = hs.find((h) => h.id === 'a');
+  assert.ok(back, 'the shooter is hit by their own round');
+  assert.equal(back.by, 'b');
+  assert.equal(back.n, pr.n2);
+  assert.equal(back.w, 'n');
+  assert.equal(back.pr, 1);
+  assert.equal(back.d, 70);
+  assert.ok(back.kx < 0, 'knocked back the way the round flies');
+  assert.equal(B.hp, 100);
+  assert.equal(A.hp, 30);
+});
+
+test('parry: a strike thrown too early, or facing away, is no parry; the round hits', () => {
+  for (const o of [{ strikeAt: 0.9 }, { strikeAt: 1.05, f: 1 }]) {
+    const { out } = parryRun(o);
+    assert.equal(out.filter((m) => m.t === 'pr').length, 0, JSON.stringify(o));
+    const h = out.find((m) => m.t === 'h' && m.id === 'b');
+    assert.ok(h, JSON.stringify(o));
+    assert.equal(h.pr, undefined);
+  }
+});
+
+test('parry: a kick parries too; no strike, no parry', () => {
+  assert.equal(parryRun({ kind: 'k' }).out.filter((m) => m.t === 'pr').length, 1);
+  assert.equal(parryRun({ kind: null }).out.filter((m) => m.t === 'pr').length, 0);
+});
+
+test('parry: deagle and rifle rounds are never parried', () => {
+  for (const gun of ['deagle', 'rifle']) {
+    const { out } = parryRun({ gun, strikeAt: 1.2 });
+    assert.equal(out.filter((m) => m.t === 'pr').length, 0, gun);
+    assert.ok(out.some((m) => m.t === 'h' && m.id === 'b'), gun);
+  }
+});
+
+test('parry: a kill by a parried round is the parrier\'s, and its k carries pr: 1', () => {
+  const R = ref(), A = sniperAt('a', 20.5), B = F('b', 60.5, 24.5, -1);
+  A.hp = 50; A.hurtAt = 0.9;
+  const all = [A, B];
+  shoot(R, A, 1, all);
+  const out = [...run(R, 1, 1.04, all), ...R.strike(B, { k: 'p' }, 1.05, all).out, ...run(R, 1.05, 1.8, all)];
+  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'a', by: 'b', kills: 1, pr: 1 });
+  assert.equal(B.kills, 1);
+});
+
+test('parry: the round sent back does not count against the parrier\'s in-flight cap', () => {
+  const R = ref(), A = sniperAt('a', 20.5), B = sniperAt('b', 60.5, -1);
+  const all = [A, B];
+  shoot(R, A, 1, all);
+  run(R, 1, 1.04, all);
+  R.strike(B, { k: 'p' }, 1.05, all);
+  const out = run(R, 1.05, 1.2, all);
+  assert.ok(out.some((m) => m.t === 'pr'));
+  assert.equal(R.bullets.filter((b) => b.owner === 'b').length, 1, 'the parried round is b\'s now');
+  assert.equal(shoot(R, B, 1.21, all).ok, true, 'b can still fire its own sniper');
+});
+
+test('parry: the shooter can parry it back, and then it is theirs again', () => {
+  const R = ref(), A = sniperAt('a', 20.5), B = F('b', 60.5, 24.5, -1);
+  const all = [A, B];
+  shoot(R, A, 1, all);
+  const out = [...run(R, 1, 1.04, all), ...R.strike(B, { k: 'p' }, 1.05, all).out, ...run(R, 1.05, 1.24, all)];
+  out.push(...R.strike(A, { k: 'p' }, 1.25, all).out, ...run(R, 1.25, 2, all));
+  const prs = out.filter((m) => m.t === 'pr');
+  assert.deepEqual(prs.map((m) => m.id), ['b', 'a']);
+  assert.ok(Math.abs(prs[1].a) < 0.01, 'back toward b');
+  const h = out.find((m) => m.t === 'h');
+  assert.equal(h.id, 'b');
+  assert.equal(h.by, 'a');
 });

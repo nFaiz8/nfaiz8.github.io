@@ -8,7 +8,7 @@ const close = (a, b, e = 1e-9, msg) => assert.ok(Math.abs(a - b) <= e, msg || `$
 test('the numbers: guns, strikes, health', () => {
   assert.equal(F.MAX_HP, 100);
   assert.equal(F.FIGURE_ROWS, 3);
-  assert.deepEqual([F.GUNS.deagle.damage, F.GUNS.rifle.damage, F.GUNS.sniper.damage], [25, 9, 70]);
+  assert.deepEqual([F.GUNS.deagle.damage, F.GUNS.rifle.damage, F.GUNS.sniper.damage], [25, 6, 70]);
   assert.deepEqual([F.GUNS.deagle.cooldown, F.GUNS.rifle.cooldown, F.GUNS.sniper.cooldown], [0.4, 0.1, 1.2]);
   assert.deepEqual([F.GUNS.deagle.max, F.GUNS.rifle.max, F.GUNS.sniper.max], [2, 7, 1]);
   assert.deepEqual([F.GUNS.deagle.ammo, F.GUNS.rifle.ammo, F.GUNS.sniper.ammo], [-1, 40, 5]);
@@ -207,7 +207,7 @@ test('shoulderOf and muzzleOf by stance, mirrored by facing', () => {
   close(s1.x, 10.6); close(s1.y, 20.6);
   close(s2.x, 9.45); close(s2.y, 21.1);
   const m = F.muzzleOf(10, 20, -1, 0, 'rifle', 2);
-  close(m.x, 9.45 - 4.8); close(m.y, 21.1);
+  close(m.x, 9.45 - 3.8); close(m.y, 21.1);
   assert.deepEqual(F.shoulderOf(10, 20, 1), F.shoulderOf(10, 20, 1, 0));
 });
 
@@ -232,4 +232,11 @@ test('boxHits by stance; the range and knock while low', () => {
   assert.equal(F.LOW_KNOCK, 0.5);
   close(F.bulletRange('deagle', true), 96);
   close(F.bulletRange('deagle'), 64);
+});
+
+test('the smg: 6 a hit, and a spray by stance (standing 0.15, crouched 0.04); the other guns none', async () => {
+  const { GUNS, sprayOf } = await import('../src/fight.js');
+  assert.equal(GUNS.rifle.damage, 6);
+  assert.deepEqual([0, 1].map((low) => sprayOf('rifle', low)), [0.15, 0.04]);
+  for (const gun of ['deagle', 'sniper']) assert.deepEqual([0, 1].map((low) => sprayOf(gun, low)), [0, 0], gun);
 });

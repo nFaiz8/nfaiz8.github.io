@@ -32,6 +32,15 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     if (b) b.n = n;
   }
 
+  // A round parried (parry addendum §1): bullet n stops, n2 flies on from the parry point, with a spark and
+  // parry! in flash white.
+  function parry({ n, n2, x, y, angle, gun, id, color, mine, at }) {
+    bullets = bullets.filter((b) => b.n == null || b.n !== n);
+    shot({ id, n: n2, x, y, angle, gun, color, mine, at });
+    sparks.push({ x, y, t0: at / 1000 });
+    numbers.push({ x, y: y - NUMBER_DY, text: 'parry!', t0: at / 1000, life: HEAD_TIME, color: FLASH });
+  }
+
   // hs: a headshot: -50! in flash white, lasting 1.3 times as long.
   function hit({ n, x, y, d, at, hs = false }) {
     bullets = bullets.filter((b) => b.n == null || b.n !== n);
@@ -125,5 +134,5 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     numbers = [];
   }
 
-  return { shot, assign, hit, step, glyphs, clear };
+  return { shot, assign, parry, hit, step, glyphs, clear };
 }

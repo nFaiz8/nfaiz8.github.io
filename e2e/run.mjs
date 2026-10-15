@@ -363,15 +363,25 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
     await sleep(600);
   });
-  await check('the train is always drawn in the line look: no look button, and L changes nothing', async () => {
+  await check('in the arena R (and its button) switches the train between line and ascii, line first; outside it is the renderer', async () => {
     await page.goto('about:blank');
     await page.goto(`${url}#/room/arena`); await ready(page);
     await page.waitForFunction(() => window.__ascii.mode() === 'side' && !window.__ascii.tilting(), { timeout: 8000 });
-    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line');
-    assert.equal(await page.$('#look-btn'), null, 'no look button');
+    const btn = () => page.$eval('#renderer-btn', (b) => b.textContent);
+    const r0 = await page.evaluate(() => window.__ascii.renderer);
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'line by default');
+    assert.equal(await btn(), '[R] ascii');
     await page.focus('#stage');
-    await page.keyboard.press('KeyL');
-    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'L does nothing');
+    await page.keyboard.press('KeyR');
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'ascii');
+    assert.equal(await btn(), '[R] line');
+    assert.equal(await page.evaluate(() => window.__ascii.renderer), r0, 'the renderer stays');
+    assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'no glyph is missing in ascii');
+    await page.click('#renderer-btn');
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'the button switches back');
+    await page.goto('about:blank');
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    assert.equal(await page.evaluate(() => window.__ascii.look()), 'line', 'not remembered');
   });
   for (const [size, vp] of [['computer', { width: 1440, height: 900, deviceScaleFactor: 1 }], ['phone', { width: 852, height: 393, deviceScaleFactor: 3, isMobile: true, hasTouch: true, isLandscape: true }]]) {
     for (const r of ['museum', 'canvas', 'gl']) {
@@ -806,13 +816,13 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(seen[0].there === true && taken, 'there, then taken');
     assert.ok(back && back.t - taken.t > 9500 && back.t - taken.t < 10800, `back ${back && (back.t - taken.t).toFixed(0)} ms after it was taken`);
   });
-  await check('arena PvP alone: the rifle gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (2 to 2.6 a second); 9 a rifle hit, 25 a deagle hit', async () => {
+  await check('arena PvP alone: the rifle (the smg) gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (2 to 2.6 a second); 6 an smg hit (12 on the head, from its spray), 25 a deagle hit', async () => {
     const s = await enterFight();
     await place(s.rifle.x - 4, s.rifle.y, 1); // on car A's roof
     await sleep(200);
     await holdUntil('ArrowRight', () => window.__ascii.pvp().me.gun === 'rifle', 3000);
     assert.equal(await page.evaluate(() => window.__ascii.pvp().me.ammo), 40);
-    await page.waitForFunction(() => /· rifle 40$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
+    await page.waitForFunction(() => /· smg 40$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
     await place(s.dummy.x - 10, s.floor, 1);
     await sleep(300);
     await page.evaluate(() => { window.__fight.shots.length = 0; window.__fight.hits.length = 0; });
@@ -838,7 +848,7 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(deagle.length >= 3 && deagle[0].at > rifle.at(-1).at, 'then the deagle');
     assert.ok(rate(deagle) > 0.8 * per('deagle') && rate(deagle) <= 1.04 * per('deagle'), `the deagle 2 to 2.6 a second (${rate(deagle).toFixed(2)})`);
     assert.equal(rifleHits.length + deagleHits.length, hits.length, 'every hit traced to its gun');
-    assert.ok(rifleHits.length >= 10 && rifleHits.every((h) => h.d === 9 && !h.hs), `9 a rifle hit (${rifleHits.map((h) => h.d).join(' ')})`);
+    assert.ok(rifleHits.length >= 10 && rifleHits.every((h) => h.d === (h.hs ? 12 : 6)), `6 an smg hit, 12 on the head (${rifleHits.map((h) => h.d).join(' ')})`);
     assert.ok(deagleHits.length > 0 && deagleHits.every((h) => h.d === 25 && !h.hs), `25 a deagle hit (${deagleHits.map((h) => h.d).join(' ')})`);
   });
   await check('arena PvP alone: a double-tap of D rolls about 14 cells; a bullet reaching the dummy inside its roll\'s dodge window passes through it (rules and screen)', async () => {

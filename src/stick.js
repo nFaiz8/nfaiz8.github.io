@@ -5,11 +5,11 @@ export const SHOULDER = { dx: 0.15, dy: -0.3 };
 // The shoulder by stance (crouch addendum §2): standing, crouched, prone, where the rig draws it (cells, rows).
 export const SHOULDERS = [SHOULDER, { dx: 0.6, dy: 0.6 }, { dx: 0.55, dy: 1.1 }];
 export const HAND_R = 1.3;
-export const MUZZLE_R = { deagle: 2.8, rifle: 4.8, sniper: 6.8 };
+export const MUZZLE_R = { deagle: 2.8, rifle: 3.8, sniper: 6.8 };
 // hand is the index of the glyph at the hand.
 export const GUN_ART = {
   deagle: { glyphs: '╦═', hand: 0 },
-  rifle: { glyphs: '═╦╤══', hand: 1 },
+  rifle: { glyphs: '╦╤═', hand: 0 }, // the smg: short, a magazine under the grip
   sniper: { glyphs: '═╦═°═══', hand: 1 },
 };
 

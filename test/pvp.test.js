@@ -22,12 +22,12 @@ const IN = { x: 0, y: 0, run: false, jump: false, down: false, fire: false, stri
 function setup({ online = false, at = { x: 40.5, y: FLOOR }, rand = () => 0.5 } = {}) {
   const world = createWorld(map);
   teleport(world, off.x + at.x, off.y + at.y);
-  const sent = [], notes = [], feed = [];
-  const pvp = createPvp({ world, map, level, send: (m) => { sent.push(m); return true; }, onNote: (t) => notes.push(t), onFeed: (t) => feed.push(t), rand, myId: () => 'me' });
+  const sent = [], notes = [], feed = [], impacts = [];
+  const pvp = createPvp({ world, map, level, send: (m) => { sent.push(m); return true; }, onNote: (t) => notes.push(t), onFeed: (t) => feed.push(t), onImpact: (e) => impacts.push(e), rand, myId: () => 'me' });
   let now = 0;
   pvp.enter(now, online);
   const frames = (n, inp = {}) => { for (let k = 0; k < n; k++) { now += 1000 / 60; step(world, 1 / 60, pvp.control({ ...IN, ...inp }, now)); pvp.frame(1 / 60, now); } };
-  return { world, pvp, sent, notes, feed, frames, get now() { return now; } };
+  return { world, pvp, sent, notes, feed, impacts, frames, get now() { return now; } };
 }
 
 test('offline: the dummy stands on car A\'s floor at column 50 (from the level), facing the door', () => {
@@ -190,12 +190,12 @@ const named = { a: 'Ann', b: 'Bo' };
 function setupNamed({ online = true, reducedMotion = false } = {}) {
   const world = createWorld(map, { reducedMotion });
   teleport(world, off.x + 40.5, off.y + FLOOR);
-  const sent = [], notes = [], feed = [];
-  const pvp = createPvp({ world, map, level, send: (m) => { sent.push(m); return true; }, onNote: (t) => notes.push(t), onFeed: (t) => feed.push(t), rand: () => 0.5, myId: () => 'me', nameOf: (id) => named[id] || '', reducedMotion });
+  const sent = [], notes = [], feed = [], impacts = [];
+  const pvp = createPvp({ world, map, level, send: (m) => { sent.push(m); return true; }, onNote: (t) => notes.push(t), onFeed: (t) => feed.push(t), onImpact: (e) => impacts.push(e), rand: () => 0.5, myId: () => 'me', nameOf: (id) => named[id] || '', reducedMotion });
   let now = 0;
   pvp.enter(now, online);
   const frames = (n, inp = {}) => { for (let k = 0; k < n; k++) { now += 1000 / 60; step(world, 1 / 60, pvp.control({ ...IN, ...inp }, now)); pvp.frame(1 / 60, now); } };
-  return { world, pvp, sent, notes, feed, frames, get now() { return now; } };
+  return { world, pvp, sent, notes, feed, impacts, frames, get now() { return now; } };
 }
 const fighter = (id, x, kills = 0) => ({ id, hp: 100, kills, alive: 1, safe: 0, w: 'd', ammo: -1, x, y: FLOOR, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 });
 
@@ -802,4 +802,73 @@ test('crawling, a shot aimed down with the mouse still leaves level or higher, a
   s.frames(2, { down: true, x: 1, mouse });
   const g2 = s.pvp.glyphs(s.now).filter((q) => q.ch === '•');
   assert.ok(g.length + g2.length > 0, 'a bullet is drawn');
+});
+
+// Parry and the impact frame (parry addendum).
+test('pr: the drawn round turns back from the parry point, with parry!; my parry shakes a little', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('a', 20.5), fighter('b', 60.5)] }, s.now);
+  s.frames(2);
+  const tracers = () => s.pvp.fx.glyphs(s.now, {}).filter((g) => g.glow && g.ch === '-');
+  s.pvp.onMessage({ t: 's', id: 'a', n: 9, x: 23.5, y: FLOOR - 0.3, a: 0, w: 'n' }, s.now);
+  s.frames(1);
+  const before = tracers();
+  assert.ok(before.length > 0);
+  s.pvp.onMessage({ t: 'pr', id: 'b', n: 9, n2: 10, x: 57.9, y: FLOOR - 0.3, a: 3.14, w: 'n' }, s.now);
+  assert.equal(s.world.shake, null, 'someone else\'s parry');
+  s.frames(1);
+  const after = tracers();
+  assert.ok(after.length > 0 && after.every((g) => g.x < off.x + 57.9), 'flying back from the parry point');
+  assert.ok(s.pvp.fx.glyphs(s.now, {}).map((g) => g.ch).join('').includes('parry!'));
+  s.pvp.onMessage({ t: 'pr', id: 'me', n: 10, n2: 11, x: 40, y: FLOOR - 0.3, a: 0, w: 'n' }, s.now);
+  assert.ok(s.world.shake && s.world.shake.amp < 0.4, 'my parry: a tiny shake');
+});
+
+test('a kill by a parried round: the feed line ends " ↩ parry"', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('a', 20.5), fighter('b', 40.5)] }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'a', by: 'me', kills: 1, pr: 1 }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'a', kills: 1, hs: 1, pr: 1 }, s.now);
+  assert.deepEqual(s.feed, ['you popped Ann ↩ parry', 'Ann popped Bo ◎ headshot ↩ parry']);
+});
+
+test('the impact frame: for my kill and my death, not for someone else\'s kill or a flee', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('a', 20.5), fighter('b', 40.5)] }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'a', kills: 1 }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'me', kills: 1, fled: 1 }, s.now);
+  assert.equal(s.impacts.length, 0);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'me', kills: 2 }, s.now);
+  assert.equal(s.impacts.length, 1);
+  s.pvp.onMessage({ t: 'k', id: 'me', by: 'a', kills: 2 }, s.now);
+  assert.equal(s.impacts.length, 2);
+  assert.deepEqual(s.impacts.map((e) => e.me), [false, true], 'whether I was the one popped');
+});
+
+test('the impact frame: popping the dummy offline gives one; Reduce Motion gives none', () => {
+  const s = setup();
+  s.frames(15);
+  for (let k = 0; k < 8 && s.pvp.bodies(s.now).find((b) => b.dummy).state.act !== 'dead'; k++) { s.frames(1, { fire: true }); s.frames(30); }
+  assert.equal(s.pvp.bodies(s.now).find((b) => b.dummy).state.act, 'dead');
+  assert.equal(s.impacts.length, 1);
+  const r = setupNamed({ reducedMotion: true });
+  r.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('b', 40.5)] }, r.now);
+  r.pvp.onMessage({ t: 'k', id: 'b', by: 'me', kills: 1 }, r.now);
+  assert.equal(r.impacts.length, 0);
+});
+
+// The smg (the rifle's key on the wire and in the rules; smg addendum).
+test('the smg sprays: standing up to 0.15 rad either way, crouched 0.04; the deagle and the sniper fly true', () => {
+  const shot = (gun, r, inp = {}) => {
+    const s = setup({ online: true, rand: () => r });
+    s.pvp.onMessage(emptyAw(), s.now);
+    s.frames(20);
+    s.pvp.me.gun = gun; s.pvp.me.ammo = gun === 'deagle' ? -1 : 5;
+    if (inp.down) s.frames(3, inp);
+    s.frames(1, { ...inp, fire: true });
+    return s.sent.find((m) => m.t === 'f').a;
+  };
+  assert.deepEqual([0, 0.5, 1].map((r) => shot('rifle', r)), [-0.15, 0, 0.15]);
+  assert.deepEqual([0, 0.5, 1].map((r) => shot('rifle', r, { down: true })), [-0.04, 0, 0.04]);
+  for (const gun of ['deagle', 'sniper']) assert.deepEqual([0, 1].map((r) => shot(gun, r)), [0, 0], gun);
 });

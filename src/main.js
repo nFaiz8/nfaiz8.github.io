@@ -87,10 +87,7 @@ function setRenderer(name) {
     return setRenderer('canvas');
   }
   resize();
-  const long = document.createElement('span');
-  long.className = 'long';
-  long.textContent = ` ${renderer.name}`;
-  rendererBtn.replaceChildren('[R]', long);
+  showR();
   try { localStorage.setItem(RENDERER_KEY, name); } catch {}
 }
 
@@ -106,8 +103,26 @@ function syncView() {
   if (world && m) world.view = { cols: innerWidth / m.cw, rows: innerHeight / m.ch };
 }
 
-// The train's look (train level addendum §1): the user chose 'line' (box drawing and colour) for good.
-const look = 'line';
+// The train's look (train level addendum §1): 'line' (box drawing and colour) on every visit; in the arena
+// R, and its button, switch it to 'ascii' (7-bit) and back. Not remembered: line stays the default.
+const LOOKS = ['line', 'ascii'];
+let look = 'line';
+const inArenaView = () => !!world && world.mode === 'side' && !!map.arena;
+// The [R] button: in the arena it names the look it switches to; elsewhere the renderer in use.
+function showR() {
+  const long = document.createElement('span');
+  long.className = 'long';
+  if (inArenaView()) {
+    const other = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
+    long.textContent = ` ${other}`;
+    rendererBtn.title = `Switch the train to ${other} (R)`;
+  } else {
+    long.textContent = ` ${renderer.name}`;
+    rendererBtn.title = 'Switch renderer (R)';
+  }
+  rendererBtn.setAttribute('aria-label', rendererBtn.title);
+  rendererBtn.replaceChildren('[R]', long);
+}
 
 // The side view's zoom by the gun in hand (train level addendum §2), and on touch how far the figure keeps
 // clear of the pad: its top above the screen's bottom, and how far its two clusters reach in from the
@@ -247,6 +262,11 @@ function onKey(e) {
     else if (world.atKiosk) openGrid();
     return true;
   }
+  if (e.code === 'KeyR' && inArenaView()) {
+    look = LOOKS[(LOOKS.indexOf(look) + 1) % LOOKS.length];
+    showR();
+    return true;
+  }
   if (e.code === 'KeyR') {
     const names = Object.keys(RENDERERS);
     setRenderer(names[(names.indexOf(renderer.name) + 1) % names.length]);
@@ -342,6 +362,7 @@ function loop(now) {
     lastMode = world.mode;
     input.clear(); // nothing held, no strike or roll carried in or out of the arena
     document.body.classList.toggle('side', world.mode === 'side');
+    showR(); // [R] is the train's look in the arena, the renderer outside
     if (world.mode === 'side') meEntry++; // a fresh motion-memory entry: my fly-in plays on every entry
     if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
   }
@@ -466,7 +487,13 @@ function loop(now) {
     note('WebGL context lost, switched to the canvas renderer');
     setRenderer('canvas');
   }
-  renderer.draw(world);
+  // The impact frame (parry addendum §2): the kill's frame is drawn, shown inverted for IMPACT.flash ms, and
+  // held, undrawn over, until IMPACT.hold ms after it.
+  if (impact && impact.at === null) impact.at = t;
+  const since = impact ? t - impact.at : Infinity;
+  stage.classList.toggle('impact', since < IMPACT.flash);
+  if (!(since > 0 && since < IMPACT.hold)) renderer.draw(world);
+  if (since >= IMPACT.hold) impact = null;
   viewer.sync();
   mapView.sync(world.player, roomAt(map, world.player.x, world.player.y), world.others);
   updateCaption();
@@ -484,6 +511,8 @@ function loop(now) {
 }
 
 let live = null;
+const IMPACT = { flash: 70, hold: 150 }; // ms
+let impact = null; // a kill I'm in: { at } in ms, or at null until the frame of it is drawn
 let lightingTop = null, tilting = false, lastMode = 'top';
 let train = null, trainGlows = [];
 let trainAt = null; // __ascii.freezeTrain (localhost): the train held at this time (ms), for screenshots
@@ -634,6 +663,7 @@ async function boot() {
       colorOf: (id) => (id === myId() ? C.player : peerColor(id)),
       nameOf: (id) => (live && live.peers.get(id)?.name) || '',
       onNote: (text) => note(text, 3000),
+      onImpact: () => { impact = { at: null }; },
       onFeed: (text) => {
         fightHud.line(text);
         // For screen readers, politely (the box is aria-hidden); cleared first so a repeat is read again.

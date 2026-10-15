@@ -27,17 +27,25 @@ export const DODGE = [0.04, 0.26];
 export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
 export const ACT_TIME = { shoot: 0.2, punch: 0.25, kick: 0.4, roll: 0.3 };
 
-// Ammo -1 means endless, everywhere: records and wire.
+// Ammo -1 means endless, everywhere: records and wire. spray: radians a shot may go off its aim either way,
+// standing (or in the air) and crouched; the rifle is drawn and shown as an smg (smg addendum).
 export const GUNS = {
   deagle: { code: 'd', damage: 25, cooldown: 0.4, speed: 80, flight: 0.8, max: 2, ammo: -1, kb: 10, stun: 0.1 },
-  rifle: { code: 'r', damage: 9, cooldown: 0.1, speed: 90, flight: 0.7, max: 7, ammo: 40, kb: 3, stun: 0.05 },
-  sniper: { code: 'n', damage: 70, cooldown: 1.2, speed: 220, flight: 0.75, max: 1, ammo: 5, kb: 30, stun: 0.3 },
+  rifle: { code: 'r', damage: 6, cooldown: 0.1, speed: 90, flight: 0.7, max: 7, ammo: 40, kb: 3, stun: 0.05, spray: [0.15, 0.04] },
+  sniper: { code: 'n', damage: 70, cooldown: 1.2, speed: 220, flight: 0.75, max: 1, ammo: 5, kb: 30, stun: 0.3, parry: true },
 };
 export const GUN_BY_CODE = { d: 'deagle', r: 'rifle', n: 'sniper' };
+export const GUN_NAME = { deagle: 'deagle', rifle: 'smg', sniper: 'sniper' }; // what the HUD calls them
+// A gun's spray in a stance (0 standing, 1 crouched); crawling has its own (CRAWL_SPREAD).
+export const sprayOf = (gun, low = 0) => (GUNS[gun].spray ? GUNS[gun].spray[low ? 1 : 0] : 0);
 export const STRIKES = {
   punch: { code: 'p', damage: 14, reach: 1.8, kx: 25, ky: 10, stun: 0.2, cooldown: 0.3 },
   kick: { code: 'k', damage: 22, reach: 2.2, kx: 45, ky: 22, stun: 0.4, cooldown: 0.55 },
 };
+
+// A strike's box parries a round of a gun with parry (the sniper) that flies into it this long after the
+// strike: the round turns straight back, the striker's now (parry addendum §1).
+export const PARRY_TIME = 0.2;
 
 const STUN = { d: 0.1, r: 0.05, n: 0.3, p: 0.2, k: 0.4 };
 export const stunOf = (w) => STUN[w];

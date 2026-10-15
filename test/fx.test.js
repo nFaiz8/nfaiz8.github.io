@@ -107,7 +107,7 @@ test('hp bars show below full health only', () => {
 test('pickups float and bob; a taken one is a dim dotted outline', () => {
   const f = fx();
   const there = f.glyphs(0, { pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: true }] });
-  assert.equal(there.map((g) => g.ch).join(''), '═╦╤══');
+  assert.equal(there.map((g) => g.ch).join(''), '╦╤═');
   assert.notEqual(f.glyphs(375, { pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: true }] })[0].y, there[0].y);
   const gone = f.glyphs(0, { pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: false }] });
   assert.ok(gone.every((g) => g.ch === '·' && g.a < 0.5));
@@ -213,4 +213,21 @@ test('a long shot (fired low) flies 1.5× as far on every screen; the sniper aim
   const dots = (low) => f.glyphs(0, { aims: [{ id: 'b', x: 20.5, y: 24.5, facing: 1, aim: 0, color: [9, 9, 9], ready: true, low }] }).filter((g) => g.ch === '·');
   const far = (low) => Math.max(...dots(low).map((g) => g.x));
   assert.ok(far(1) > far(0), `the line reaches further low (${far(1)} vs ${far(0)})`);
+});
+
+test('parry: the old round stops, a new one flies back the other way from the parry point, with parry! in white', () => {
+  const f = fx();
+  f.shot({ id: 'a', n: 7, x: 23.45, y: 24.2, angle: 0, gun: 'sniper', color: [200, 100, 100], mine: false, at: 0 });
+  f.parry({ id: 'b', n: 7, n2: 8, x: 57.9, y: 24.2, angle: Math.PI, gun: 'sniper', color: [100, 200, 100], mine: false, at: 160 });
+  const g = f.glyphs(200, {});
+  const tracers = g.filter((q) => q.glow && q.ch === '-');
+  assert.ok(tracers.length > 0, 'the new round is drawn');
+  assert.ok(tracers.every((q) => q.x < 57.9), 'flying back, left of the parry point');
+  assert.ok(tracers.every((q) => q.color[1] > q.color[0]), 'in the parrier\'s colour');
+  const word = g.filter((q) => q.y < 24.2 - 3).map((q) => q.ch).join('');
+  assert.equal(word, 'parry!');
+  assert.ok(g.some((q) => q.ch === '*'), 'a spark');
+  // The h for the new round (n2) stops it.
+  f.hit({ n: 8, x: 23, y: 24.5, d: 70, at: 300 });
+  assert.equal(f.glyphs(310, {}).filter((q) => q.glow && q.ch === '-').length, 0);
 });

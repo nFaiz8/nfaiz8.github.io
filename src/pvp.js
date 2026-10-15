@@ -6,7 +6,7 @@ import { newBody, stepBody, knock, rolling, doorZone } from './arena.js';
 import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
-  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup, LOW_KNOCK, CRAWL_SPREAD,
+  absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup, LOW_KNOCK, CRAWL_SPREAD, sprayOf,
 } from './fight.js';
 import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
@@ -42,7 +42,7 @@ const sec = (ms) => ms / 1000;
 
 export function createPvp({
   world, map, level, send = () => false, rtt = () => 100, colorOf = () => [200, 200, 200], nameOf = () => '',
-  onNote = () => {}, onFeed = () => {}, reducedMotion = false, rand = Math.random, myId = () => 'me',
+  onNote = () => {}, onFeed = () => {}, onImpact = () => {}, reducedMotion = false, rand = Math.random, myId = () => 'me',
 }) {
   const off = { x: map.arena.x + 1, y: map.arena.y + 1 };
   const DUMMY_SPOT = floorSpot(level, DUMMY_COL);
@@ -74,6 +74,9 @@ export function createPvp({
   const pickOk = (n) => Number.isInteger(n) && n >= 0 && n < taken.length;
   const shake = (S = SHAKE) => { if (!reducedMotion) world.shake = { until: world.t + S.time, amp: S.amp }; };
   const myHeadshot = (m) => { if (m.hs && isMe(m.by) && !isMe(m.id)) shake(HEAD_SHAKE); };
+  // A kill I'm in (I popped someone, the dummy too, or I was popped) freezes the picture a moment (parry
+  // addendum §2); a flee hits nobody. Never with Reduce Motion: it is motion, and its flash a strobe.
+  const impact = (m) => { if (!reducedMotion && !m.fled && (isMe(m.by) || isMe(m.id))) onImpact({ me: isMe(m.id) }); };
 
   // My state for the wire and the local referee (arena-local). The input bits gain 32 rolling, and 64
   // crouched or 128 prone from what my body does (crouch addendum §4).
@@ -167,7 +170,15 @@ export function createPvp({
   // ---------- messages ----------
   function feed(m) {
     if (!isMe(m.id) && !fighters.get(m.id)) return; // someone already gone: stale
-    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : `${name(m.by)} popped ${name(m.id)}${m.hs ? ' ◎ headshot' : ''}`);
+    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : `${name(m.by)} popped ${name(m.id)}${m.hs ? ' ◎ headshot' : ''}${m.pr ? ' ↩ parry' : ''}`);
+  }
+
+  // A round parried (parry addendum §1): drawn back from the parry point, as if sent half my round trip ago.
+  function parried(m, now) {
+    if (!num(m.x) || !num(m.y) || !num(m.a)) return;
+    const mine = isMe(m.id);
+    fx.parry({ id: m.id, n: m.n, n2: m.n2, x: m.x + off.x, y: m.y + off.y, angle: m.a, gun: GUN_BY_CODE[m.w] || 'sniper', color: colorOf(m.id), mine, at: now - rtt() / 2 });
+    if (mine) shake(HEAD_SHAKE);
   }
 
   function mineMsg(m, now) {
@@ -214,6 +225,8 @@ export function createPvp({
 
   function apply(m, now, isLocal = false) {
     if (!entered || !m || typeof m !== 'object') return;
+    if (m.t === 'k') impact(m);
+    if (m.t === 'pr') return parried(m, now);
     if (isLocal && m.id === DUMMY) return dummyMsg(m, now);
     if (m.t === 'aw') {
       const you = m.you && typeof m.you === 'object' ? m.you : {};
@@ -262,7 +275,10 @@ export function createPvp({
     const p = world.player, l = local(p.x, p.y), low = p.low || 0;
     // Crawling (prone is only ever crawling): the shot goes wild, up to CRAWL_SPREAD above the aim. Lying
     // flat, the gun is a hair over the floor: never below level, or the shot dies in the floor at the muzzle.
-    const shotAim = low === 2 ? Math.max(-Math.PI / 2, Math.min(0, aim) - rand() * CRAWL_SPREAD) : aim;
+    // Otherwise a gun with spray (the smg) goes up to its spray off the aim either way, less when crouched.
+    const spray = sprayOf(gun, low);
+    const shotAim = low === 2 ? Math.max(-Math.PI / 2, Math.min(0, aim) - rand() * CRAWL_SPREAD)
+      : spray ? Math.max(-Math.PI / 2, Math.min(Math.PI / 2, aim + (rand() * 2 - 1) * spray)) : aim;
     const mz = muzzleOf(l.x, l.y, facing, shotAim, gun, low); // from the stance's shoulder
     const x = r2(mz.x), y = r2(mz.y), a = r2(absAngle(facing, shotAim));
     ref.state(me, snap(now, facing), t); // this frame's facing, so the muzzle check agrees

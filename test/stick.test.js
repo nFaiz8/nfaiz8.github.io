@@ -449,8 +449,8 @@ test('motion memory: landing sets landT 0; dead → idle sets spawnT 0; ids are 
 test('the shared constants keep their values', () => {
   assert.deepEqual(SHOULDER, { dx: 0.15, dy: -0.3 });
   assert.equal(HAND_R, 1.3);
-  assert.deepEqual(MUZZLE_R, { deagle: 2.8, rifle: 4.8, sniper: 6.8 });
-  assert.deepEqual(GUN_ART, { deagle: { glyphs: '╦═', hand: 0 }, rifle: { glyphs: '═╦╤══', hand: 1 }, sniper: { glyphs: '═╦═°═══', hand: 1 } });
+  assert.deepEqual(MUZZLE_R, { deagle: 2.8, rifle: 3.8, sniper: 6.8 });
+  assert.deepEqual(GUN_ART, { deagle: { glyphs: '╦═', hand: 0 }, rifle: { glyphs: '╦╤═', hand: 0 }, sniper: { glyphs: '═╦═°═══', hand: 1 } });
   assert.deepEqual([RIG.torso, RIG.upperArm, RIG.foreArm, RIG.thigh, RIG.shin], [2, 0.95, 0.95, 1, 1]);
 });
 
