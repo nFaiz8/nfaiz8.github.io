@@ -18,6 +18,9 @@ export function followCamera(cam, t, dt, map, aspect) {
   cam.y += (t.y + CAM.lift - cam.y) * k;
   cam.z += (t.z - cam.z) * k;
   const hw = tilesAcross(aspect) / 2, hd = Math.min(4, hw / aspect);
+  // Keeps the focus off the map's edges: the screen's sides at the focus stay inside the map, and the focus
+  // stays off the north and south walls. At 35° the view still reaches past them (about 15 north, 3 south);
+  // the outer walls and the dark hide that.
   cam.x = clamp(cam.x, hw, map.cols - hw);
   cam.z = clamp(cam.z, hd * 0.25, map.rows - hd * 0.5);
   return cam;

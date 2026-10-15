@@ -32,12 +32,15 @@ test('follows on a 0.15 s spring', () => {
 });
 
 test('kept inside the map', () => {
-  const cam = createCamera({ x: 1, y: 0, z: 1 });
-  followCamera(cam, { x: 1, y: 0, z: 1 }, 1, MAP, 16 / 9);
-  assert.ok(cam.x >= 6 && cam.z >= 1, `(${cam.x}, ${cam.z})`);
-  const far = createCamera({ x: 47, y: 0, z: 18 });
-  followCamera(far, { x: 47, y: 0, z: 18 }, 1, MAP, 16 / 9);
-  assert.ok(far.x <= 42 && far.z <= 18);
+  // 16:9 on 48 × 19: hd = 6 / (16/9) = 3.375, so z runs from 0.84375 to 19 - 1.6875 = 17.3125.
+  const near = createCamera({ x: 0, y: 0, z: 0 });
+  followCamera(near, { x: 0, y: 0, z: 0 }, 1, MAP, 16 / 9);
+  assert.ok(Math.abs(near.x - 6) < 1e-9, `x ${near.x}`);
+  assert.ok(Math.abs(near.z - 0.84375) < 1e-9, `z ${near.z}`);
+  const far = createCamera({ x: 48, y: 0, z: 19 });
+  followCamera(far, { x: 48, y: 0, z: 19 }, 1, MAP, 16 / 9);
+  assert.ok(Math.abs(far.x - 42) < 1e-9, `x ${far.x}`);
+  assert.ok(Math.abs(far.z - 17.3125) < 1e-9, `z ${far.z}`);
   const narrow = createCamera({ x: 0, y: 0, z: 0 });
   followCamera(narrow, { x: 0, y: 0, z: 0 }, 1, { cols: 6, rows: 4 }, 16 / 9);
   assert.equal(narrow.x, 3, 'a map narrower than the view is centred');
