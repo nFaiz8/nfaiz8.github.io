@@ -5,12 +5,32 @@ import * as THREE from 'three';
 const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const PX = 64; // the font's pixel size on a sprite's canvas
 
-export function makeSprite(lines, colors, height, { glow = false } = {}) {
+// Every sprite is drawn on one fixed character grid: each glyph left-aligned in its own cell, cells a font advance
+// wide, and lines exactly one '│' tall, so box-drawing strokes meet across lines. `centre` is the column the
+// mesh's origin (and its mirror line, when it flips) sits on; by default the middle of the widest line.
+const grid = (() => {
+  let g = null;
+  return () => {
+    if (g) return g;
+    const c = document.createElement('canvas').getContext('2d');
+    c.font = `700 ${PX}px ${FONT}`;
+    const bar = c.measureText('│');
+    g = { cw: c.measureText('M').width, ascent: bar.actualBoundingBoxAscent, lh: Math.floor(bar.actualBoundingBoxAscent + bar.actualBoundingBoxDescent) - 1 };
+    return g;
+  };
+})();
+const PAD = 8;
+const GLYPH_COLORS = { '¤': '#ffce6e' }; // the lantern keeps its own warm gold whatever line it's on
+
+export function makeSprite(lines, colors, height, { glow = false, centre = null } = {}) {
   const canvas = document.createElement('canvas');
+  const { cw, ascent, lh } = grid();
   const cols = Math.max(...lines.map((l) => [...l].length));
-  const cw = Math.ceil(PX * 0.62), lh = Math.ceil(PX * 1.08);
-  canvas.width = cols * cw + 16;
-  canvas.height = lines.length * lh + 16;
+  const mid = centre == null ? cols / 2 : centre + 0.5; // in columns from the left edge
+  const half = Math.max(mid, cols - mid);
+  const x0 = PAD + (half - mid) * cw; // the left edge of column 0
+  canvas.width = Math.ceil(2 * half * cw) + 2 * PAD;
+  canvas.height = lines.length * lh + 2 * PAD;
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
@@ -20,33 +40,30 @@ export function makeSprite(lines, colors, height, { glow = false } = {}) {
   geo.translate(0, height / 2, 0);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = 2;
+  const lineColor = (i) => (Array.isArray(colors) ? colors[i] ?? colors[0] : colors);
   const draw = (ls) => {
     const c = canvas.getContext('2d');
     c.clearRect(0, 0, canvas.width, canvas.height);
     c.font = `700 ${PX}px ${FONT}`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.lineJoin = 'round';
-    ls.forEach((line, i) => {
-      const y = 8 + lh * (i + 0.5);
-      c.strokeStyle = 'rgba(0,0,0,0.6)';
-      c.lineWidth = 10;
-      c.strokeText(line, canvas.width / 2, y);
-      c.fillStyle = Array.isArray(colors) ? colors[i] ?? colors[0] : colors;
-      c.fillText(line, canvas.width / 2, y);
-    });
+    c.textAlign = 'left';
+    c.textBaseline = 'alphabetic';
+    const cells = ls.flatMap((line, i) => [...line].map((ch, j) => ({ ch, i, x: x0 + j * cw, y: PAD + lh * i + ascent }))).filter((g) => g.ch !== ' ');
+    // No dark outline: per glyph, it showed through as notches wherever two strokes meet.
+    for (const g of cells) { c.fillStyle = GLYPH_COLORS[g.ch] ?? lineColor(g.i); c.fillText(g.ch, g.x, g.y); }
     tex.needsUpdate = true;
   };
   draw(lines);
   return { mesh, draw, dispose() { geo.dispose(); mat.dispose(); tex.dispose(); } };
 }
 
-// You: 4 lines with a lantern, two walking frames (the legs swap).
+// You: 5 lines of box-drawing strokes that join up, holding a lantern. Frame 0 is standing (and the stride),
+// frame 1 the passing step. Draw it with { centre: PLAYER_CENTRE } so you flip about your body, not the lantern.
 export const PLAYER = [
-  [' o ', '/|\\¤', ' | ', '/ \\'],
-  [' o ', '/|\\¤', ' | ', ' |\\'],
+  [' ● ', '─┼─¤', ' │ ', '┌┴┐', '│ │'],
+  [' ● ', '─┼─¤', ' │ ', ' ├┐', ' │ '],
 ];
-export const PLAYER_COLORS = ['#ffe6bd', '#ffce6e', '#e9a23b', '#c98a3a'];
+export const PLAYER_CENTRE = 1; // the ┼ column
+export const PLAYER_COLORS = ['#ffe6bd', '#ffdcae', '#f0bf7a', '#e9a23b', '#c98a3a'];
 
 export const PROPS = {
   bin: { lines: [' ___ ', '|###|', '|___|'], colors: ['#a7afc2', '#6f7890', '#6f7890'], h: 0.9 },

@@ -112,6 +112,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     const fadeMat = own(mats[kind].clone());
     fadeMat.transparent = true; fadeMat.opacity = 0.25; fadeMat.depthWrite = false;
     const solid = new THREE.InstancedMesh(unit, mats[kind], list.length), faded = new THREE.InstancedMesh(unit, fadeMat, list.length);
+    // placeWalls moves instances between these two every few steps, and three.js computes an InstancedMesh's
+    // bounding sphere once, from the instances it had then; culling against that stale sphere would drop them.
+    solid.frustumCulled = faded.frustumCulled = false;
     scene.add(solid, faded);
     return { side: kind === 'wall' ? FADE_REACH : 1.6, list, solid, faded };
   });

@@ -40,7 +40,8 @@ export function createPost(renderer, scene, camera) {
   down.uniforms.dir.value.set(0, 1);
   composer.addPass(across);
   composer.addPass(down);
-  composer.addPass(new OutputPass());
+  const output = new OutputPass();
+  composer.addPass(output);
   return {
     setSize(w, h, dpr) {
       composer.setPixelRatio(dpr);
@@ -49,6 +50,6 @@ export function createPost(renderer, scene, camera) {
     },
     setFocus(y01) { across.uniforms.focus.value = down.uniforms.focus.value = Math.min(0.9, Math.max(0.1, y01)); },
     render() { composer.render(); },
-    dispose() { bloom.dispose(); across.dispose?.(); down.dispose?.(); composer.dispose(); },
+    dispose() { bloom.dispose(); across.dispose?.(); down.dispose?.(); output.dispose(); composer.dispose(); },
   };
 }
