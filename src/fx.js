@@ -6,6 +6,8 @@ import { GUN_ART } from './stick.js';
 const SPARK_COLOR = [255, 214, 140];
 const BAR_COLOR = [255, 110, 70];
 const PICKUP_COLOR = [255, 236, 210];
+const MEDKIT_COLOR = [255, 120, 120], HEAL_COLOR = [140, 235, 150];
+const PICKUP_ART = (kind) => (kind === 'medkit' ? '[+]' : GUN_ART[kind].glyphs);
 const FLASH = [255, 255, 255]; // a headshot's number, in the figures' flash white
 const SPARK_ART = [{ ch: '*', ang: -Math.PI / 2 }, { ch: '+', ang: Math.PI / 6 }, { ch: '·', ang: Math.PI * 5 / 6 }];
 const SPARK_TIME = 0.25, SPARK_STILL = 0.2, SPARK_REACH = 1.5, NUMBER_TIME = 0.6, HEAD_TIME = NUMBER_TIME * 1.3;
@@ -39,6 +41,11 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     shot({ id, n: n2, x, y, angle, gun, color, mine, at });
     sparks.push({ x, y, t0: at / 1000 });
     numbers.push({ x, y: y - NUMBER_DY, text: 'parry!', t0: at / 1000, life: HEAD_TIME, color: FLASH });
+  }
+
+  // A medkit taken (pickups addendum): +d in green, rising like a damage number.
+  function heal({ x, y, d, at }) {
+    numbers.push({ x, y: y - NUMBER_DY, text: `+${d}`, t0: at / 1000, life: HEAD_TIME, color: HEAL_COLOR });
   }
 
   // hs: a headshot: -50! in flash white, lasting 1.3 times as long.
@@ -109,10 +116,10 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
       for (let i = 0; i < 5; i++) out.push({ x: s.x + i - 2, y: s.y - BAR_DY, ch: i < full ? '█' : '░', color: BAR_COLOR, a: 1 });
     }
     for (const p of pickups) {
-      const art = GUN_ART[p.gun].glyphs;
+      const art = PICKUP_ART(p.kind), color = p.kind === 'medkit' ? MEDKIT_COLOR : PICKUP_COLOR;
       const bob = p.there && !reducedMotion ? 0.15 * Math.sin(2 * Math.PI * now / 1.5) : 0;
       for (let i = 0; i < art.length; i++) {
-        out.push({ x: p.x + i - (art.length - 1) / 2, y: p.y - 0.5 + bob, ch: p.there ? art[i] : '·', color: PICKUP_COLOR, a: p.there ? 1 : 0.35 });
+        out.push({ x: p.x + i - (art.length - 1) / 2, y: p.y - 0.5 + bob, ch: p.there ? art[i] : '·', color, a: p.there ? 1 : 0.35 });
       }
     }
     for (const q of aims) {
@@ -134,5 +141,5 @@ export function createFx({ kindAt, offset = { x: 0, y: 0 }, reducedMotion = fals
     numbers = [];
   }
 
-  return { shot, assign, parry, hit, step, glyphs, clear };
+  return { shot, assign, parry, hit, heal, step, glyphs, clear };
 }

@@ -8,11 +8,11 @@ const close = (a, b, e = 1e-9, msg) => assert.ok(Math.abs(a - b) <= e, msg || `$
 test('the numbers: guns, strikes, health', () => {
   assert.equal(F.MAX_HP, 100);
   assert.equal(F.FIGURE_ROWS, 3);
-  assert.deepEqual([F.GUNS.deagle.damage, F.GUNS.rifle.damage, F.GUNS.sniper.damage], [25, 6, 70]);
-  assert.deepEqual([F.GUNS.deagle.cooldown, F.GUNS.rifle.cooldown, F.GUNS.sniper.cooldown], [0.4, 0.1, 1.2]);
-  assert.deepEqual([F.GUNS.deagle.max, F.GUNS.rifle.max, F.GUNS.sniper.max], [2, 7, 1]);
+  assert.deepEqual([F.GUNS.deagle.damage, F.GUNS.rifle.damage, F.GUNS.sniper.damage], [25, 8, 70]);
+  assert.deepEqual([F.GUNS.deagle.cooldown, F.GUNS.rifle.cooldown, F.GUNS.sniper.cooldown], [0.4, 0.1, 1.8]);
+  assert.deepEqual([F.GUNS.deagle.max, F.GUNS.rifle.max, F.GUNS.sniper.max], [6, 7, 1]);
   assert.deepEqual([F.GUNS.deagle.ammo, F.GUNS.rifle.ammo, F.GUNS.sniper.ammo], [-1, 40, 5]);
-  close(F.bulletRange('deagle'), 64);
+  assert.equal(F.bulletRange('deagle'), Infinity, 'the deagle flies until a wall');
   assert.ok(F.bulletRange('sniper') >= 160);
   assert.deepEqual([F.STRIKES.punch.damage, F.STRIKES.kick.damage], [14, 22]);
   assert.deepEqual(['d', 'r', 'n', 'p', 'k'].map(F.stunOf), [0.1, 0.05, 0.3, 0.2, 0.4]);
@@ -230,13 +230,14 @@ test('boxHits by stance; the range and knock while low', () => {
   assert.equal(F.boxHits({ x0: 13.3, x1: 14, y0: 20, y1: 21 }, 12, 20, 2), true, 'the long prone box');
   assert.equal(F.LOW_RANGE, 1.5);
   assert.equal(F.LOW_KNOCK, 0.5);
-  close(F.bulletRange('deagle', true), 96);
-  close(F.bulletRange('deagle'), 64);
+  assert.equal(F.bulletRange('deagle', true), Infinity);
+  close(F.bulletRange('rifle', true), 94.5);
+  close(F.bulletRange('rifle'), 63);
 });
 
-test('the smg: 6 a hit, and a spray by stance (standing 0.15, crouched 0.04); the other guns none', async () => {
+test('the smg: 8 a hit, and a spray by stance (standing 0.15, crouched 0.04); the other guns none', async () => {
   const { GUNS, sprayOf } = await import('../src/fight.js');
-  assert.equal(GUNS.rifle.damage, 6);
+  assert.equal(GUNS.rifle.damage, 8);
   assert.deepEqual([0, 1].map((low) => sprayOf('rifle', low)), [0.15, 0.04]);
   for (const gun of ['deagle', 'sniper']) assert.deepEqual([0, 1].map((low) => sprayOf(gun, low)), [0, 0], gun);
 });

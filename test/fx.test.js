@@ -106,10 +106,10 @@ test('hp bars show below full health only', () => {
 
 test('pickups float and bob; a taken one is a dim dotted outline', () => {
   const f = fx();
-  const there = f.glyphs(0, { pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: true }] });
+  const there = f.glyphs(0, { pickups: [{ x: 26.5, y: 17.5, kind: 'rifle', there: true }] });
   assert.equal(there.map((g) => g.ch).join(''), '╦╤═');
-  assert.notEqual(f.glyphs(375, { pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: true }] })[0].y, there[0].y);
-  const gone = f.glyphs(0, { pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: false }] });
+  assert.notEqual(f.glyphs(375, { pickups: [{ x: 26.5, y: 17.5, kind: 'rifle', there: true }] })[0].y, there[0].y);
+  const gone = f.glyphs(0, { pickups: [{ x: 26.5, y: 17.5, kind: 'rifle', there: false }] });
   assert.ok(gone.every((g) => g.ch === '·' && g.a < 0.5));
 });
 
@@ -173,7 +173,7 @@ test('bullets and sparks are marked to glow (the train\'s halation); numbers, ba
   const f = fx();
   f.shot({ id: 'b', n: 1, x: 30.5, y: 24.2, angle: 0, gun: 'deagle', color: [1, 2, 3], mine: false, at: 0 });
   f.hit({ n: -1, x: 70, y: 24.5, d: 25, at: 0 });
-  const g = f.glyphs(30, { bodies: [{ id: 'b', state: { x: 50, y: 20, hp: 40, act: 'idle' } }], pickups: [{ x: 26.5, y: 17.5, gun: 'rifle', there: true }],
+  const g = f.glyphs(30, { bodies: [{ id: 'b', state: { x: 50, y: 20, hp: 40, act: 'idle' } }], pickups: [{ x: 26.5, y: 17.5, kind: 'rifle', there: true }],
     aims: [{ id: 'b', x: 20.5, y: 24.5, facing: 1, aim: 0, color: [9, 9, 9], ready: true }] });
   const glowing = g.filter((q) => q.glow).map((q) => q.ch).join('');
   assert.ok(glowing.includes('•'), 'the bullet');
@@ -201,14 +201,14 @@ test('my standing level bullet flies over a fighter crouched or prone on my scre
 test('a long shot (fired low) flies 1.5× as far on every screen; the sniper aim line of someone low reaches as far', () => {
   const run = (long) => {
     const f = fx();
-    f.shot({ id: 'b', n: 1, x: 20.5, y: 25.1, angle: 0, gun: 'deagle', color: [1, 1, 1], mine: false, at: 0, long });
+    f.shot({ id: 'b', n: 1, x: 20.5, y: 25.1, angle: 0, gun: 'rifle', color: [1, 1, 1], mine: false, at: 0, long });
     let last = 0;
-    for (let ms = 16; ms <= 2000; ms += 16) { f.step(0.016, ms, []); const h = f.glyphs(ms, {}).find((g) => g.ch === '•'); if (h) last = h.x; }
+    for (let ms = 16; ms <= 2000; ms += 16) { f.step(0.016, ms, []); const h = f.glyphs(ms, {}).find((g) => g.glow && g.ch === '-'); if (h) last = h.x; }
     return last - 20.5;
   };
-  const short = run(false), long = run(true);
-  assert.ok(short > 60 && short <= 64, `standing: ${short}`);
-  assert.ok(long > 90 && long <= 96, `low: ${long}`);
+  const short = run(false), long = run(true); // the rifle: 63 cells, 94.5 low (the deagle flies to the wall)
+  assert.ok(short > 59 && short <= 63, `standing: ${short}`);
+  assert.ok(long > 90 && long <= 94.5, `low: ${long}`);
   const f = fx();
   const dots = (low) => f.glyphs(0, { aims: [{ id: 'b', x: 20.5, y: 24.5, facing: 1, aim: 0, color: [9, 9, 9], ready: true, low }] }).filter((g) => g.ch === '·');
   const far = (low) => Math.max(...dots(low).map((g) => g.x));
@@ -230,4 +230,12 @@ test('parry: the old round stops, a new one flies back the other way from the pa
   // The h for the new round (n2) stops it.
   f.hit({ n: 8, x: 23, y: 24.5, d: 70, at: 300 });
   assert.equal(f.glyphs(310, {}).filter((q) => q.glow && q.ch === '-').length, 0);
+});
+
+test('the deagle flies until a wall: a level shot along car A\'s floor reaches the far end', () => {
+  const f = fx();
+  f.shot({ id: 'b', n: 1, x: 20.5, y: 24.2, angle: 0, gun: 'deagle', color: [1, 1, 1], mine: false, at: 0 });
+  let last = 0;
+  for (let ms = 16; ms <= 4000; ms += 16) { f.step(0.016, ms, []); const h = f.glyphs(ms, {}).find((g) => g.ch === '•'); if (h) last = h.x; }
+  assert.ok(last > 190, `it got to ${last}`);
 });

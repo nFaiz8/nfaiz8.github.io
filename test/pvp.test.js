@@ -77,9 +77,15 @@ test('no shooting or striking while rolling', () => {
   assert.notEqual(s.pvp.bodies(s.now).find((b) => b.me).state.act, 'punch');
 });
 
+// Where my referee puts a pickup with this rand (arena-local), as pvp.js's own referee will.
+const spotOf = (kind, rand = () => 0.5) => {
+  const q = createReferee({ level, rand }).pickups(0).find((p) => p.g === { rifle: 'r', sniper: 'n', medkit: 'm' }[kind]);
+  return { n: q.n, x: q.x, y: q.y };
+};
+
 test('offline: walking into the sniper pickup gives the sniper; its aim line shows', () => {
-  const p = level.pickups.find((q) => q.gun === 'sniper');
-  const s = setup({ at: { x: p.x - 3, y: p.y } });
+  const p = spotOf('sniper', () => 0.75); // on car A's floor
+  const s = setup({ at: { x: p.x - 3, y: p.y }, rand: () => 0.75 });
   s.frames(40, { x: 1 });
   assert.equal(s.pvp.me.gun, 'sniper');
   assert.equal(s.pvp.me.ammo, 5);
@@ -250,7 +256,8 @@ test('the in-flight cap counts all my bullets whatever the gun: a rifle stream, 
   s.frames(60, { fire: true });
   const next = s.sent.filter((m) => m.t === 'f')[7];
   assert.ok(next, 'the deagle fires again once bullets land');
-  assert.ok(next.ts - rifle.at(-1).ts > 400 && next.ts > T + 450, `${next.ts - T} ms after the switch`);
+  // The deagle's own cooldown runs from the last rifle shot; its cap (6) counts the rifle rounds still flying.
+  assert.ok(next.ts - rifle.at(-1).ts >= 400 - 17 && next.ts > T + 300, `${next.ts - T} ms after the switch`);
 });
 
 test('offline, the ammo of a pickup gun runs down and runs dry back to the deagle', () => {
@@ -260,7 +267,7 @@ test('offline, the ammo of a pickup gun runs down and runs dry back to the deagl
   s.frames(5);
   s.frames(1, { fire: true });
   assert.equal(s.pvp.me.ammo, 1);
-  s.frames(80);
+  s.frames(120); // past the sniper's 1.8 s
   s.frames(1, { fire: true });
   assert.equal(s.pvp.me.gun, 'deagle');
   assert.equal(s.pvp.me.ammo, -1);
@@ -281,13 +288,14 @@ test('the scoreboard: top 5 by kills plus me, shown only with another fighter in
 });
 
 test('online, touching a pickup sends pk at most every 0.5 s and waits for the server to give the gun', () => {
-  const p = level.pickups.find((q) => q.gun === 'sniper');
+  const p = spotOf('sniper');
   const world = createWorld(map);
   teleport(world, off.x + p.x, off.y + p.y);
   const sent = [];
   const pvp = createPvp({ world, map, level, send: (m) => { sent.push(m); return true; }, rand: () => 0.5, myId: () => 'me' });
   let now = 0;
   pvp.enter(now, true);
+  pvp.onMessage({ ...emptyAw(), pk: [{ n: p.n, at: 0, x: p.x, y: p.y, g: 'n' }] }, now); // the server's spot
   for (let k = 0; k < 60; k++) { now += 1000 / 60; step(world, 1 / 60, pvp.control(IN, now)); pvp.frame(1 / 60, now); }
   const pks = sent.filter((m) => m.t === 'pk');
   assert.ok(pks.length >= 1 && pks.length <= 2, `${pks.length}`);
@@ -597,7 +605,7 @@ test('flashes: a shot lights the train for a moment at its muzzle (arena-local),
 
 test('collision: I can\'t walk through the dummy once my protection is over, and I can stand on its head', () => {
   const s = setup();
-  s.frames(100); // past the 1.5 s of protection
+  s.frames(190); // past the 3 s of protection
   const dummy = () => s.pvp.bodies(s.now).find((b) => b.dummy).state;
   s.frames(90, { x: 1 });
   const d = dummy(), p = s.world.player;
@@ -873,4 +881,43 @@ test('the smg sprays: standing up to 0.15 rad either way, crouched 0.04; the dea
   assert.deepEqual([0, 0.5, 1].map((r) => shot('rifle', r)), [-0.15, 0, 0.15]);
   assert.deepEqual([0, 0.5, 1].map((r) => shot('rifle', r, { down: true })), [-0.04, 0, 0.04]);
   for (const gun of ['deagle', 'sniper']) assert.deepEqual([0, 1].map((r) => shot(gun, r)), [0, 0], gun);
+});
+
+// Pickups at random spots, and the medkit (pickups addendum).
+test('pickups are drawn where the referee put them: offline my own, online the welcome\'s and each pk\'s', () => {
+  const s = setup({ rand: () => 0.25 });
+  const mine = createReferee({ level, rand: () => 0.25 }).pickups(0);
+  assert.deepEqual(s.pvp.pickups(s.now).map((q) => [q.kind, q.x - off.x, q.y - off.y]), mine.map((q) => [{ r: 'rifle', n: 'sniper', m: 'medkit' }[q.g], q.x, q.y]));
+  const o = setupNamed();
+  assert.deepEqual(o.pvp.pickups(o.now), [], 'online: none until the welcome');
+  o.pvp.onMessage({ ...emptyAw(), pk: [{ n: 0, at: 0, x: 30.5, y: 24.5, g: 'r' }, { n: 1, at: 4000, x: 60.5, y: 6.5, g: 'n' }, { n: 2, at: 0, x: 90.5, y: 24.5, g: 'm' }] }, o.now);
+  assert.deepEqual(o.pvp.pickups(o.now).map((q) => [q.kind, q.x - off.x, q.y - off.y, q.there]), [['rifle', 30.5, 24.5, true], ['sniper', 60.5, 6.5, false], ['medkit', 90.5, 24.5, true]]);
+  o.pvp.onMessage({ t: 'pk', id: 'b', n: 0, at: 10000, x: 150.5, y: 6.5 }, o.now);
+  const r = o.pvp.pickups(o.now)[0];
+  assert.deepEqual([r.x - off.x, r.y - off.y, r.there], [150.5, 6.5, false], 'taken: it comes back somewhere else');
+  const art = o.pvp.glyphs(o.now, []).map((g) => g.ch).join('');
+  assert.ok(art.includes('[+]'), 'the medkit is drawn [+]');
+});
+
+test('the medkit: offline, walking into it hurt heals 50 (+50 in green); at full health it stays', () => {
+  const p = spotOf('medkit', () => 0.75); // car A's floor
+  const s = setup({ at: { x: p.x - 3, y: p.y }, rand: () => 0.75 });
+  s.frames(40, { x: 1 });
+  assert.ok(s.pvp.pickups(s.now).find((q) => q.kind === 'medkit').there, 'at full health it is left there');
+  const h = setup({ at: { x: p.x - 3, y: p.y }, rand: () => 0.75 });
+  Object.assign(h.pvp.me, { hp: 30, hurtAt: h.now / 1000 });
+  h.frames(40, { x: 1 });
+  assert.equal(Math.round(h.pvp.hud(h.now).hp), 80);
+  assert.equal(h.pvp.pickups(h.now).find((q) => q.kind === 'medkit').there, false);
+  assert.ok(h.pvp.glyphs(h.now, []).some((g) => g.ch === '+' && g.color.join() === '140,235,150'), '+50 in green');
+});
+
+test('online: hl heals me (my regen carries on) and shows +d over a healed fighter', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ ...emptyAw(), fighters: [fighter('b', 40.5)] }, s.now);
+  s.pvp.onMessage({ t: 'h', id: 'me', by: 'b', w: 'd', n: 1, d: 60, hp: 40, kx: 0, ky: 0 }, s.now);
+  s.pvp.onMessage({ t: 'hl', id: 'me', hp: 90, d: 50 }, s.now);
+  assert.equal(s.pvp.hud(s.now).hp, 90);
+  s.pvp.onMessage({ t: 'hl', id: 'b', hp: 70, d: 50 }, s.now);
+  assert.equal(s.pvp.fx.glyphs(s.now, {}).filter((g) => g.color.join() === '140,235,150').map((g) => g.ch).join(''), '+50+50');
 });

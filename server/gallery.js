@@ -8,13 +8,13 @@ import {
 } from './rules.js';
 import { createReferee, newFighter } from '../src/referee.js';
 import { parseLevel, levelKind, levelHash, SOLID } from '../src/level.js';
-import { GUNS } from '../src/fight.js';
+import { GUNS, FIGHT_VERSION } from '../src/fight.js';
 import levelText from '../src/arena.txt';
 
 const KIND = { p: 'p', e: 'e', r: 'r', n: 'n', c: 'c' };
 const ARENA = new Set(['ae', 'al', 'a', 'f', 'm', 'pk', 'rs']);
 const LEVEL = parseLevel(levelText);
-const LEVEL_HASH = levelHash(levelText);
+const LEVEL_HASH = `${levelHash(levelText)}.${FIGHT_VERSION}`; // the level and the fight's wire version
 const kindAt = levelKind(LEVEL);
 const TICK_MS = 33;
 const KICK_GAP = 0.5; // s: after a kick, the next strike waits this long (the 0.55 s cooldown less jitter)

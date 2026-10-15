@@ -7,6 +7,7 @@ import { levelKind } from './level.js';
 import {
   MAX_HP, SAFE_TIME, RESPAWN_TIME, GUNS, GUN_BY_CODE, STRIKES, ACT_TIME, stunOf, keyAim, pointAim,
   absAngle, shoulderOf, muzzleOf, regenHp, nextStrike, strikeReady, nearPickup, LOW_KNOCK, CRAWL_SPREAD, sprayOf,
+  REGEN_AFTER, PICKUP_BY_CODE,
 } from './fight.js';
 import { createReferee, newFighter } from './referee.js';
 import { createFighters } from './fighters.js';
@@ -56,7 +57,19 @@ export function createPvp({
   const me = newFighter(myId() || 'me', 0);
   const ghost = newFighter(me.id, 0);
   const dummy = { body: null, rec: null, act: null, deadAt: 0 };
-  const taken = level.pickups.map(() => -Infinity); // ms when each pickup is back
+  // The pickups (the level's guns, then a medkit): where each is (arena-local) and when it's back (ms). The
+  // referee picks the spots (pickups addendum): offline mine, online the server's (aw, pk).
+  const spots = ref.pickups(0).map((q) => ({ n: q.n, kind: PICKUP_BY_CODE[q.g], x: q.x, y: q.y }));
+  const taken = spots.map(() => -Infinity);
+  function pickupsFromRef(now) {
+    for (const q of ref.pickups(sec(now))) { taken[q.n] = now + q.at; spots[q.n].x = q.x; spots[q.n].y = q.y; }
+  }
+  // A pk or an aw entry: back in at ms, at (x, y) if given.
+  function setPickup(q, now) {
+    if (!q || !pickOk(q.n) || !num(q.at)) return;
+    taken[q.n] = now + q.at;
+    if (num(q.x) && num(q.y)) { spots[q.n].x = q.x; spots[q.n].y = q.y; }
+  }
   const shotAt = new Map(); // id -> ms of their last shot (for sniper aim lines)
 
   let entered = false, online = false, enteredAt = 0, ticker = null;
@@ -191,7 +204,14 @@ export function createPvp({
     switch (m.t) {
       case 'w': if (GUN_BY_CODE[m.w]) { me.gun = GUN_BY_CODE[m.w]; me.ammo = num(m.ammo) ? m.ammo : -1; } break;
       case 's': if (num(m.n)) fx.assign(m.n); break;
-      case 'pk': if (pickOk(m.n) && num(m.at)) taken[m.n] = now + m.at; break;
+      case 'pk': setPickup(m, now); break;
+      case 'hl': {
+        if (!me.alive) break;
+        if (num(m.hp)) me.hp = m.hp;
+        me.hurtAt = Math.max(me.hurtAt, t - REGEN_AFTER); // the regen so far is in hp now: it goes on from here
+        if (num(m.d)) fx.heal({ x: p.x, y: p.y, d: m.d, at: now });
+        break;
+      }
       case 'h': {
         if (!me.alive) break;
         fx.hit({ n: m.n, x: p.x, y: p.y, d: m.d, at: now, hs: !!m.hs });
@@ -238,7 +258,7 @@ export function createPvp({
       if (num(you.hp)) { me.hp = you.hp; me.hurtAt = you.hp < MAX_HP ? sec(now) : -1e9; }
       if (num(you.kills)) kills = me.kills = you.kills;
       if (GUN_BY_CODE[you.w]) { me.gun = GUN_BY_CODE[you.w]; me.ammo = num(you.ammo) ? you.ammo : -1; }
-      if (Array.isArray(m.pk)) for (const q of m.pk) if (q && pickOk(q.n) && num(q.at)) taken[q.n] = now + q.at;
+      if (Array.isArray(m.pk)) for (const q of m.pk) setPickup(q, now);
       const list = Array.isArray(m.fighters) ? m.fighters.filter((q) => q && !isMe(q.id)) : [];
       fighters.apply({ ...m, fighters: list }, now);
       awaitAw = false;
@@ -257,7 +277,10 @@ export function createPvp({
         myHeadshot(m);
         break;
       case 'k': feed(m); break;
-      case 'pk': if (pickOk(m.n) && num(m.at)) taken[m.n] = now + m.at; break;
+      case 'pk': setPickup(m, now); break;
+      case 'hl':
+        if (F && F.body && num(m.d)) fx.heal({ x: F.body.x + F.corr.x, y: F.body.y + F.corr.y, d: m.d, at: now });
+        break;
       case 's': {
         if (!F || !num(m.x) || !num(m.y) || !num(m.a)) break;
         // Drawn from where it is now: half my round trip after it was fired.
@@ -366,8 +389,9 @@ export function createPvp({
     if (online && me.alive) { ticker(snap(now), now, urgent); urgent = false; }
     if (me.alive) {
       const l = local(p.x, p.y);
-      for (const q of level.pickups) {
-        if (now < taken[q.n] || !nearPickup(l.x, l.y, q)) continue;
+      const full = regenHp(me.hp, me.hurtAt, t) >= MAX_HP;
+      for (const q of spots) {
+        if (now < taken[q.n] || !nearPickup(l.x, l.y, q) || (q.kind === 'medkit' && full)) continue;
         if (!online) runLocal(ref.pickup(me, q.n, t).out, now);
         else if (now - lastPk >= PK_EVERY) { send({ t: 'pk', n: q.n }); lastPk = now; }
       }
@@ -414,6 +438,9 @@ export function createPvp({
     return out;
   }
 
+  // The pickups as drawn (map cells). Online, none until the welcome says where they are.
+  const shownPickups = (now) => (online && awaitAw ? [] : spots.map((q) => ({ n: q.n, kind: q.kind, x: q.x + off.x, y: q.y + off.y, there: now >= taken[q.n] })));
+
   function glyphs(now, out = []) {
     const list = bodies(now), aims = [];
     for (const b of list) {
@@ -422,7 +449,7 @@ export function createPvp({
       const last = b.me ? lastShot : shotAt.has(b.id) ? shotAt.get(b.id) : -Infinity;
       aims.push({ x: s.x, y: s.y, facing: s.facing, aim: s.aim, low: s.low || 0, color: b.color, ready: now - last >= (GUNS.sniper.cooldown - AIM_WARN) * 1000 });
     }
-    const pickups = level.pickups.map((q) => ({ x: q.x + off.x, y: q.y + off.y, gun: q.gun, there: now >= taken[q.n] }));
+    const pickups = shownPickups(now);
     return fx.glyphs(now, { bodies: list, pickups, aims }, out);
   }
 
@@ -451,7 +478,7 @@ export function createPvp({
   }
 
   // ---------- entering, leaving, the connection ----------
-  // A fresh fight for me: full health, 1.5 s of protection, the deagle (as the server does on ae).
+  // A fresh fight for me: full health, SAFE_TIME of protection, the deagle (as the server does on ae).
   function freshFight(now) {
     me.id = myId() || me.id;
     ref.bullets.length = 0;
@@ -474,6 +501,7 @@ export function createPvp({
     world.aimFacing = 0;
     freshFight(now);
     awaitAw = online; // online, whether anyone else is here is the welcome's to say
+    if (!online) pickupsFromRef(now); // offline my referee's spots; online the welcome's
     dummyBackAt = now; dummyUp = false;
     dummyShown(now);
     if (online) send({ t: 'ae' });
@@ -505,6 +533,7 @@ export function createPvp({
       ref.bullets.length = 0;
       practice.bullets.length = 0;
       awaitAw = false;
+      pickupsFromRef(now);
       Object.assign(me, { hp: MAX_HP, hurtAt: -1e9, hitBy: null });
       if (!shown) dummyBackAt = now + DUMMY_BACK;
     } else {
@@ -520,7 +549,7 @@ export function createPvp({
   }
 
   return {
-    enter, leave, setOnline, control, frame, bodies, glyphs, flashes, hud,
+    enter, leave, setOnline, control, frame, bodies, glyphs, flashes, hud, pickups: shownPickups,
     onMessage(m, now) {
       try { apply(m, now); } catch (e) { console.warn('pvp: a message was ignored', m && m.t, e); }
     },

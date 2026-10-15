@@ -24,6 +24,21 @@ export function parseLevel(text, cols = LEVEL_COLS, rows = LEVEL_ROWS) {
   return { cols, rows, cells, spawns, pickups, door };
 }
 
+// Where a pickup may appear (pickups addendum): any spot a body can stand on (floor or platform under it,
+// three clear rows over it), clear of the level's sides and of the doorway. The level's R and N say which
+// guns there are; where they appear is the referee's to pick from these.
+export function pickupSpots(L) {
+  const k = levelKind(L), out = [];
+  for (let r = 2; r < L.rows - 1; r++) {
+    for (let c = 4; c < L.cols - 4; c++) {
+      if (k(c, r + 1) === AIR || k(c, r) || k(c, r - 1) || k(c, r - 2)) continue;
+      if (L.door && r === L.door.r && Math.abs(c - L.door.c) < 10) continue;
+      out.push({ c, r, x: c + 0.5, y: r - 0.5 });
+    }
+  }
+  return out;
+}
+
 export const levelKind = (L) => (c, r) => (c < 0 || r < 0 || c >= L.cols || r >= L.rows ? SOLID : L.cells[r * L.cols + c]);
 
 // Server and browser compare this, so neither fights on a level the other doesn't have.

@@ -68,7 +68,8 @@ live in `src/stick.js`. A test keeps the rules' values and the rig's within
   - Clients halve the stun from `stunOf(w)` when `lo` is set. Old clients ignore `lo` and use the full
     stun with the halved knock.
 - **Longer range.** A bullet fired while crouched or prone flies 1.5× as far (`LOW_RANGE`): the deagle about
-  64 → 96 cells, the rifle 63 → 94, the sniper 165 → 247. This is fixed when the bullet is fired.
+  64 → 96 cells, the rifle 63 → 94, the sniper 165 → 247. This is fixed when the bullet is fired. (The
+  deagle's range is unlimited since `2026-10-14-arena-pickups-weapons-exit.md` §3.)
   - The `s` message carries `l: 1` for these shots, so every screen draws the bullet to its real end.
   - The sniper's aim line is as long as the shot would be.
 - **Keyboard aim stays level while low.** ↓ crouches and does not tilt the shot. ↑ still jumps, which

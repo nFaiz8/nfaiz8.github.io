@@ -636,40 +636,40 @@ test('kindsFor: level cells inside, walls solid, the door open', () => {
 // The side view zooms in by gun (bigger-zoom addendum §2, with the train level's rows).
 import { SIDE_ROWS, sideZoom, ZOOM_TIME } from '../src/arena.js';
 
-test('SIDE_ROWS: deagle 20, rifle 25, sniper 33 (the whole height), no fight 24', () => {
-  assert.deepEqual(SIDE_ROWS, { deagle: 20, rifle: 25, sniper: 33, scope: 45, none: 24 });
+test('SIDE_ROWS: every gun 33 (the whole height), the sniper crouched 45 (the scope), no fight 24', () => {
+  assert.deepEqual(SIDE_ROWS, { deagle: 33, rifle: 33, sniper: 33, scope: 45, none: 24 });
   assert.equal(ZOOM_TIME, 0.35);
 });
 
 test('sideZoom: starts settled on the gun\'s rows; no fight is 24; dead (undefined) keeps the last value', () => {
   const z = sideZoom(null, 'deagle', 10);
-  assert.deepEqual([z.rows, z.settled], [20, true]);
+  assert.deepEqual([z.rows, z.settled], [33, true]);
   assert.equal(sideZoom(null, null, 10).rows, 24);
-  const r = sideZoom(sideZoom(null, 'rifle', 0), undefined, 5);
-  assert.deepEqual([r.rows, r.settled], [25, true]);
-  const again = sideZoom(z, 'deagle', 11);
-  assert.deepEqual([again.rows, again.settled], [20, true], 'the same gun: still settled');
+  const r = sideZoom(sideZoom(null, 'scope', 0), undefined, 5);
+  assert.deepEqual([r.rows, r.settled], [45, true]);
+  const again = sideZoom(z, 'rifle', 11);
+  assert.deepEqual([again.rows, again.settled], [33, true], 'the same rows: still settled');
 });
 
-test('sideZoom: changing guns eases over 0.35 s with 1 − (1 − k)³, then settles; a change mid-ease starts from where it is', () => {
-  let z = sideZoom(null, 'deagle', 0);
-  z = sideZoom(z, 'sniper', 1);
-  assert.deepEqual([z.rows, z.settled], [20, false]);
-  const half = sideZoom(z, 'sniper', 1 + 0.175);
-  assert.ok(Math.abs(half.rows - (20 + 13 * (1 - 0.5 ** 3))) < 1e-9, `half way ${half.rows}`);
+test('sideZoom: into the scope eases over 0.35 s with 1 − (1 − k)³, then settles; a change mid-ease starts from where it is', () => {
+  let z = sideZoom(null, 'sniper', 0);
+  z = sideZoom(z, 'scope', 1);
+  assert.deepEqual([z.rows, z.settled], [33, false]);
+  const half = sideZoom(z, 'scope', 1 + 0.175);
+  assert.ok(Math.abs(half.rows - (33 + 12 * (1 - 0.5 ** 3))) < 1e-9, `half way ${half.rows}`);
   assert.equal(half.settled, false);
-  const done = sideZoom(half, 'sniper', 1.35);
-  assert.deepEqual([done.rows, done.settled], [33, true]);
-  // Back to the deagle half way through: from the rows at that moment, not from 33.
-  const back = sideZoom(half, 'deagle', 1.175);
-  assert.ok(Math.abs(back.rows - half.rows) < 1e-9 && back.to === 20);
-  assert.equal(sideZoom(back, 'deagle', 1.175 + 0.35).rows, 20);
+  const done = sideZoom(half, 'scope', 1.35);
+  assert.deepEqual([done.rows, done.settled], [45, true]);
+  // Standing up half way through: from the rows at that moment, not from 45.
+  const back = sideZoom(half, 'sniper', 1.175);
+  assert.ok(Math.abs(back.rows - half.rows) < 1e-9 && back.to === 33);
+  assert.equal(sideZoom(back, 'sniper', 1.175 + 0.35).rows, 33);
 });
 
 test('sideZoom: Reduce Motion switches at once', () => {
-  let z = sideZoom(null, 'deagle', 0, { reducedMotion: true });
-  z = sideZoom(z, 'sniper', 1, { reducedMotion: true });
-  assert.deepEqual([z.rows, z.settled], [33, true]);
+  let z = sideZoom(null, 'sniper', 0, { reducedMotion: true });
+  z = sideZoom(z, 'scope', 1, { reducedMotion: true });
+  assert.deepEqual([z.rows, z.settled], [45, true]);
 });
 
 test('the side camera\'s lead scales with the view\'s width: half the cells, half the lead', () => {

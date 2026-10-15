@@ -312,10 +312,10 @@ export function sideCamera(a, view, p, lead = 0, inset = null) {
   return { x, y };
 }
 
-// How many rows the side view shows, by the gun in your hand (train level addendum §2): pick up the sniper
-// and it pulls back to the whole room; back to the deagle, it pushes in.
+// How many rows the side view shows, by the gun in your hand (train level addendum §2). Every gun sees the
+// whole room, as only the sniper used to (weapons addendum: "everyone should get sniper vision").
 // scope: the sniper in hand while crouched or prone (crouch addendum §3) pulls back further still.
-export const SIDE_ROWS = { deagle: 20, rifle: 25, sniper: 33, scope: 45, none: 24 };
+export const SIDE_ROWS = { deagle: 33, rifle: 33, sniper: 33, scope: 45, none: 24 };
 export const ZOOM_TIME = 0.35; // s
 
 // The zoom, eased: z is the last result (null at first), gun the gun in hand, null when not fighting and

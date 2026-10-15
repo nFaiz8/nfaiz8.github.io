@@ -3,6 +3,7 @@ import levelText from './arena.txt?raw';
 import { parseLevel, sideZoom } from './arena.js';
 import { buildTrain, frameAt, flashGlows } from './train.js';
 import { levelHash } from './level.js';
+import { FIGHT_VERSION } from './fight.js';
 import { createPvp } from './pvp.js';
 import { createFightHud } from './fighthud.js';
 import { createLive, peerEntities, heartEntities, localEcho, peerColor } from './live.js';
@@ -260,7 +261,7 @@ function onKey(e) {
   if (e.code === 'KeyG') { openGrid(); return true; }
   if (e.code === 'KeyF') { toggleFullscreen(); return true; }
   if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
-  if (e.code === 'KeyE' || e.code === 'Enter' || e.code === 'Space') {
+  if (e.code === 'KeyE') { // only E opens (not Enter or Space)
     if (world.focus) openFrame(world.focus, world.mode === 'side' ? { instant: true } : undefined);
     else if (world.atKiosk) openGrid();
     return true;
@@ -329,6 +330,7 @@ function controls(t) {
     mouse: m.on ? { on: true, ...renderer.pointAt(world, m.px, m.py) } : null }, t);
 }
 let padJump = false; // the pad's JUMP is held
+let exitAsks = 0; // world.exit.asks already noted
 // In the fight while the side view is up and nothing covers it (PvP spec §8). The tilt out, a photo, the map,
 // the grid or a hidden tab take me out (al); coming back puts me in again (ae, with fresh health).
 let keysNoted = false, linkUp = false; // linkUp: this connection's welcome came (so fightOk is its own)
@@ -359,6 +361,8 @@ function loop(now) {
   step(world, dt, away ? idle() : controls(t));
   if (pvp) { syncFight(t); pvp.frame(dt, t); } // through the door: out of the fight as the tilt starts
   if (world.want) tilt();
+  // The exit's first hit (exit addendum): it holds, and says how to get out.
+  if (world.exit.asks !== exitAsks) { exitAsks = world.exit.asks; note('hit the exit again to leave', 2500); }
   // Side-on the train lights itself; top-down the gallery's light (the train in its box has its own).
   world.lighting = world.mode === 'side' ? null : lightingTop;
   if (world.mode !== lastMode) {
@@ -862,7 +866,7 @@ async function boot() {
   const syncOnline = () => { if (pvp && live) pvp.setOnline(fightOnline(), performance.now()); };
   live = createLive({
     version: data.generated,
-    fightHash: pvp ? levelHash(levelText) : '',
+    fightHash: pvp ? `${levelHash(levelText)}.${FIGHT_VERSION}` : '', // as the server's: the level and the wire version
     inArena: () => !!pvp && pvp.entered && pvp.online, // the arena stream replaces my position messages
     onArena: (m) => { if (pvp) pvp.onMessage(m, performance.now()); },
     onState: () => { linkUp = false; syncOnline(); },

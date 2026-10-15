@@ -255,7 +255,7 @@ test('w, mm, aj, ax and the kill count', () => {
   assert.deepEqual(F.list(900), []);
 });
 
-test('k: dead until sp, stepped with no input; sp snaps, protects for 1.5 s, full hp', () => {
+test('k: dead until sp, stepped with no input; sp snaps, protects for 3 s, full hp', () => {
   const F = createFighters({ kindAt: kinds });
   one(F, 0, { vx: 30, i: 2 });
   F.apply({ t: 'h', id: 'b', by: 'a', w: 'd', n: 1, d: 25, hp: 0, kx: 10, ky: 0 }, 0);
@@ -274,8 +274,8 @@ test('k: dead until sp, stepped with no input; sp snaps, protects for 1.5 s, ful
   assert.equal(r.state.act, 'idle');
   assert.equal(r.state.hp, 100);
   assert.equal(r.state.safe, true);
-  assert.equal(F.list(3599)[0].state.safe, true);
-  assert.equal(F.list(3601)[0].state.safe, false);
+  assert.equal(F.list(5099)[0].state.safe, true);
+  assert.equal(F.list(5101)[0].state.safe, false);
 });
 
 test('a bullet hit adds to vy and does not cancel a jump; hp regenerates by regenHp', () => {

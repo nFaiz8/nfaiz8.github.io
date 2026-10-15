@@ -181,7 +181,7 @@ test('walking west through the door asks for the side view; entering puts you on
   assert.equal(w.focus, A.backdrop, 'the backdrop is what you look at');
 });
 
-test('in side view you run and jump; running east out of the door asks to go back; exiting faces east in the corridor', () => {
+test('in side view you run and jump; running east out of the door twice asks to go back; exiting faces east in the corridor', () => {
   const w = createWorld(amap);
   teleport(w, A.entry.x + 0.5, A.floorY - 1.5);
   assert.equal(w.mode, 'side', 'a teleport into the arena switches at once');
@@ -192,7 +192,10 @@ test('in side view you run and jump; running east out of the door asks to go bac
   // The jump may land on a platform over the door's floor: ↓ drops back through it first.
   for (let i = 0; i < 60; i++) step(w, 1 / 60, { ...SIDE_IDLE, down: true });
   for (let i = 0; i < 120 && !w.want; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: 1 });
-  assert.equal(w.want, 'top');
+  assert.equal(w.want, null, 'the first hit on the exit holds');
+  step(w, 1 / 60, SIDE_IDLE);
+  for (let i = 0; i < 60 && !w.want; i++) step(w, 1 / 60, { ...SIDE_IDLE, x: 1 });
+  assert.equal(w.want, 'top', 'the second lets me out');
   exitSide(w);
   assert.equal(w.mode, 'top');
   assert.equal(w.player.x, A.door.x + 2.5);
@@ -315,4 +318,35 @@ test('aimFacing 0 leaves facing to the running direction; Reduce Motion never sh
   const cx = r.cam.x, cy = r.cam.y;
   r.shake = { until: r.t + 0.15, amp: 0.4 };
   for (let i = 0; i < 5; i++) { step(r, 1 / 60, SIDE_IDLE); assert.equal(r.cam.x, cx); assert.equal(r.cam.y, cy); }
+});
+
+// The exit (exit addendum): two hits to leave the arena.
+test('the arena exit: the first hit holds me in (and asks); holding on is still one hit; the second within 3 s lets me out', async () => {
+  const { createWorld, step, enterSide } = await import('../src/world.js');
+  const fs = await import('node:fs');
+  const { indexData } = await import('../src/data.js');
+  const { buildLayout } = await import('../src/layout.js');
+  const { parseLevel } = await import('../src/level.js');
+  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
+  const data = indexData(fixture, ['IMG_1003']);
+  const map = buildLayout(data, { name: 'X' }, { arena: { photo: data.byId.get('IMG_1003'), level: parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8')) } });
+  const world = createWorld(map);
+  world.player.x = map.arena.entry.x + 0.5; world.player.y = map.arena.entry.y + 0.5;
+  enterSide(world);
+  const RIGHT = { x: 1, y: 0, run: false, jump: false, down: false }, NONE = { x: 0, y: 0, run: false, jump: false, down: false };
+  const run = (n, inp) => { for (let k = 0; k < n; k++) step(world, 1 / 60, inp); };
+  run(90, RIGHT); // 1.5 s held against it
+  assert.equal(world.mode, 'side');
+  assert.equal(world.want, null, 'held in');
+  assert.equal(world.exit.asks, 1, 'asked once, though held');
+  run(10, NONE);
+  run(60, RIGHT);
+  assert.equal(world.want, 'top', 'the second hit lets me out');
+  // A second hit too late (over 3 s after the first) is a first hit again.
+  enterSide(world);
+  run(30, RIGHT);
+  run(240, NONE);
+  run(30, RIGHT);
+  assert.equal(world.want, null, 'too late: held again');
+  assert.equal(world.exit.asks, 3);
 });

@@ -1,12 +1,13 @@
 // The rules engine of the arena fight: fighter records, shots and the bullet sweep, strikes, pickups,
 // respawns and the flee rule. Shared by the Worker (the authority) and the browser (the dummy, offline).
 // Pure: no DOM, no clocks, no randomness of its own (rand is given). Times are in seconds.
-import { levelKind } from './level.js';
+import { levelKind, pickupSpots } from './level.js';
 import {
   MAX_HP, SAFE_TIME, PICKUP_BACK, GUNS, GUN_BY_CODE, STRIKES, stunOf,
   shoulderOf, muzzleOf, rayLength, bulletRange, bulletAt, sweep,
   regenHp, fleeKiller, nextStrike, strikeBox, boxHits, strikeKnock, bulletKnock, inDodge, pickSpawn, nearPickup,
-  HEADSHOT, isHeadshot, ROLL, hurtOf, lowOf, LOW_KNOCK, PARRY_TIME,
+  HEADSHOT, isHeadshot, ROLL, hurtOf, lowOf, LOW_KNOCK, PARRY_TIME, PARRY_PAD,
+  PICKUP_GAP, SPAWN_GAP, MEDKIT, PICKUP_CODE, REGEN_AFTER,
 } from './fight.js';
 
 const EST_MAX = 0.1; // how far ahead a fighter's last state is moved on by its velocity, then held
@@ -21,10 +22,11 @@ const TOUCH = 1e-6; // cells: a body flush against the wall a bullet stops at is
 
 const r2 = (v) => Math.round(v * 100) / 100 + 0;
 const r1 = (v) => Math.round(v * 10) / 10 + 0; // + 0 turns -0 into 0
-// A strike's box as a centre offset from the body and half sizes, for the parry's sweep (parry addendum §1).
+// A strike's box, grown by PARRY_PAD, as a centre offset from the body and half sizes, for the parry's
+// sweep (parry addendum §1).
 function parryBox(T) {
   const b = strikeBox(0, 0, T.f, T.lastStrike);
-  return { dx: (b.x0 + b.x1) / 2, dy: (b.y0 + b.y1) / 2, hw: (b.x1 - b.x0) / 2, hh: (b.y1 - b.y0) / 2 };
+  return { dx: (b.x0 + b.x1) / 2, dy: (b.y0 + b.y1) / 2, hw: (b.x1 - b.x0) / 2 + PARRY_PAD, hh: (b.y1 - b.y0) / 2 + PARRY_PAD };
 }
 const shownHp = (hp) => (hp > 0 ? Math.max(1, Math.round(hp)) : 0); // alive never shows 0
 
@@ -43,7 +45,20 @@ const toDeagle = (F) => { F.gun = 'deagle'; F.ammo = -1; };
 export function createReferee({ level, rand }) {
   const kindAt = levelKind(level);
   const bullets = [];
-  const pickups = level.pickups.map((p) => ({ ...p, takenAt: -1e9 }));
+  // The level's guns, then one medkit (pickups addendum), each at a random spot; backAt: when it's there.
+  const spots = pickupSpots(level);
+  const pickups = [...level.pickups.map((p) => p.gun), 'medkit'].map((kind, n) => ({ n, kind, x: null, y: null, backAt: -1e9 }));
+  const apart = (a, b, d) => Math.hypot(a.x - b.x, 2 * (a.y - b.y)) >= d;
+  // A spot for p: PICKUP_GAP from the others and from where p was, SPAWN_GAP from the spawns; any spot if
+  // none is.
+  function place(p) {
+    const ok = (s) => (p.x == null || apart(s, p, PICKUP_GAP)) && level.spawns.every((q) => apart(s, q, SPAWN_GAP))
+      && pickups.every((q) => q === p || q.x == null || apart(s, q, PICKUP_GAP));
+    const free = spots.filter(ok), from = free.length ? free : spots;
+    const s = from[Math.min(from.length - 1, Math.floor(rand() * from.length))]; // a rand() of 1 is the last
+    p.x = s.x; p.y = s.y;
+  }
+  for (const p of pickups) place(p);
   let seq = 0;
 
   // The last state moved on by its velocity for the time since it arrived, at most EST_MAX.
@@ -230,15 +245,31 @@ export function createReferee({ level, rand }) {
     return out;
   }
 
+  // A gun gives itself (the same gun refills); a medkit heals MEDKIT.heal, and is refused at full health.
+  // Taken, it comes back at a new spot: a gun PICKUP_BACK later, a medkit at a random time in MEDKIT.back.
+  // pk says where (x, y), so everyone draws it there; hl gives the healed hp (d: how much it healed).
   function pickup(F, n, now) {
     const p = pickups[n];
-    if (!F.arena || !F.alive || !p || now - p.takenAt < PICKUP_BACK) return { ok: false, out: [] };
+    if (!F.arena || !F.alive || !p || now < p.backAt) return { ok: false, out: [] };
     const e = estimate(F, now);
     if (!nearPickup(e.x, e.y, p)) return { ok: false, out: [] };
-    p.takenAt = now;
-    F.gun = p.gun;
-    F.ammo = GUNS[p.gun].ammo;
-    return { ok: true, out: [{ t: 'pk', id: F.id, n: p.n, at: PICKUP_BACK * 1000 }, { t: 'w', id: F.id, w: GUNS[p.gun].code, ammo: F.ammo }] };
+    let back, got;
+    if (p.kind === 'medkit') {
+      const hp = regenHp(F.hp, F.hurtAt, now);
+      if (hp >= MAX_HP) return { ok: false, out: [] };
+      F.hp = Math.min(MAX_HP, hp + MEDKIT.heal);
+      F.hurtAt = Math.max(F.hurtAt, now - REGEN_AFTER); // the regen so far is in hp now: it goes on from here
+      back = MEDKIT.back[0] + rand() * (MEDKIT.back[1] - MEDKIT.back[0]);
+      got = { t: 'hl', id: F.id, hp: shownHp(F.hp), d: Math.round(F.hp - hp) };
+    } else {
+      F.gun = p.kind;
+      F.ammo = GUNS[p.kind].ammo;
+      back = PICKUP_BACK;
+      got = { t: 'w', id: F.id, w: GUNS[p.kind].code, ammo: F.ammo };
+    }
+    p.backAt = now + back;
+    place(p);
+    return { ok: true, out: [{ t: 'pk', id: F.id, n: p.n, at: Math.round(back * 1000), x: p.x, y: p.y }, got] };
   }
 
   function respawn(F, now, all, spot) {
@@ -274,7 +305,7 @@ export function createReferee({ level, rand }) {
 
   return {
     enter, state, fire, strike, tick, pickup, respawn, leave, view, estimate,
-    pickups: (now) => pickups.map((p) => ({ n: p.n, at: Math.max(0, Math.round((p.takenAt + PICKUP_BACK - now) * 1000)) })),
+    pickups: (now) => pickups.map((p) => ({ n: p.n, at: Math.max(0, Math.round((p.backAt - now) * 1000)), x: p.x, y: p.y, g: PICKUP_CODE[p.kind] })),
     live: () => bullets.length,
     bullets,
   };

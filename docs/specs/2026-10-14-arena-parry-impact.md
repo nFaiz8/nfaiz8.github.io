@@ -6,9 +6,11 @@ kill". The details below are choices made without them (§3). This addendum amen
 
 ## 1. The parry
 
-- **What it takes.** A punch or a kick parries a sniper round that flies into its strike box within
-  `PARRY_TIME` = 0.2 s of the strike.
-  - The box is the strike's own box (`strikeBox`), moved with the striker as it moves.
+- **What it takes.** A punch or a kick parries a sniper round that flies into its parry box within
+  `PARRY_TIME` = 0.28 s of the strike (0.2 at first; the user asked to "make parry lil easier",
+  `2026-10-14-arena-pickups-weapons-exit.md` §8).
+  - The box is the strike's own box (`strikeBox`) grown by `PARRY_PAD` = 0.6 cells each way, moved with the
+    striker as it moves.
   - Only sniper rounds can be parried (`GUNS.sniper.parry`). Deagle and rifle rounds pass through the box
     into the body as before.
   - A round coming from behind meets the body first, and the body takes it.
@@ -80,7 +82,7 @@ too) or someone pops me, the fight's picture freezes for a moment, the way a fig
 | --- | --- |
 | Which rounds can be parried? | Sniper only, as asked. One flag in `GUNS` would open it to the others. |
 | Where does a parried round go? | Straight back along its line, at whoever fired it if they haven't moved. Not along the parrier's aim. |
-| How long is a strike a parry? | 0.2 s, less than the punch's 0.3 s cooldown, so mashing K can't keep a parry up all the time. |
+| How long is a strike a parry? | 0.28 s (was 0.2), still less than the punch's 0.3 s cooldown, so mashing K can't keep a parry up all the time. |
 | Its range? | A fresh sniper range from the parry point. |
 | Impact frame for which kills? | Mine: I popped someone, or I was popped. Not other people's, which in a busy arena would strobe. |
 | Impact frame on a parry? | No, just the spark, the `parry!` and a small shake. |

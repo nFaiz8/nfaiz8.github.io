@@ -2,7 +2,7 @@
 import { isWalkable } from './layout.js';
 import { findPath } from './path.js';
 import { CELL_ASPECT } from './layout.js';
-import { newBody, stepBody, sideCamera, kindsFor, insideFor, SOLID } from './arena.js';
+import { newBody, stepBody, sideCamera, kindsFor, insideFor, SOLID, BODY } from './arena.js';
 
 const SPEED = 30; // walking, cells per second horizontally; vertical is divided by CELL_ASPECT
 const SPRINT = 1.5; // holding Shift
@@ -38,7 +38,30 @@ export function createWorld(map, { reducedMotion = false } = {}) {
     collide: null, // in the fight, the other fighters I bump into: stepBody's { others, solid, door } (pvp.js)
     shake: null, // { until, amp } in world seconds (pvp.js: kicked or popped)
     shakeOff: { x: 0, y: 0 }, // the offset the shake added to the camera last frame
+    // The arena's exit takes two hits (exit addendum): when the first was, whether I was pushing into it
+    // last step, until when it's open, and how many times it has asked for the second (main.js notes it).
+    exit: { hitAt: -Infinity, pushing: false, openUntil: -Infinity, asks: 0 },
   };
+}
+
+// The exit (exit addendum): the arena's east edge, where its door is, holds me in until I hit it twice. A
+// hit is starting to push into it (holding on is one hit, so a knock or a roll into it can't throw me
+// out); the second within EXIT_AGAIN s opens it for EXIT_OPEN s, and I walk out.
+export const EXIT_AGAIN = 3, EXIT_OPEN = 1;
+function holdAtExit(world) {
+  const p = world.player, a = world.map.arena, E = world.exit;
+  const edge = a.x + 1 + a.level.cols - BODY.w / 2; // the furthest east my centre goes inside
+  const pushing = p.x > edge;
+  if (pushing && world.t >= E.openUntil) {
+    const hit = !E.pushing;
+    if (hit && world.t - E.hitAt <= EXIT_AGAIN) E.openUntil = world.t + EXIT_OPEN; // the second: through
+    else {
+      if (hit) { E.hitAt = world.t; E.asks++; }
+      p.x = edge;
+      if (p.vx > 0) p.vx = 0;
+    }
+  }
+  E.pushing = pushing;
 }
 
 const solidAt = (map, x, y) => !isWalkable(map, Math.floor(x), Math.floor(y));
@@ -265,6 +288,7 @@ function stepSide(world, dt, input) {
   const p = world.player;
   if (!world.frozen) {
     stepBody(p, dt, input, world.kindAt, { reducedMotion: world.reducedMotion, inside: world.inside, ...world.collide });
+    holdAtExit(world);
     p.moving = Math.abs(p.vx) > 0.5 || !p.onGround;
     if (world.aimFacing) p.facing = world.aimFacing < 0 ? -1 : 1;
     else if (Math.abs(p.vx) > 0.5) p.facing = Math.sign(p.vx);
@@ -314,6 +338,7 @@ export function enterSide(world, { place = true } = {}) {
   // arrival. A teleport (a link, the viewer) has no such key, so the first press there jumps.
   if (!place) settleOnFloor(world);
   Object.assign(p, newBody(p.x, p.y), { prevJump: place });
+  world.exit = { hitAt: -Infinity, pushing: false, openUntil: -Infinity, asks: world.exit.asks };
   world.mode = 'side';
   world.want = null;
   world.path = null;

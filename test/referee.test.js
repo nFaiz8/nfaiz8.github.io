@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseLevel, levelKind } from '../src/level.js';
+import { parseLevel, levelKind, pickupSpots } from '../src/level.js';
 import { createReferee, newFighter } from '../src/referee.js';
-import { muzzleOf, bulletKnock, GUNS, STRIKES } from '../src/fight.js';
+import { muzzleOf, bulletKnock, GUNS, STRIKES, PARRY_TIME, PARRY_PAD } from '../src/fight.js';
 import { newBody, stepBody, knock } from '../src/arena.js';
 
 const L = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
@@ -67,8 +67,8 @@ test('four deagle hits pop: k with kills 1; the dead target holds the deagle', (
   assert.equal(B.gun, 'deagle');
 });
 
-test('bullets in flight: at most 2 deagle, 7 rifle, 1 sniper', () => {
-  for (const [gun, max] of [['deagle', 2], ['rifle', 7], ['sniper', 1]]) {
+test('bullets in flight: at most 6 deagle, 7 rifle, 1 sniper', () => {
+  for (const [gun, max] of [['deagle', 6], ['rifle', 7], ['sniper', 1]]) {
     const R = ref(), A = F('a', 60.5);
     A.gun = gun; A.ammo = GUNS[gun].ammo;
     let ok = 0;
@@ -86,16 +86,59 @@ test('running dry: 40 rifle shots, then w back to the deagle, and the next s is 
   assert.equal(shoot(R, A, 50, [A]).out[0].w, 'd');
 });
 
-test('pickups: taken, refused while gone, back after 10 s, the same gun refills, too far is refused', () => {
-  const R = ref(), p = L.pickups.find((q) => q.gun === 'rifle');
-  const A = F('a', p.x, p.y), B = F('b', p.x + 0.5, p.y), C = F('c', p.x + 3, p.y);
-  assert.deepEqual(R.pickup(A, p.n, 1).out, [{ t: 'pk', id: 'a', n: p.n, at: 10000 }, { t: 'w', id: 'a', w: 'r', ammo: 40 }]);
-  assert.equal(R.pickup(B, p.n, 2).ok, false);
-  A.ammo = 3;
+test('pickups: taken, refused while gone, back after 10 s at a new spot, the same gun refills, too far is refused', () => {
+  const R = ref(), p = R.pickups(0).find((q) => q.g === 'r');
+  const A = F('a', p.x, p.y), B = F('b', p.x + 0.5, p.y);
+  const r1 = R.pickup(A, p.n, 1).out;
+  const q = R.pickups(1).find((x) => x.n === p.n);
+  assert.deepEqual(r1, [{ t: 'pk', id: 'a', n: p.n, at: 10000, x: q.x, y: q.y }, { t: 'w', id: 'a', w: 'r', ammo: 40 }]);
+  assert.ok(Math.hypot(q.x - p.x, 2 * (q.y - p.y)) >= 20, 'it comes back at least 20 cells away');
+  assert.equal(R.pickup(B, p.n, 2).ok, false, 'gone');
+  Object.assign(A, { x: q.x, y: q.y, ammo: 3 });
   assert.equal(R.pickup(A, p.n, 11).ok, true);
   assert.equal(A.ammo, 40, 'refilled');
+  const q2 = R.pickups(11).find((x) => x.n === p.n), C = F('c', q2.x + 3, q2.y);
   assert.equal(R.pickup(C, p.n, 30).ok, false, 'too far');
-  assert.deepEqual(R.pickups(12).find((q) => q.n === p.n), { n: p.n, at: 9000 });
+  assert.deepEqual(R.pickups(12).find((x) => x.n === p.n), { n: p.n, at: 9000, x: q2.x, y: q2.y, g: 'r' });
+});
+
+test('pickups start at random standing spots, 20 apart and clear of the spawns; the medkit is the last', () => {
+  for (const r of [0, 0.3, 0.6, 0.99]) {
+    const P = createReferee({ level: L, rand: () => r }).pickups(0), spots = pickupSpots(L);
+    assert.deepEqual(P.map((q) => q.g), ['r', 'n', 'm']);
+    for (const q of P) {
+      assert.ok(spots.some((s) => s.x === q.x && s.y === q.y), `${q.g} on a standing spot`);
+      assert.ok(L.spawns.every((s) => Math.hypot(s.x - q.x, 2 * (s.y - q.y)) >= 6), `${q.g} clear of the spawns`);
+      for (const o of P) if (o !== q) assert.ok(Math.hypot(o.x - q.x, 2 * (o.y - q.y)) >= 20, `${q.g}–${o.g} apart`);
+    }
+  }
+  // Every rand gives the same spot; a varying one spreads them.
+  let k = 0;
+  const seen = new Set();
+  for (let i = 0; i < 20; i++) seen.add(createReferee({ level: L, rand: () => (k = (k * 7 + 3) % 11) / 11 }).pickups(0)[0].x);
+  assert.ok(seen.size > 3, `the rifle turns up in ${seen.size} places`);
+});
+
+test('the medkit: refused at full health; heals 50 (capped at 100) with hl; gone 15 to 30 s; regen carries on', () => {
+  const R = ref(), m = R.pickups(0).find((q) => q.g === 'm');
+  const A = F('a', m.x, m.y);
+  assert.equal(R.pickup(A, m.n, 1).ok, false, 'full health');
+  Object.assign(A, { hp: 20, hurtAt: 0.5 });
+  const { ok, out } = R.pickup(A, m.n, 1);
+  assert.equal(ok, true);
+  assert.deepEqual(out[1], { t: 'hl', id: 'a', hp: 70, d: 50 });
+  assert.ok(out[0].at >= 15000 && out[0].at <= 30000, `back in ${out[0].at} ms`);
+  assert.equal(A.hp, 70);
+  // Hurt 10 s ago (regen running), at 50: regen gives 50 by now... it is already full: refused.
+  const B = Object.assign(F('b', 0, 0), { hp: 10, hurtAt: 0 });
+  const back = R.pickups(1).find((q) => q.n === m.n);
+  Object.assign(B, { x: back.x, y: back.y });
+  assert.equal(R.pickup(B, m.n, 40).ok, false, 'regen has filled it up');
+  // Hurt 5 s ago: regen has given 20 (from 10 to 30); the medkit takes it to 80, and regen goes on from there.
+  Object.assign(B, { hp: 10, hurtAt: 35 });
+  assert.equal(R.pickup(B, m.n, 40).out[1].hp, 80);
+  assert.equal(R.view(B, 40).hp, 80);
+  assert.equal(R.view(B, 40.5).hp, 90, 'regen carries on at once');
 });
 
 test('strikes: mm always; a punch within reach; a ground kick outside a combo is a punch; punch punch kick', () => {
@@ -201,7 +244,7 @@ test('enter keeps kills and resets the rest; view reports regen, safety and the 
   const R = ref(), A = newFighter('a', 0);
   Object.assign(A, { kills: 3, hp: 10, hurtAt: 5, alive: false, gun: 'rifle', ammo: 4, hitBy: 'b' });
   assert.deepEqual(R.enter(A, 10), [{ t: 'aj', id: 'a', hp: 100, kills: 3 }]);
-  assert.deepEqual([A.arena, A.hp, A.alive, A.safeUntil, A.gun, A.ammo, A.hitBy], [true, 100, true, 11.5, 'deagle', -1, null]);
+  assert.deepEqual([A.arena, A.hp, A.alive, A.safeUntil, A.gun, A.ammo, A.hitBy], [true, 100, true, 13, 'deagle', -1, null]);
   Object.assign(A, { hp: 40, hurtAt: 20 });
   assert.deepEqual(R.view(A, 25), { id: 'a', hp: 60, kills: 3, alive: 1, safe: 0, w: 'd', ammo: -1, x: 0, y: 0, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0 });
   assert.equal(R.view(A, 11).safe, 1);
@@ -330,12 +373,12 @@ test('headshot: a level deagle bullet at the head row does 50 with hs: 1; knockb
   assert.deepEqual({ ...h, n: undefined }, { t: 'h', id: 'b', by: 'a', w: 'd', n: undefined, d: 50, hp: 50, kx: 10, ky: 0, hs: 1 });
 });
 
-test('headshot: ×2 for the rifle (the smg) too (12)', () => {
+test('headshot: ×2 for the rifle (the smg) too (16)', () => {
   const R = ref(), A = F('a', 20.5, 23.5), B = F('b', 30.5);
   A.gun = 'rifle'; A.ammo = 40;
   shoot(R, A, 1, [A, B]);
   const h = run(R, 1, 1.3, [A, B]).find((m) => m.t === 'h');
-  assert.deepEqual([h.d, h.hp, h.hs], [12, 88, 1]);
+  assert.deepEqual([h.d, h.hp, h.hs], [16, 84, 1]);
 });
 
 test('a level bullet at the torso does 1× with no hs; melee never has hs', () => {
@@ -519,17 +562,17 @@ test('crouch: half the knock and lo: 1 for a body hit low, by a bullet or a stri
 });
 
 test('crouch: a shot fired low flies 1.5× as far and s carries l: 1; a standing one has no l', () => {
-  // Car A's open floor: a target ~80 cells away, past the deagle's 64 but within 96.
+  // Car A's open floor: a target ~80 cells away, past the rifle's 63 but within 94.5 (the deagle's is unlimited).
   const far = (i, low) => {
-    const R = ref(), A = Object.assign(F('a', 20.5), { i }), B = Object.assign(F('b', 20.5 + 80), { i: 64 });
+    const R = ref(), A = Object.assign(F('a', 20.5), { i, gun: 'rifle', ammo: 40 }), B = Object.assign(F('b', 20.5 + 80), { i: 64 });
     const r = lowShoot(R, A, 1, [A, B], low);
     return { s: r.out[0], len: R.bullets[0].len };
   };
   const lo = far(64, 1), up = far(0, 0);
   assert.equal(lo.s.l, 1);
   assert.equal(up.s.l, undefined);
-  assert.ok(up.len <= 64 + 1e-9);
-  assert.ok(lo.len > 64, `the low shot runs ${lo.len}`);
+  assert.ok(up.len <= 63 + 1e-9);
+  assert.ok(lo.len > 63, `the low shot runs ${lo.len}`);
 });
 
 test('crouch: the bits count only on the ground and not rolling; a prone body\'s head is its front', () => {
@@ -561,7 +604,7 @@ function parryRun({ strikeAt = 1.05, f = -1, gun = 'sniper', kind = 'p', to = 1.
   return { R, A, B, s, out };
 }
 
-test('parry: a punch facing a sniper round within 0.2 s sends it back; it hits the shooter, by the parrier, with pr: 1', () => {
+test('parry: a punch facing a sniper round within 0.28 s sends it back; it hits the shooter, by the parrier, with pr: 1', () => {
   const { A, B, s, out } = parryRun();
   const pr = out.find((m) => m.t === 'pr');
   assert.ok(pr, 'pr sent');
@@ -586,13 +629,23 @@ test('parry: a punch facing a sniper round within 0.2 s sends it back; it hits t
 });
 
 test('parry: a strike thrown too early, or facing away, is no parry; the round hits', () => {
-  for (const o of [{ strikeAt: 0.9 }, { strikeAt: 1.05, f: 1 }]) {
+  for (const o of [{ strikeAt: 0.8 }, { strikeAt: 1.05, f: 1 }]) {
     const { out } = parryRun(o);
     assert.equal(out.filter((m) => m.t === 'pr').length, 0, JSON.stringify(o));
     const h = out.find((m) => m.t === 'h' && m.id === 'b');
     assert.ok(h, JSON.stringify(o));
     assert.equal(h.pr, undefined);
   }
+});
+
+test('parry: a little easier: a strike 0.25 s before the round arrives still parries, and the box is grown by 0.6', () => {
+  assert.equal(PARRY_TIME, 0.28);
+  assert.equal(PARRY_PAD, 0.6);
+  assert.ok(PARRY_TIME < STRIKES.punch.cooldown, 'mashing can\'t hold a parry up');
+  assert.equal(parryRun({ strikeAt: 0.88 }).out.filter((m) => m.t === 'pr').length, 1, 'too early before');
+  // The bare punch box's near edge is 58.3; the grown one's 57.7, met first.
+  const pr = parryRun({ strikeAt: 1.0 }).out.find((m) => m.t === 'pr');
+  assert.ok(pr.x > 57.5 && pr.x < 58, `met the grown box: ${pr.x}`);
 });
 
 test('parry: a kick parries too; no strike, no parry', () => {

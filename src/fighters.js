@@ -183,6 +183,10 @@ export function createFighters({ kindAt, inside = null, offset = { x: 0, y: 0 },
         if (F.alive) setAct(F, 'hurt', now, stun * 1000);
         break;
       }
+      case 'hl': // a medkit: the regen so far is in hp now, and goes on from here
+        if (num(m.hp)) F.hp = m.hp;
+        F.hurtAt = Math.max(F.hurtAt, now - REGEN_AFTER * 1000);
+        break;
       case 'k': F.alive = false; F.hp = 0; F.input = NONE; setAct(F, 'dead', now, Infinity); break;
       case 'sp': {
         if (!num(m.x) || !num(m.y)) break;

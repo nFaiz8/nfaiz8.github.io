@@ -191,6 +191,14 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(300);
     const p = await page.evaluate(() => ({ ...window.__ascii.world.player }));
     assert.ok(Math.abs(p.y - (a.floorY - 1.5)) < 0.01, `on the floor (${p.y})`); // the 3-row body's centre
+    // The exit takes two hits: the first holds (and asks), the second lets me out.
+    await page.keyboard.down('ArrowRight');
+    await page.waitForFunction(() => window.__ascii.world.exit.asks > 0, { timeout: 5000 });
+    await sleep(300);
+    await page.keyboard.up('ArrowRight');
+    assert.equal(await page.evaluate(() => window.__ascii.mode()), 'side', 'the first hit holds');
+    assert.match(await page.$eval('#note', (n) => n.textContent), /hit the exit again/);
+    await sleep(100);
     await page.keyboard.down('ArrowRight');
     await page.waitForFunction(() => window.__ascii.mode() === 'top', { timeout: 5000 });
     await page.keyboard.up('ArrowRight');
@@ -323,7 +331,7 @@ await withBrowser(async ({ page, url, errors }) => {
       assert.equal(await page.evaluate(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id)), false, 'the photo was not loaded to be drawn');
     });
   }
-  await check('the side view zooms by gun: about 20 rows with the deagle, the whole room with the sniper; the mouse aims true at both', async () => {
+  await check('the side view: the whole room (33 rows) with any gun, 45 with the sniper crouched (the scope); the mouse aims true at both', async () => {
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
     await page.goto(`${url}#/room/arena`); await ready(page);
     await page.waitForFunction(() => window.__ascii.pvp().entered && !window.__ascii.tilting(), { timeout: 8000 });
@@ -348,17 +356,20 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 60.5, a.floorY - 1.5); });
     await sleep(800);
     const deagle = await rows();
-    assert.ok(deagle >= 20 && deagle < 22.4, `deagle: ${deagle.toFixed(2)} rows`);
-    assert.deepEqual(await facesMouse(), [-1, 1], 'faces the mouse (deagle zoom)');
+    assert.ok(deagle >= 33 && deagle < 37, `deagle: ${deagle.toFixed(2)} rows`);
+    assert.deepEqual(await facesMouse(), [-1, 1], 'faces the mouse (deagle)');
     await page.evaluate(() => { window.__ascii.pvp().me.gun = 'sniper'; });
+    await page.focus('#stage');
+    await page.keyboard.down('ArrowDown'); // crouched: the scope
     await sleep(100);
     const easing = await page.evaluate(() => window.__ascii.zoom());
     await sleep(600);
-    const sniper = await rows(), z = await page.evaluate(() => window.__ascii.zoom());
-    console.log(`  zoom: deagle ${deagle.toFixed(2)} rows, sniper ${sniper.toFixed(2)} rows (mid-ease ${easing.rows.toFixed(1)}, settled ${easing.settled})`);
-    assert.ok(easing.rows > 20 && easing.rows < 33 && !easing.settled, 'it eases');
-    assert.ok(z.settled && sniper >= 33 && sniper < 37, `sniper: ${sniper.toFixed(2)} rows`);
-    assert.deepEqual(await facesMouse(), [-1, 1], 'faces the mouse (sniper zoom)');
+    const scope = await rows(), z = await page.evaluate(() => window.__ascii.zoom());
+    console.log(`  zoom: deagle ${deagle.toFixed(2)} rows, the sniper crouched ${scope.toFixed(2)} rows (mid-ease ${easing.rows.toFixed(1)}, settled ${easing.settled})`);
+    assert.ok(easing.rows > 33 && easing.rows < 45 && !easing.settled, 'it eases');
+    assert.ok(z.settled && scope >= 45 && scope < 49, `scope: ${scope.toFixed(2)} rows`);
+    assert.deepEqual(await facesMouse(), [-1, 1], 'faces the mouse (scope)');
+    await page.keyboard.up('ArrowDown');
     assert.deepEqual(await page.evaluate(() => window.__ascii.missing()), [], 'no glyph is missing from the atlas');
     await page.evaluate(() => { window.__ascii.pvp().me.gun = 'deagle'; });
     await sleep(600);
@@ -667,17 +678,17 @@ await withBrowser(async ({ page, url, errors }) => {
         return hit(h);
       };
       const a = A.map.arena, L = a.level, ox = a.x + 1, oy = a.y + 1, top = L.door.r + 1; // the floor's top row
-      const pk = (gun) => { const q = L.pickups.find((p) => p.gun === gun); return { x: q.x + ox, y: q.y + oy }; };
+      const pk = (kind) => P.pickups(performance.now()).find((q) => q.kind === kind); // random spots: the referee's
       const d = P.dummy.body;
       // 40 cells of floor with 10 clear rows over them, 4 cells clear of the dummy and of any pickup on it.
-      const busy = (c) => Math.abs(d.x - ox - c) < 4 || L.pickups.some((q) => q.r === top - 1 && Math.abs(q.c - c) < 4);
+      const busy = (c) => Math.abs(d.x - ox - c) < 4 || P.pickups(performance.now()).some((q) => Math.abs(q.y - oy - (top - 1.5)) < 1 && Math.abs(q.x - ox - c) < 4);
       let open = null;
       for (let c0 = 2; !open && c0 + 40 < L.cols - 2; c0++) {
         let ok = true;
         for (let c = c0; ok && c <= c0 + 40; c++) ok = L.cells[top * L.cols + c] !== 0 && !busy(c) && [...Array(10)].every((_, k) => !L.cells[(top - 1 - k) * L.cols + c]);
         if (ok) open = { x: ox + c0 + 0.5 };
       }
-      return { floor: a.floorY - 1.5, rifle: pk('rifle'), sniper: pk('sniper'), dummy: { x: d.x, y: d.y }, open };
+      return { floor: a.floorY - 1.5, rifle: pk('rifle'), sniper: pk('sniper'), medkit: pk('medkit'), dummy: { x: d.x, y: d.y }, open };
     });
   };
   const place = (x, y, facing) => page.evaluate((x, y, f) => { window.__ascii.teleport(x, y); window.__ascii.world.player.facing = f; }, x, y, facing);
@@ -785,9 +796,8 @@ await withBrowser(async ({ page, url, errors }) => {
       requestAnimationFrame(tick);
     }), s.sniper);
     watch.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
-    await place(s.sniper.x - 4, s.floor, 1);
-    await sleep(200);
-    await holdUntil('ArrowRight', () => window.__ascii.pvp().me.gun === 'sniper', 3000);
+    await place(s.sniper.x, s.sniper.y, 1); // onto it: it may be anywhere (pickups addendum)
+    await page.waitForFunction(() => window.__ascii.pvp().me.gun === 'sniper', { timeout: 3000 });
     assert.deepEqual(await page.evaluate(() => ({ gun: window.__ascii.pvp().me.gun, ammo: window.__ascii.pvp().me.ammo })), { gun: 'sniper', ammo: 5 });
     await page.waitForFunction(() => /· sniper 5$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
     // My aim line: a · every 2 cells, in my colour, along my aim.
@@ -816,11 +826,10 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(seen[0].there === true && taken, 'there, then taken');
     assert.ok(back && back.t - taken.t > 9500 && back.t - taken.t < 10800, `back ${back && (back.t - taken.t).toFixed(0)} ms after it was taken`);
   });
-  await check('arena PvP alone: the rifle (the smg) gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (2 to 2.6 a second); 6 an smg hit (12 on the head, from its spray), 25 a deagle hit', async () => {
+  await check('arena PvP alone: the rifle (the smg) gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (2 to 2.6 a second); 8 an smg hit (16 on the head, from its spray), 25 a deagle hit', async () => {
     const s = await enterFight();
-    await place(s.rifle.x - 4, s.rifle.y, 1); // on car A's roof
-    await sleep(200);
-    await holdUntil('ArrowRight', () => window.__ascii.pvp().me.gun === 'rifle', 3000);
+    await place(s.rifle.x, s.rifle.y, 1); // onto it: it may be anywhere (pickups addendum)
+    await page.waitForFunction(() => window.__ascii.pvp().me.gun === 'rifle', { timeout: 3000 });
     assert.equal(await page.evaluate(() => window.__ascii.pvp().me.ammo), 40);
     await page.waitForFunction(() => /· smg 40$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
     await place(s.dummy.x - 10, s.floor, 1);
@@ -848,7 +857,8 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(deagle.length >= 3 && deagle[0].at > rifle.at(-1).at, 'then the deagle');
     assert.ok(rate(deagle) > 0.8 * per('deagle') && rate(deagle) <= 1.04 * per('deagle'), `the deagle 2 to 2.6 a second (${rate(deagle).toFixed(2)})`);
     assert.equal(rifleHits.length + deagleHits.length, hits.length, 'every hit traced to its gun');
-    assert.ok(rifleHits.length >= 10 && rifleHits.every((h) => h.d === (h.hs ? 12 : 6)), `6 an smg hit, 12 on the head (${rifleHits.map((h) => h.d).join(' ')})`);
+    const smg = GUNS.rifle.damage;
+    assert.ok(rifleHits.length >= 10 && rifleHits.every((h) => h.d === (h.hs ? 2 * smg : smg)), `${smg} an smg hit, ${2 * smg} on the head (${rifleHits.map((h) => h.d).join(' ')})`);
     assert.ok(deagleHits.length > 0 && deagleHits.every((h) => h.d === 25 && !h.hs), `25 a deagle hit (${deagleHits.map((h) => h.d).join(' ')})`);
   });
   await check('arena PvP alone: a double-tap of D rolls about 14 cells; a bullet reaching the dummy inside its roll\'s dodge window passes through it (rules and screen)', async () => {
@@ -1224,7 +1234,7 @@ await withBrowser(async ({ page, url, errors }) => {
       await page.evaluate(() => window.__ascii.freezeTrain(5000)); // no lamp (amber too) passing behind me
       // In car B, west of the sniper: walking over it would change the gun, and the zoom with it.
       await page.evaluate(() => { const a = window.__ascii.map.arena; window.__ascii.teleport(a.x + 1 + 160.5, a.floorY - 1.5); });
-      await sleep(1500); // past the protection on entering, whose pulse dims the figure off amber
+      await sleep(3100); // past the protection on entering, whose pulse dims the figure off amber
       await page.keyboard.down('ArrowLeft');
       await sleep(400);
       // Each frame, just after it's drawn: the centre of the amber pixels around me, in map cells.

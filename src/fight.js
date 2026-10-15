@@ -17,22 +17,33 @@ export const LOW_KNOCK = 0.5; // a body hit while low takes this much of the kno
 export const CRAWL_SPREAD = 0.5; // radians: a shot fired crawling goes up off its aim by up to this
 export const REGEN_RATE = 20;
 export const REGEN_AFTER = 4;
-export const SAFE_TIME = 1.5;
+export const SAFE_TIME = 3; // protection after spawning or entering; shooting or striking ends it
 export const RESPAWN_TIME = 2;
 export const FLEE_TIME = 3;
 export const PICKUP_BACK = 10;
 export const PICKUP_REACH = { x: 1, y: 2 };
+// Pickups appear at random spots (pickups addendum): this far apart (on screen, cells) from each other and
+// from where they last were, and this far from a spawn. A medkit heals this much, and is gone this long
+// (seconds, at random) once taken.
+export const PICKUP_GAP = 20, SPAWN_GAP = 6;
+export const MEDKIT = { heal: 50, back: [15, 30] };
+export const PICKUP_CODE = { rifle: 'r', sniper: 'n', medkit: 'm' };
+export const PICKUP_BY_CODE = { r: 'rifle', n: 'sniper', m: 'medkit' };
+// Bumped when the fight's wire changes, so a page and a server of different versions don't fight together
+// (each falls back to the dummy): it goes into the fight hash. 2: pickups at random spots, and medkits.
+export const FIGHT_VERSION = 2;
 export const COMBO_GAP = 0.5;
 export const DODGE = [0.04, 0.26];
 export const ROLL = { speed: 48, time: 0.3, cooldown: 0.5 }; // cells/s, seconds
 export const ACT_TIME = { shoot: 0.2, punch: 0.25, kick: 0.4, roll: 0.3 };
 
-// Ammo -1 means endless, everywhere: records and wire. spray: radians a shot may go off its aim either way,
+// Ammo -1 means endless, everywhere: records and wire. The deagle's range is unlimited (weapons addendum),
+// so up to 6 of its rounds may be in flight (one crossing the level takes 2.5 s; it fires every 0.4 s). spray: radians a shot may go off its aim either way,
 // standing (or in the air) and crouched; the rifle is drawn and shown as an smg (smg addendum).
 export const GUNS = {
-  deagle: { code: 'd', damage: 25, cooldown: 0.4, speed: 80, flight: 0.8, max: 2, ammo: -1, kb: 10, stun: 0.1 },
-  rifle: { code: 'r', damage: 6, cooldown: 0.1, speed: 90, flight: 0.7, max: 7, ammo: 40, kb: 3, stun: 0.05, spray: [0.15, 0.04] },
-  sniper: { code: 'n', damage: 70, cooldown: 1.2, speed: 220, flight: 0.75, max: 1, ammo: 5, kb: 30, stun: 0.3, parry: true },
+  deagle: { code: 'd', damage: 25, cooldown: 0.4, speed: 80, flight: 0.8, max: 6, ammo: -1, kb: 10, stun: 0.1, range: Infinity },
+  rifle: { code: 'r', damage: 8, cooldown: 0.1, speed: 90, flight: 0.7, max: 7, ammo: 40, kb: 3, stun: 0.05, spray: [0.15, 0.04] },
+  sniper: { code: 'n', damage: 70, cooldown: 1.8, speed: 220, flight: 0.75, max: 1, ammo: 5, kb: 30, stun: 0.3, parry: true },
 };
 export const GUN_BY_CODE = { d: 'deagle', r: 'rifle', n: 'sniper' };
 export const GUN_NAME = { deagle: 'deagle', rifle: 'smg', sniper: 'sniper' }; // what the HUD calls them
@@ -43,9 +54,10 @@ export const STRIKES = {
   kick: { code: 'k', damage: 22, reach: 2.2, kx: 45, ky: 22, stun: 0.4, cooldown: 0.55 },
 };
 
-// A strike's box parries a round of a gun with parry (the sniper) that flies into it this long after the
-// strike: the round turns straight back, the striker's now (parry addendum §1).
-export const PARRY_TIME = 0.2;
+// A strike's box, grown by PARRY_PAD cells each way, parries a round of a gun with parry (the sniper) that
+// flies into it this long after the strike: the round turns straight back, the striker's now (parry
+// addendum §1). PARRY_TIME stays under the punch's cooldown, so mashing can't hold a parry up.
+export const PARRY_TIME = 0.28, PARRY_PAD = 0.6;
 
 const STUN = { d: 0.1, r: 0.05, n: 0.3, p: 0.2, k: 0.4 };
 export const stunOf = (w) => STUN[w];
@@ -94,7 +106,8 @@ export function rayLength(kindAt, x, y, angle, max) {
   return max;
 }
 
-export const bulletRange = (gun, long = false) => GUNS[gun].speed * GUNS[gun].flight * (long ? LOW_RANGE : 1);
+// range: Infinity flies until a wall (the deagle: the level's walls are all around, so it always ends).
+export const bulletRange = (gun, long = false) => GUNS[gun].range ?? GUNS[gun].speed * GUNS[gun].flight * (long ? LOW_RANGE : 1);
 
 export function bulletAt(b, t) {
   const d = along(b.angle, GUNS[b.gun].speed * (t - b.t0));

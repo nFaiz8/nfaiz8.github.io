@@ -223,7 +223,7 @@ try {
       const aId = await a.evaluate(() => window.__ascii.live().peers.myId), bId = await b.evaluate(() => window.__ascii.live().peers.myId);
       await a.waitForFunction((id) => (window.__ascii.world.bodies || []).some((x) => x.id === id), { timeout: 5000 }, bId);
       await b.waitForFunction((id) => (window.__ascii.world.bodies || []).some((x) => x.id === id), { timeout: 5000 }, aId);
-      await sleep(2000); // past both fly-ins and the 1.5 s of protection
+      await sleep(3200); // past both fly-ins and the 3 s of protection
       // The server clamps a first state from the door, so a teleported B is seen there until B moves: a step.
       await b.evaluate(() => window.__ascii.input().press('ArrowLeft', true));
       await sleep(50);
@@ -285,17 +285,18 @@ try {
       ids.b = await b.evaluate(() => window.__ascii.pvp().me.id);
     };
     // Spots from the level: the floor, 40 cells of open floor (10 clear rows over it, clear of the pickups),
-    // the pickups, the spawns. Map cells.
+    // the spawns; the pickups where the server put them (pickups addendum). Map cells.
     const spotsOf = () => a.evaluate(() => {
       const A = window.__ascii, a = A.map.arena, L = a.level, ox = a.x + 1, oy = a.y + 1, top = L.door.r + 1;
-      const busy = (c) => L.pickups.some((q) => q.r === top - 1 && Math.abs(q.c - c) < 4);
+      const P = A.pvp().pickups(performance.now());
+      const busy = (c) => P.some((q) => Math.abs(q.y - oy - (top - 1.5)) < 1 && Math.abs(q.x - ox - c) < 4);
       let open = null;
       for (let c0 = 2; !open && c0 + 40 < L.cols - 2; c0++) {
         let ok = true;
         for (let c = c0; ok && c <= c0 + 40; c++) ok = L.cells[top * L.cols + c] !== 0 && !busy(c) && [...Array(10)].every((_, k) => !L.cells[(top - 1 - k) * L.cols + c]);
         if (ok) open = ox + c0 + 0.5;
       }
-      const pk = (gun) => { const q = L.pickups.find((p) => p.gun === gun); return { x: q.x + ox, y: q.y + oy }; };
+      const pk = (kind) => P.find((q) => q.kind === kind);
       return { floor: a.floorY - 1.5, open, rifle: pk('rifle'), sniper: pk('sniper'), spawns: L.spawns.map((s) => ({ x: s.x + ox, y: s.y + oy })) };
     });
     // A fighter as page p draws it (null if not drawn).
@@ -323,7 +324,7 @@ try {
         S = await spotsOf();
         await putAt(a, b, S.open + 5, S.floor, 1);
         await putAt(b, a, S.open + 17, S.floor, -1);
-        await sleep(1000); // past the 1.5 s of protection on entering
+        await sleep(1000); // past the 3 s of protection on entering (with the wait above)
         await a.keyboard.down('KeyJ');
         try { await b.waitForFunction(() => window.__ascii.pvp().me.hp < 100, { timeout: 4000 }); } finally { await a.keyboard.up('KeyJ'); }
         const hp = await b.evaluate(() => window.__ascii.pvp().me.hp);
@@ -361,7 +362,7 @@ try {
     await check('arena PvP: A presses K next to B: B is knocked more than 2 cells away, on both screens', async () => {
       await putAt(b, a, S.open + 17, S.floor, -1);
       await putAt(a, b, S.open + 15.8, S.floor, 1);
-      await sleep(1600); // B's protection from the respawn is over
+      await sleep(3100); // B's protection from the respawn is over
       const b0 = (await meOn(b)).x, seen0 = (await bodyOn(a, ids.b)).x;
       await a.focus('#stage');
       await a.keyboard.press('KeyK');
@@ -413,11 +414,10 @@ try {
     await check('arena PvP: A walks into the rifle: A holds a rifle on both screens, and B sees A\'s shots as rifle bullets', async () => {
       // Onto car A's roof from the floor right under it: one step straight up (a slanted run of clamped steps
       // can end one inside the roof, which the server drops).
-      await putAt(a, b, S.rifle.x - 4, S.floor, 1);
-      await putAt(a, b, S.rifle.x - 4, S.rifle.y, 1);
-      await a.focus('#stage');
-      await a.keyboard.down('ArrowRight');
-      try { await a.waitForFunction(() => window.__ascii.pvp().me.gun === 'rifle', { timeout: 3000 }); } finally { await a.keyboard.up('ArrowRight'); }
+      // It may be anywhere (pickups addendum): under it on the floor, then straight up onto it.
+      await putAt(a, b, S.rifle.x, S.floor, 1);
+      if (S.rifle.y !== S.floor) await putAt(a, b, S.rifle.x, S.rifle.y, 1).catch(() => {}); // taken on arrival: not seen standing there
+      await a.waitForFunction(() => window.__ascii.pvp().me.gun === 'rifle', { timeout: 3000 });
       await b.waitForFunction((id) => window.__ascii.pvp().bodies(performance.now()).find((x) => x.id === id)?.state.gun === 'rifle', { timeout: 3000 }, ids.a);
       const n0 = await b.evaluate(() => window.__fight.shots.length); // A's earlier shots (the deagle) aren't these
       await a.keyboard.down('KeyJ'); await sleep(350); await a.keyboard.up('KeyJ');
@@ -427,9 +427,9 @@ try {
       assert.ok(guns.every((g) => g === 'rifle'), guns.join(' '));
     });
     await check('arena PvP: A holds the sniper: B\'s screen draws A\'s dotted aim line', async () => {
-      await putAt(a, b, S.sniper.x - 4, S.floor, 1);
-      await a.keyboard.down('ArrowRight');
-      try { await a.waitForFunction(() => window.__ascii.pvp().me.gun === 'sniper', { timeout: 3000 }); } finally { await a.keyboard.up('ArrowRight'); }
+      await putAt(a, b, S.sniper.x, S.floor, 1);
+      if (S.sniper.y !== S.floor) await putAt(a, b, S.sniper.x, S.sniper.y, 1).catch(() => {});
+      await a.waitForFunction(() => window.__ascii.pvp().me.gun === 'sniper', { timeout: 3000 });
       await b.waitForFunction((id) => {
         const A = window.__ascii, q = A.pvp().bodies(performance.now()).find((x) => x.id === id);
         return q && q.state.gun === 'sniper' && A.world.figures.filter((g) => g.ch === '·' && g.color && g.color.join() === q.color.join()).length >= 5;

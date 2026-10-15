@@ -88,7 +88,7 @@ the unit of `RUN`) and rows (vertical, the unit of `GRAVITY`); a row is twice as
 |---|---|---|
 | health (`MAX_HP`) | **100** | round numbers for damage |
 | regeneration | **20 hp/s**, starting **4 s** after the last damage taken | keeps a drop-in fight flowing without a medkit system; 4 s is long enough that it never saves you mid-exchange |
-| protection after spawning or entering | **1.5 s**, ended early by shooting or striking | long enough to see where you are; can't be used to attack safely |
+| protection after spawning or entering | **3 s** (was 1.5; pickups addendum §7), ended early by shooting or striking | long enough to see where you are; can't be used to attack safely |
 
 - Regeneration is computed lazily from the time of the last damage, on the server and in the browser
   alike, so it needs no timer.
@@ -192,7 +192,7 @@ ground if `ky` is upward, and starts the stun.
     of each pair in each half of the room. None in the track bed under the yellow line.
   - The server picks the spawn whose nearest living, in-arena opponent is farthest away, breaking ties
     at random.
-- After respawning you have full health and 1.5 s of protection.
+- After respawning you have full health and 3 s of protection.
 
 ### 2.6 Scoreboard and kill feed
 
@@ -488,7 +488,7 @@ The bullets and the tick live for under a second, so losing them to an eviction 
     movement.
   The cost: on a slow connection, a running target you strike at the edge of your reach can get away.
 - **Popping and respawning**: at 0 hp the server sets `alive: false`, credits the killer, and sends
-  `k`. A later `rs` (at least 1.9 s on) gets a spawn point (§2.5), full health, the deagle and 1.5 s of
+  `k`. A later `rs` (at least 1.9 s on) gets a spawn point (§2.5), full health, the deagle and 3 s of
   protection, and `sp` goes to everyone in the arena.
 - **Dodging**: a target inside its roll's dodge window is skipped by bullets (they fly on) and by
   strikes.
@@ -539,7 +539,7 @@ they are, which is what hits are tested against.
 
 - **Entering** (through the door, by a `#/room/arena` link, or arriving by teleport): the browser sends
   `ae`. The server answers `aw` with everyone inside and their health, kills and states, and sends `aj`
-  to the others. You start with full health and 1.5 s of protection wherever you are (normally the
+  to the others. You start with full health and 3 s of protection wherever you are (normally the
   door, so camping it is pointless). Bullets already in flight are not sent; they last under a second.
 - **First entry per visit**: a note shows "J shoot · K hit · mouse aims" on a keyboard device, for 4 s.
   Phones have labelled buttons and get no note.
