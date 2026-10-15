@@ -165,10 +165,16 @@ test('bullet glyphs follow the direction', () => {
   assert.deepEqual(F.bulletGlyphs('sniper', Math.PI / 2).map((g) => [g.du, g.ch, g.a]), [[0, '|', 1], [1, '|', 0.75], [2, '|', 0.5], [3, '|', 0.25]]);
 });
 
-test('pickup reach is 1 cell across and 2 rows', () => {
+test('pickup reach: touching any of it as drawn (half its width and half a body across), 2 rows', () => {
   assert.equal(F.nearPickup(10.9, 12, { x: 10, y: 10 }), true);
   assert.equal(F.nearPickup(11.1, 10, { x: 10, y: 10 }), false);
   assert.equal(F.nearPickup(10, 12.1, { x: 10, y: 10 }), false);
+  // the sniper is drawn 7 cells wide: its end is 3 from the middle, and a body touches it from 4
+  assert.equal(F.pickupReach('sniper'), 4);
+  assert.equal(F.nearPickup(13.9, 10, { x: 10, y: 10, kind: 'sniper' }), true);
+  assert.equal(F.nearPickup(14.1, 10, { x: 10, y: 10, kind: 'sniper' }), false);
+  assert.equal(F.pickupReach('rifle'), 2);
+  assert.equal(F.pickupReach('medkit'), 2);
 });
 
 test('fight.js uses no randomness or browser APIs of its own', async () => {

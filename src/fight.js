@@ -1,7 +1,7 @@
 // The numbers and geometry of the arena fight, shared by the rules engine, the Worker and the browser.
 // Pure: no DOM, no randomness of its own, no clocks. Times are in seconds; angles are on screen.
 import { SOLID } from './level.js';
-import { SHOULDERS, MUZZLE_R } from './stick.js';
+import { SHOULDERS, MUZZLE_R, GUN_ART } from './stick.js';
 
 export const MAX_HP = 100;
 export const FIGURE_ROWS = 3;
@@ -21,7 +21,11 @@ export const SAFE_TIME = 3; // protection after spawning or entering; shooting o
 export const RESPAWN_TIME = 2;
 export const FLEE_TIME = 3;
 export const PICKUP_BACK = 10;
+// A pickup is taken by touching any of it as drawn (fx.js: its glyphs centred on x), not only its middle: across,
+// half its width plus half a body; 2 rows up or down. PICKUP_REACH.x is the narrowest's, for a pickup of no kind.
 export const PICKUP_REACH = { x: 1, y: 2 };
+const pickupWidth = (kind) => (kind === 'medkit' ? 3 : GUN_ART[kind] ? GUN_ART[kind].glyphs.length : 0);
+export const pickupReach = (kind) => Math.max(PICKUP_REACH.x, pickupWidth(kind) / 2 + 0.5);
 // Pickups appear at random spots (pickups addendum): this far apart (on screen, cells) from each other and
 // from where they last were, and this far from a spawn. A medkit heals this much, and is gone this long
 // (seconds, at random) once taken.
@@ -190,7 +194,7 @@ export function pickSpawn(spawns, others, rand) {
   return tied.length === 1 ? tied[0] : tied[Math.floor(rand() * tied.length)];
 }
 
-export const nearPickup = (x, y, p) => Math.abs(x - p.x) <= PICKUP_REACH.x && Math.abs(y - p.y) <= PICKUP_REACH.y;
+export const nearPickup = (x, y, p) => Math.abs(x - p.x) <= pickupReach(p.kind) && Math.abs(y - p.y) <= PICKUP_REACH.y;
 
 // Glyphs.
 export function dirGlyph(angle) {

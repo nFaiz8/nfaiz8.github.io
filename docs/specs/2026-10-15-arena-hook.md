@@ -50,6 +50,11 @@ Online, the server checks a pickup's reach (1 cell across) from my last state. T
 came 500 ms later, by when I was past it. Now the page sends where I am (`ticker.force`) right before
 each `pk`.
 
+And the reach was 1 cell across from the pickup's middle, while the sniper is drawn 7 cells wide (the smg 3,
+the medkit 3): touching its end took nothing. The reach is now what touching it as drawn means
+(`pickupReach`, `src/fight.js`): half its width plus half a body, so 4 for the sniper and 2 for the smg and
+the medkit, on the page and the server alike.
+
 ## Tests
 
 - `test/hook.test.js`:

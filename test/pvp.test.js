@@ -7,7 +7,7 @@ import { parseLevel } from '../src/level.js';
 import { createWorld, step, teleport } from '../src/world.js';
 import { createPvp } from '../src/pvp.js';
 import { createReferee, newFighter } from '../src/referee.js';
-import { muzzleOf } from '../src/fight.js';
+import { muzzleOf, pickupReach } from '../src/fight.js';
 
 const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/photos.json', import.meta.url)));
 const level = parseLevel(fs.readFileSync(new URL('../src/arena.txt', import.meta.url), 'utf8'));
@@ -961,6 +961,6 @@ test('online: running through a pickup, where I am goes out right before the pk 
     assert.ok(k > 0, 'a pk went out');
     const a = s.sent[k - 1];
     assert.equal(a.t, 'a');
-    assert.ok(Math.abs(a.x - q.x) <= 1 && Math.abs(a.y - q.y) <= 2, `from ${d.toFixed(1)} further: the state before it is out of reach: ${a.x}, ${a.y} vs ${q.x}, ${q.y}`);
+    assert.ok(Math.abs(a.x - q.x) <= pickupReach('sniper') && Math.abs(a.y - q.y) <= 2, `from ${d.toFixed(1)} further: the state before it is out of reach: ${a.x}, ${a.y} vs ${q.x}, ${q.y}`);
   }
 });
