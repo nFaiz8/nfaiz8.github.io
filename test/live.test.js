@@ -168,12 +168,13 @@ function withLive(opts, fn) {
   const saved = {};
   const socks = [];
   const warns = [];
+  const listeners = {};
   class FakeWS {
     constructor() { this.readyState = 1; this.sent = []; socks.push(this); }
     send(d) { this.sent.push(JSON.parse(d)); }
     close() {}
   }
-  const stubs = { WebSocket: FakeWS, location: { hostname: 'localhost', search: '?live=ws://x' }, addEventListener: () => {} };
+  const stubs = { WebSocket: FakeWS, location: { hostname: 'localhost', search: '?live=ws://x' }, addEventListener: (t, f) => { (listeners[t] ||= []).push(f); }, document: { hidden: false } };
   for (const k of Object.keys(stubs)) { saved[k] = Object.getOwnPropertyDescriptor(globalThis, k); Object.defineProperty(globalThis, k, { value: stubs[k], configurable: true, writable: true }); }
   const warn = console.warn;
   console.warn = (...a) => warns.push(a.join(' '));
@@ -182,7 +183,7 @@ function withLive(opts, fn) {
     const sock = socks[0];
     const say = (m) => sock.onmessage({ data: JSON.stringify(m) });
     const sentP = () => sock.sent.filter((m) => m.t === 'p');
-    fn({ live, say, sock, warns, sentP });
+    fn({ live, say, sock, warns, sentP, socks, fire: (t) => listeners[t].forEach((f) => f()) });
   } finally {
     console.warn = warn;
     for (const k of Object.keys(stubs)) { if (saved[k]) Object.defineProperty(globalThis, k, saved[k]); else delete globalThis[k]; }
@@ -265,5 +266,18 @@ test('inside the arena no position goes out; after leftArena the next tick sends
     live.leftArena();
     live.tick({ x: 6, y: 5 });
     assert.equal(ps.length, 2, 'same position again at once');
+  });
+});
+
+test('away: the tab coming back does not rejoin the net; back from away it does', () => {
+  withLive({}, ({ live, socks, fire }) => {
+    assert.equal(socks.length, 1);
+    live.away(true);
+    assert.equal(live.net.state, 'idle');
+    fire('visibilitychange'); // the tab is visible again
+    assert.equal(socks.length, 1, 'no new connection while away');
+    assert.equal(live.net.state, 'idle');
+    live.away(false);
+    assert.equal(socks.length, 2, 'rejoins on the way back up');
   });
 });

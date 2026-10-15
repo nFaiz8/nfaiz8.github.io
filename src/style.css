@@ -208,7 +208,7 @@ body.side .hud { background: linear-gradient(#07080bcc, transparent); }
 .fade.on { opacity: 1; pointer-events: auto; }
 body.in-station .hud, body.in-station .hud-tools, body.in-station .chat-log, body.in-station .chat-form, body.in-station .emote-bar, body.in-station .pad,
 body.in-station .fight, body.in-station .caption, body.in-station .name-form, body.in-station .admin-form, body.in-station .debug,
-body.in-station .viewer, body.in-station .grid, body.in-station .map, body.in-station .resolve-progress { display: none !important; }
+body.in-station .viewer, body.in-station .grid, body.in-station .map, body.in-station .resolve-progress, body.in-station .resolve, body.in-station .flip { display: none !important; }
 #stage canvas.station { z-index: 1; }
 #stage.impact canvas.station { filter: none; }
 @media (prefers-reduced-motion: reduce) { .fade { transition: none; } }

@@ -598,9 +598,20 @@ const onStairs = () => {
   return x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h;
 };
 const standAtStairs = () => teleport(world, map.stairs.front.x, map.stairs.front.y);
+let downGen = 0;
+// A photo, the grid, the map or the impact frames may be open (the forward button): close them the way their
+// own buttons do. Their onClose handlers rewrite the hash to the room, so the caller puts #/station back.
+async function closePanels() {
+  // The viewer only closes once it's open; one still opening (or closing) is waited out, for a few seconds at most.
+  for (let i = 0; viewer.isOpen && i < 100; i++) { await viewer.close(); if (viewer.isOpen) await new Promise((r) => setTimeout(r, 50)); }
+  if (grid.isOpen) grid.close();
+  if (mapView.isOpen) mapView.toggle();
+  if (shots?.isOpen) shots.toggle();
+}
 async function goDown({ instant = false } = {}) {
   if (stationState !== 'off' || !map.stairs) return;
   stationState = 'down';
+  const gen = ++downGen;
   world.frozen = true;
   world.path = null;
   world.onArrive = null;
@@ -608,11 +619,14 @@ async function goDown({ instant = false } = {}) {
   if (instant) { fadeEl.hidden = false; fadeEl.firstElementChild.textContent = '▼ going down…'; fadeEl.classList.add('on'); }
   else await fade(true, '▼ going down…');
   try {
+    await closePanels();
+    if (instant && location.hash !== STATION_HASH) replaceHash(STATION_HASH); // the panels' close handlers rewrote it
     const { startStation } = await import('./rpg/index.js');
-    if (stationState !== 'down') return; // the back button won while it loaded
+    if (stationState !== 'down' || gen !== downGen) return; // the back button won while it loaded
     station = startStation(stage, { onExit: () => goUp(), keys: () => input.state(), reducedMotion, phone: touch });
   } catch (err) {
     console.warn(err);
+    if (gen !== downGen || stationState !== 'down') return; // a newer trip owns the state now
     stationState = 'off';
     standAtStairs();
     world.frozen = false;
@@ -621,7 +635,7 @@ async function goDown({ instant = false } = {}) {
     note("the station couldn't load", 3000);
     return;
   }
-  if (live) live.net.pause(); // to the gallery, you've left (spec §1)
+  if (live) live.away(true); // to the gallery, you've left (spec §1); the tab coming back doesn't rejoin
   document.body.classList.add('in-station');
   if (location.hash !== STATION_HASH) history.pushState(null, '', STATION_HASH);
   stationState = 'in';
@@ -635,13 +649,16 @@ async function goUp({ fromHistory = false } = {}) {
   station.stop();
   station = null;
   document.body.classList.remove('in-station');
-  if (live) live.net.resume();
+  if (live) live.away(false);
+  input.clear(); // a key or pad direction held on the way up doesn't carry into the lobby
   standAtStairs();
   if (!fromHistory && location.hash === STATION_HASH) replaceHash('');
   world.frozen = false;
   stationState = 'off';
   await fade(false);
   stage.focus({ preventScroll: true });
+  // Back to a route (a photo, a room): the hashchange that brought you up is applied now you're here.
+  if (fromHistory && location.hash && location.hash !== STATION_HASH) applyRoute(parseRoute(location.hash));
 }
 const muted = new Set(); // ids whose chat you've hidden, for this visit
 function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }

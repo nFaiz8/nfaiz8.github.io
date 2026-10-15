@@ -125,7 +125,7 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
   const target = liveTarget(url);
   if (!target) return null;
   const peers = createPeers();
-  let count = 0, fightOk = false;
+  let count = 0, fightOk = false, away = false;
   const net = createNet({
     url: target, version, name: getName(), getPos,
     onState: (s) => {
@@ -156,7 +156,7 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
   addEventListener('visibilitychange', () => {
     clearTimeout(createLive.hideTimer);
     if (document.hidden) createLive.hideTimer = setTimeout(() => { net.pause(); peers.clear(); onCount(0); }, 30000);
-    else net.resume();
+    else if (!away) net.resume(); // away (in the station): to the gallery you've left, so the tab coming back doesn't rejoin
   });
   const tick = positionTicker((m) => net.send(m));
   return {
@@ -172,6 +172,8 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
     chat: (text) => net.send({ t: 'c', text }),
     admin: (map, pw) => net.send({ t: 'am', map, pw }),
     setName: (n) => net.setName(n),
+    // Away from the gallery (the station): off the net, and the tab coming back doesn't rejoin. false: back on.
+    away(on) { away = !!on; if (on) { clearTimeout(createLive.hideTimer); net.pause(); } else net.resume(); },
     get state() { return net.state; },
   };
 }
