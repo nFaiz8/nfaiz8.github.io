@@ -37,12 +37,16 @@ kill". The details below are choices made without them (§3). This addendum amen
 When I pop someone (the dummy too), or someone pops me, the fight's picture freezes for a moment, the way a
 fighting game's hitstop does:
 
-- **The flash.** The frame of the kill is drawn, then shown for `IMPACT.flash` = 200 ms inverted, grey and
-  at high contrast: a stark black-and-white impact frame. It is a CSS filter on the stage, so it works the
-  same in all three renderers.
-- **The hold.** The picture stays frozen until `IMPACT.hold` = 400 ms after the kill. Then the next frame is
-  drawn. (Both were 70 and 150 ms at first. The user asked on 2026-10-14 to "make the impact frame last
-  longer".)
+- **When.** `IMPACT.delay` = 250 ms after the kill, so it lands on the body in pieces in mid-air. The death's
+  pop is 0.08 s, then the bones and the head fly up and out, highest and furthest apart about 0.2 s later.
+  The user asked on 2026-10-14: "it should save just barely after ... when the body is into parts is when it
+  should freeze and screenshot", then "like the body mid air".
+- **The flash.** That frame is drawn, then shown for `IMPACT.flash` = 70 ms inverted, grey and at high
+  contrast: a stark black-and-white impact frame. It is a CSS filter on the stage, so it works the same in
+  all three renderers.
+- **The hold.** The picture stays frozen until `IMPACT.hold` = 150 ms after that frame. Then the next frame
+  is drawn. For a while they were 200 and 400 ms. Once every impact was kept as a picture, the user asked
+  for them short again: "since we have screenshots u can keep it short again".
 - **Only the picture freezes.** The fight goes on underneath: other players, the server and my own body
   can't be paused. After the hold, the picture catches up in one frame.
 - **A flee doesn't count.** Leaving within 3 s of a hit still gives the hitter the kill, but there is no
@@ -50,8 +54,8 @@ fighting game's hitstop does:
 - **Reduce Motion:** neither the flash nor the hold. Both are motion, and the flash is a strobe.
 - **Each one is kept as a picture** (`src/shots.js`). The user asked: "add it as a screen shot that u can
   view and save, the server doesnt save it so u lose it when u reload the page".
-  - The kill's frame is copied from the stage's canvas right after it is drawn, before the browser shows
-    it, since a WebGL canvas reads blank after that.
+  - The impact's frame (the body in pieces) is copied from the stage's canvas right after it is drawn,
+    before the browser shows it, since a WebGL canvas reads blank after that.
   - Once the hold is over, the copy gets the same filter, baked in, and becomes a PNG blob. It uses the 2D
     context's `filter` where that really works (tested with a one-pixel probe), and otherwise
     `impactPixels`. The copy is at most 1920 px wide.

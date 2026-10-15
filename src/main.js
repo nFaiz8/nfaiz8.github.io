@@ -491,15 +491,15 @@ function loop(now) {
     note('WebGL context lost, switched to the canvas renderer');
     setRenderer('canvas');
   }
-  // The impact frame (parry addendum §2): the kill's frame is drawn, shown inverted for IMPACT.flash ms, and
-  // held, undrawn over, until IMPACT.hold ms after it.
-  if (impact && impact.at === null) impact.at = t;
-  const since = impact ? t - impact.at : Infinity;
+  // The impact frame (parry addendum §2): IMPACT.delay ms after the kill, that frame is drawn, shown inverted
+  // for IMPACT.flash ms, and held, undrawn over, until IMPACT.hold ms after it.
+  if (impact && impact.at === null && t >= impact.due) impact.at = t;
+  const since = impact && impact.at !== null ? t - impact.at : Infinity;
   stage.classList.toggle('impact', since < IMPACT.flash);
   if (!(since > 0 && since < IMPACT.hold)) renderer.draw(world);
   // The kill's frame is kept (shots.js): copied now, before the browser shows it, baked once the hold is over.
   if (since === 0) shots.capture(stage.querySelector('canvas'), impact.text, IMPACT.hold);
-  if (since >= IMPACT.hold) impact = null;
+  if (since >= IMPACT.hold && since !== Infinity) impact = null; // not while it waits for its delay
   viewer.sync();
   mapView.sync(world.player, roomAt(map, world.player.x, world.player.y), world.others);
   updateCaption();
@@ -517,8 +517,10 @@ function loop(now) {
 }
 
 let live = null;
-const IMPACT = { flash: 200, hold: 400 }; // ms
-let impact = null; // a kill I'm in: { at, text }, at in ms, or null until the frame of it is drawn
+// ms. delay: from the kill to the impact, so it lands on the body in pieces in mid-air (stick.js: the pop
+// is 0.08 s, then the bones and the head fly up and out, highest and furthest apart about 0.2 s later).
+const IMPACT = { delay: 250, flash: 70, hold: 150 };
+let impact = null; // a kill I'm in: { due, at, text } in ms; at is null until the frame of it is drawn
 let shots = null, shotsNoted = false; // the impact frames kept (shots.js)
 // [I]: in the arena always (its switch turns impact frames off); elsewhere once one is kept.
 function showShotsBtn() {
@@ -676,7 +678,7 @@ async function boot() {
       colorOf: (id) => (id === myId() ? C.player : peerColor(id)),
       nameOf: (id) => (live && live.peers.get(id)?.name) || '',
       onNote: (text) => note(text, 3000),
-      onImpact: (e) => { if (shots.on) impact = { at: null, text: e.text }; },
+      onImpact: (e) => { if (shots.on) impact = { due: performance.now() + IMPACT.delay, at: null, text: e.text }; },
       onFeed: (text) => {
         fightHud.line(text);
         // For screen readers, politely (the box is aria-hidden); cleared first so a repeat is read again.
