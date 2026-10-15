@@ -42,10 +42,11 @@ tested.
 | File | Job | three.js |
 |---|---|---|
 | `station.txt` | The map (§3). | none |
-| `map.js` | `parseStation(text)` returns `{ name, cols, rows, cells, spawn, exits, levelAt(x, z), solidAt(x, z), tubes, tracks }`. | none |
-| `check.js` | `checkStation(map)` returns a list of `{ row, col, msg }` errors (§3). | none |
+| `map.js` | `parseStation(text)` returns `{ name, cols, rows, cells, at(c, r), spawn, exits, levelAt(x, z), solidAt(x, z), tubes, tracks, signs }`. | none |
+| `check.js` | `checkStation(text)` returns a list of `{ row, col, msg }` errors (§3). It takes the text so it can see ragged rows. | none |
 | `move.js` | `stepWalker(w, dt, input, map)`: tight free movement, collision and stairs (§4). | none |
 | `train.js` | `trainAt(t, map)` gives where the passing train is, or null (§5). | none |
+| `camera.js` | The follow spring, the clamp and the field of view (§4). | none |
 | `scene.js` | Builds the station's meshes, lights and glyph textures from the map. | yes |
 | `sprites.js` | ASCII art turned into upright billboard sprites: canvas textures on planes. | yes |
 | `post.js` | Bloom and tilt-shift depth of field. | yes |
@@ -62,7 +63,7 @@ player is about 0.5 units wide and 1.6 tall. It begins with header lines:
 
 ```
 name: MUSEUM          the station's name, shown on the wall signs
-# anything after a # at the start of a line is a comment
+; a line starting with ; is a comment (# is a wall)
 ```
 
 The grid follows the header. Every row is the same width.
@@ -83,10 +84,10 @@ The grid follows the header. Every row is the same width.
 | `n` | a wall with the station-name sign on its face | n/a | no |
 | `~` | a puddle: floor, with drips falling into it | as the floor around it | yes |
 | `S` | spawn: floor, where you appear coming down | as the floor around it | yes |
-| `E` | exit stairs up to the museum: stepping on one leaves | sloped | yes |
+| `E` | exit stairs up to the museum: stepping on one leaves; drawn as steps rising into the wall | as the floor around it | yes |
 
 - **Fluorescent tubes** aren't in the map. They are placed automatically: along the platform's middle
-  every 5 tiles, and on a 6-tile grid over the hall.
+  every 5 tiles, and on a 4-tile grid over the hall.
 - **Tunnels.** A track row that reaches the map's edge goes into a tunnel there, a dark arch in the end
   wall.
 
@@ -103,7 +104,7 @@ A unit test fails if the shipped `station.txt` has any errors. The format is wri
 human or model, in `src/rpg/MAPS.md`: this table, the checker's rules, and the command to check a map
 (`node src/rpg/check.js <file>`).
 
-**The layout** for this slice is about 48 × 32 tiles:
+**The layout** for this slice is 48 × 19 tiles:
 - the exit stairs come up from the hall's back wall;
 - the ticket hall has a row of turnstiles and the kiosk;
 - a wide stair run goes down to an island platform between two tracks;
@@ -159,7 +160,7 @@ The look is the chosen mockup ("Octopath, ASCII world"), rebuilt in three.js:
   - **Bloom:** on the tubes, the lantern and the train's lights, but gentle. The mockup's door was blown
     out, so bright areas are capped, not just blurred up.
 - **Depth of field.** A tilt-shift blur in `post.js`: sharp in a band around your row, blurring toward
-  the top of the screen (more) and the bottom (less). It's drawn at half resolution.
+  the top of the screen (more) and the bottom (less). It's a cheap 9-tap blur at full resolution; the bloom runs at half resolution.
 - **The passing train** (`train.js`, drawn by `scene.js`):
   - **When:** every 30–40 s on a deterministic schedule, alternating tracks, a train comes out of one
     tunnel, rushes along the platform at about 25 units/s without stopping, and goes into the other.
