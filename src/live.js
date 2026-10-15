@@ -99,7 +99,7 @@ export function arenaTicker(send, { every = 67, gap = 30, cap = 20 } = {}) {
 
 const ARENA_T = new Set(['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']);
 
-export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onState = () => {}, fightHash = '', onArena = () => {}, inArena = () => false }) {
+export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onChatMuted = () => {}, onState = () => {}, fightHash = '', onArena = () => {}, inArena = () => false }) {
   // Local dev and tests never join the real gallery: on localhost only ?live=<ws url> connects.
   const onLocalhost = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const target = onLocalhost ? new URLSearchParams(location.search).get('live') : url;
@@ -117,6 +117,7 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
       const now = performance.now();
       if (m.t === 'name-rejected') return onRejected();
       if (m.t === 'chat-rejected') return onChatRejected();
+      if (m.t === 'chat-muted') return onChatMuted(Number(m.s) || 0);
       if (m.t === 'join') onAnnounce('join', m);
       if (m.t === 'leave') { const p = peers.get(m.id); if (p) onAnnounce('leave', { ...m, name: p.name, x: p.track.at(-1).x, y: p.track.at(-1).y }); }
       peers.apply(m, now);

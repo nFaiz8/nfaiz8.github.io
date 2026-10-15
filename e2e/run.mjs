@@ -5,7 +5,10 @@ import sharp from 'sharp';
 import { GUNS } from '../src/fight.js';
 
 const results = [];
+// ONLY=<regex> runs just the checks whose names match (each one that loads its own page stands alone).
+const only = process.env.ONLY ? new RegExp(process.env.ONLY) : null;
 const check = async (name, fn) => {
+  if (only && !only.test(name)) return;
   try { await fn(); results.push(['ok', name]); } catch (e) { results.push(['FAIL', name, e.message]); }
 };
 
@@ -316,18 +319,21 @@ await withBrowser(async ({ page, url, errors }) => {
         const px = [];
         for (let i = 0; i < data.length; i += info.channels) px.push([data[i], data[i + 1], data[i + 2]]);
         const lum = px.map(([R, G, B]) => (R + G + B) / 3).sort((x, y) => x - y);
-        const bright = px.filter(([R, G, B]) => (R + G + B) / 3 >= lum[Math.floor(lum.length * 0.95)]);
+        // The brightest 1%: at the fight's zoom (33 rows) the ═ strokes are thin, under 5% of the strip.
+        const bright = px.filter(([R, G, B]) => (R + G + B) / 3 >= lum[Math.floor(lum.length * 0.99)]);
         const warm = bright.filter(([R, , B]) => R >= B + 15).length / bright.length;
-        return { median: lum[Math.floor(lum.length / 2)], p95: lum[Math.floor(lum.length * 0.95)], warm };
+        return { median: lum[Math.floor(lum.length / 2)], p95: lum[Math.floor(lum.length * 0.95)], p99: lum[Math.floor(lum.length * 0.99)], warm };
       };
       const floor = await strip(L), above = await strip(L - 2);
       const all = await sharp(await page.screenshot()).stats();
       const mean = all.channels.slice(0, 3).reduce((s, c) => s + c.mean, 0) / 3, sd = all.channels.slice(0, 3).reduce((s, c) => s + c.stdev, 0) / 3;
-      console.log(`  ${r} train: outside mean ${lit.toFixed(1)}; inside mean ${mean.toFixed(1)} sd ${sd.toFixed(1)}; floor strokes ${floor.p95.toFixed(0)} (${(floor.warm * 100).toFixed(0)}% warm), 2 rows up p95 ${above.p95.toFixed(0)}`);
+      console.log(`  ${r} train: outside mean ${lit.toFixed(1)}; inside mean ${mean.toFixed(1)} sd ${sd.toFixed(1)}; floor strokes p99 ${floor.p99.toFixed(0)} (${(floor.warm * 100).toFixed(0)}% warm), 2 rows up p99 ${above.p99.toFixed(0)}`);
       assert.ok(lit > 12, `from outside the train shows, lit (${lit.toFixed(1)})`);
       assert.ok(mean > 20 && sd > 20, 'a lit, detailed scene');
-      assert.ok(floor.p95 > 200 && floor.warm > 0.5, 'bright, warm floor strokes');
-      assert.ok(floor.p95 >= above.p95, 'the floor at least as bright as the car above it');
+      // At the fight's 33 rows (every gun: pickups addendum §4) the strokes are about 1 px and peak near 150;
+      // at the old 24 they measured over 200.
+      assert.ok(floor.p99 > 135 && floor.warm > 0.5, 'bright, warm floor strokes');
+      assert.ok(floor.p99 >= above.p99, 'the floor at least as bright as the car above it');
       assert.equal(await page.evaluate(() => window.__ascii.loaded(window.__ascii.map.arena.backdrop.id)), false, 'the photo was not loaded to be drawn');
     });
   }
@@ -518,7 +524,7 @@ await withBrowser(async ({ page, url, errors }) => {
       const ok = await page.evaluate(() => {
         const { world: wd, map } = window.__ascii, a = map.arena, v = wd.view;
         return wd.cam.x - v.cols / 2 >= a.x - 0.01 && wd.cam.x + v.cols / 2 <= a.x + a.w + 0.01 &&
-          (v.rows >= a.h || (wd.cam.y - v.rows / 2 >= a.y - 0.01 && wd.cam.y + v.rows / 2 <= a.y + a.h + 0.01));
+          (v.rows >= (a.rows ?? a.h) || (wd.cam.y - v.rows / 2 >= a.y - 0.01 && wd.cam.y + v.rows / 2 <= a.y + a.h + 0.01)); // the whole level: spare rows above
       });
       assert.ok(ok, `${w}×${h}`);
       // A view taller than the room shows past its ceiling: that must be dark, not the next room
@@ -527,12 +533,15 @@ await withBrowser(async ({ page, url, errors }) => {
       const top = await cellsClip(page, a.x, a.y - 8, 1, 8);
       const y = Math.max(0, top.y), height = Math.floor(top.y + top.height - y);
       if (height >= 4) {
-        // The drawing only: the fight HUD and the note are DOM boxes up there.
-        await page.evaluate(() => { for (const id of ['fight', 'note']) document.getElementById(id).style.visibility = 'hidden'; });
+        // The drawing only: the HUD (its buttons, the fight's bar, the note) is DOM boxes up there.
+        const hud = (v) => page.evaluate((v) => { for (const e of document.body.children) if (e.id !== 'stage') e.style.visibility = v; }, v);
+        await hud('hidden');
         const { data } = await sharp(await page.screenshot({ clip: { x: 0, y, width: w, height } })).greyscale().raw().toBuffer({ resolveWithObject: true });
-        await page.evaluate(() => { for (const id of ['fight', 'note']) document.getElementById(id).style.visibility = ''; });
+        await hud('');
         const p99 = [...data].sort((m, n) => m - n)[Math.floor(data.length * 0.99)];
-        assert.ok(p99 < 20, `${w}×${h}: above the ceiling is dark (p99 ${p99})`);
+        // Past the ceiling the train draws its tunnel's rock (train.js paint), lit warm by the nearest lamp:
+        // p99 57 at 1440×900 with every gun's 33 rows. The next room would be 72 or more.
+        assert.ok(p99 < 65, `${w}×${h}: above the ceiling is dark rock, not the next room (p99 ${p99})`);
       }
     }
     await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
@@ -750,6 +759,8 @@ await withBrowser(async ({ page, url, errors }) => {
     await place(s.dummy.x - 10, s.floor, 1);
     await sleep(400);
     const click = async (x, y) => {
+      // The camera eases after a teleport (about a second at the fight's 33 rows): click once it is still.
+      await page.waitForFunction(() => { const c = window.__ascii.world.cam; return Math.abs(c.vx) < 0.02 && Math.abs(c.vy) < 0.02; }, { timeout: 3000, polling: 'raf' });
       const at = await page.evaluate((x, y) => { const { world, metrics } = window.__ascii, m = metrics(); return { x: (x - world.cam.x) * m.cw + innerWidth / 2, y: (y - world.cam.y) * m.ch + innerHeight / 2 }; }, x, y);
       assert.ok(at.x > 0 && at.x < DESKTOP.width && at.y > 0 && at.y < DESKTOP.height, `on screen (${at.x.toFixed(0)}, ${at.y.toFixed(0)})`);
       await page.mouse.move(at.x, at.y);
@@ -782,20 +793,23 @@ await withBrowser(async ({ page, url, errors }) => {
   });
   await check('arena PvP alone: the sniper pickup: 5 rounds (HUD), my aim line, 70 a hit, back to the deagle when empty, and there again 10 s after it was taken', async () => {
     const s = await enterFight();
-    // Whether the sniper is drawn at its spot, each frame: its art (with the °), or a dim dotted outline.
-    const watch = page.evaluate((q) => new Promise((resolve) => {
+    // The sniper pickup each frame: where it is, and how it is drawn there: its art (with the °), or a dim
+    // dotted outline. Taken, it moves to its next random spot (pickups addendum §1) and its outline waits there.
+    const watch = page.evaluate(() => new Promise((resolve) => {
       const A = window.__ascii, P = A.pvp(), out = [], t0 = performance.now();
       const tick = () => {
-        const mine = P.bodies(performance.now()).find((b) => b.me).color.join();
+        const now = performance.now(), q = P.pickups(now).find((k) => k.kind === 'sniper');
+        const mine = P.bodies(now).find((b) => b.me).color.join();
         const gs = A.world.figures.filter((g) => !g.bold && g.color && g.color.join() !== mine && Math.abs(g.x - q.x) < 4 && Math.abs(g.y - (q.y - 0.5)) < 0.4);
         const there = gs.some((g) => g.ch === '°') ? true : gs.some((g) => g.ch === '·') ? false : null;
-        if (!out.length || out.at(-1).there !== there) out.push({ t: performance.now(), there });
+        if (!out.length || out.at(-1).there !== there || out.at(-1).x !== q.x) out.push({ t: now, there, x: q.x, y: q.y });
         const back = out.findIndex((o, i) => o.there === true && out.slice(0, i).some((x) => x.there === false));
-        if (performance.now() - t0 < 25000 && back < 0) requestAnimationFrame(tick); else resolve(out);
+        if (now - t0 < 25000 && back < 0) requestAnimationFrame(tick); else resolve(out);
       };
       requestAnimationFrame(tick);
-    }), s.sniper);
+    }));
     watch.catch(() => {}); // awaited below; a check failing first mustn't leave it unhandled
+    await twoFrames(); // the watch has seen it in place
     await place(s.sniper.x, s.sniper.y, 1); // onto it: it may be anywhere (pickups addendum)
     await page.waitForFunction(() => window.__ascii.pvp().me.gun === 'sniper', { timeout: 3000 });
     assert.deepEqual(await page.evaluate(() => ({ gun: window.__ascii.pvp().me.gun, ammo: window.__ascii.pvp().me.ammo })), { gun: 'sniper', ammo: 5 });
@@ -822,8 +836,10 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.waitForFunction(() => /^hp [█░]{10} \d+$/.test(document.getElementById('fight-hp').textContent), { timeout: 1000 });
     const seen = await watch;
     const taken = seen.find((o) => o.there === false), back = taken && seen.find((o) => o.there === true && o.t > taken.t);
-    console.log(`  sniper pickup: ${seen.map((o) => `${o.there}@${(o.t - seen[0].t).toFixed(0)}`).join(' ')}`);
-    assert.ok(seen[0].there === true && taken, 'there, then taken');
+    console.log(`  sniper pickup: ${seen.map((o) => `${o.there}@${(o.t - seen[0].t).toFixed(0)} (${o.x}, ${o.y})`).join(' ')}`);
+    assert.ok(seen[0].there === true && seen[0].x === s.sniper.x && taken, 'there, then taken (its outline drawn)');
+    assert.ok(Math.hypot(taken.x - s.sniper.x, 2 * (taken.y - s.sniper.y)) >= 20, `its outline waits at a new spot (${taken.x}, ${taken.y})`);
+    assert.ok(back && back.x === taken.x && back.y === taken.y, 'and it comes back there');
     assert.ok(back && back.t - taken.t > 9500 && back.t - taken.t < 10800, `back ${back && (back.t - taken.t).toFixed(0)} ms after it was taken`);
   });
   await check('arena PvP alone: the rifle (the smg) gives 40 rounds; held, J fires about 10 a second until they run out, then the deagle (2 to 2.6 a second); 8 an smg hit (16 on the head, from its spray), 25 a deagle hit', async () => {

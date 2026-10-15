@@ -1,10 +1,11 @@
 // One gallery instance: up to 30 people. Relays each message to everyone else as it arrives. Uses the
 // hibernation API, so all per-person state lives in the socket's attachment, never in fields or storage.
 // The one exception is the arena fight: the referee (bullets in flight, when each pickup was taken) and
-// a 33 ms tick while bullets fly live in memory. Losing them to an eviction costs nothing.
+// a 33 ms tick while bullets fly live in memory. Losing them to an eviction costs nothing. And a chat mute
+// (a slur: chat filter addendum) is kept in storage by IP, so reconnecting doesn't lift it.
 import { DurableObject } from 'cloudflare:workers';
 import {
-  LIMITS, cleanName, cleanText, parseMessage, newBuckets, take, takeShot, clampMove, senderClock, sentAt, newFlood, dropped,
+  LIMITS, cleanName, cleanText, hasSlur, parseMessage, newBuckets, take, takeShot, clampMove, senderClock, sentAt, newFlood, dropped,
 } from './rules.js';
 import { createReferee, newFighter } from '../src/referee.js';
 import { parseLevel, levelKind, levelHash, SOLID } from '../src/level.js';
@@ -47,7 +48,8 @@ export class Gallery extends DurableObject {
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server, [tag]);
     const now = Date.now();
-    server.serializeAttachment({ id: randomId(), name: '', x: 0, y: 0, here: false, buckets: newBuckets(now), flood: newFlood(now) });
+    const muteUntil = (await this.ctx.storage.get(`mute:${tag}`)) || 0;
+    server.serializeAttachment({ id: randomId(), name: '', x: 0, y: 0, here: false, buckets: newBuckets(now), flood: newFlood(now), muteUntil, tag });
     if (this.ctx.getWebSockets().length > LIMITS.people) {
       server.send(JSON.stringify({ t: 'full' }));
       server.close(4000, 'full');
@@ -101,8 +103,14 @@ export class Gallery extends DurableObject {
       if (name === null) ws.send(JSON.stringify({ t: 'name-rejected' }));
       else { me.name = name; this.broadcast(ws, { t: 'n', id: me.id, name }); }
     } else if (m.t === 'c') {
+      // A slur mutes the sender's chat (and their IP's) for LIMITS.muteS; swears are sent censored.
+      if (hasSlur(m.text)) {
+        me.muteUntil = now + LIMITS.muteS * 1000;
+        if (me.tag) await this.ctx.storage.put(`mute:${me.tag}`, me.muteUntil);
+      }
       const text = cleanText(m.text);
-      if (text === null) ws.send(JSON.stringify({ t: 'chat-rejected' }));
+      if ((me.muteUntil || 0) > now) ws.send(JSON.stringify({ t: 'chat-muted', s: Math.ceil((me.muteUntil - now) / 1000) }));
+      else if (text === null) ws.send(JSON.stringify({ t: 'chat-rejected' }));
       else this.broadcast(ws, { t: 'c', id: me.id, text });
     }
     ws.serializeAttachment(me);

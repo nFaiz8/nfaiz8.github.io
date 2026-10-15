@@ -154,7 +154,7 @@ test('where someone said hi from is where others first see them', async () => {
   a.close(); b.close();
 });
 
-test('chat reaches everyone else; blocked words are refused; one message every 2 s', async () => {
+test('chat reaches everyone else; a swear is starred; a slur mutes the sender; one message every 2 s', async () => {
   const r = room();
   const a = client({ room: r }); await a.opened;
   a.send2({ t: 'hi', name: 'Ann' }); await a.next('welcome');
@@ -167,10 +167,16 @@ test('chat reaches everyone else; blocked words are refused; one message every 2
   assert.equal(b.inbox.filter((m) => m.t === 'c').length, 0, 'nobody hears their own chat');
   b.send2({ t: 'c', text: 'too soon' });
   await new Promise((s) => setTimeout(s, 2100));
-  b.send2({ t: 'c', text: 'f u c k' });
-  await b.next('chat-rejected');
+  b.send2({ t: 'c', text: 'oh shit' });
+  assert.deepEqual(await a.next('c'), { t: 'c', id: wb.id, text: 'oh sh*t' });
+  await new Promise((s) => setTimeout(s, 2100));
+  b.send2({ t: 'c', text: 'f a g' });
+  assert.equal((await b.next('chat-muted')).s, 600);
+  await new Promise((s) => setTimeout(s, 2100));
+  b.send2({ t: 'c', text: 'sorry' });
+  await b.next('chat-muted');
   await new Promise((s) => setTimeout(s, 300));
-  assert.equal(a.inbox.filter((m) => m.t === 'c').length, 0, 'neither the early nor the blocked message arrived');
+  assert.equal(a.inbox.filter((m) => m.t === 'c').length, 2, 'the early, the slur and the muted one never arrived');
   a.close(); b.close();
 });
 

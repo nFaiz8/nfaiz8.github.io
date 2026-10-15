@@ -1,7 +1,7 @@
 // test/rules.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allowedOrigin, validVersion, cleanName, cleanText, parseMessage, newBuckets, take, newFlood, dropped, EMOTES } from '../server/rules.js';
+import { allowedOrigin, validVersion, cleanName, cleanText, hasSlur, LIMITS, parseMessage, newBuckets, take, newFlood, dropped, EMOTES } from '../server/rules.js';
 import { takeShot, clampMove, senderClock, sentAt } from '../server/rules.js';
 
 test('only faiz.pics and localhost may connect', () => {
@@ -78,7 +78,7 @@ test('hi may carry where I am standing, so I appear in the right place before I 
   assert.equal(parseMessage('{"t":"hi","name":"Sam","x":3}'), null, 'both or neither');
 });
 
-test('chat text: plain, at most 80 characters, and no blocked words, without tripping on innocent ones', () => {
+test('chat text: plain, at most 80 characters; swears get one letter starred, innocent words none', () => {
   assert.equal(cleanText('  nice photo! '), 'nice photo!');
   assert.equal(cleanText(''), null);
   assert.equal(cleanText('a'.repeat(80)), 'a'.repeat(80));
@@ -87,9 +87,21 @@ test('chat text: plain, at most 80 characters, and no blocked words, without tri
   assert.equal(cleanText('hi\nthere'), null);
   for (const ok of ['the cockpit view', 'spicy colours', 'rapeseed field', 'cumulus clouds', 'Dickens fan', 'document this', 'Scunthorpe'])
     assert.equal(cleanText(ok), ok, ok);
-  for (const bad of ['fuck off', 'f.u.c.k off', 'f u c k', 'what a dick', 'sh1t', 'you cum', 'nazis'])
-    assert.equal(cleanText(bad), null, bad);
+  const starred = {
+    'fuck off': 'f*ck off', 'f.u.c.k off': 'f.*.c.k off', 'f u c k': 'f * c k', 'what a dick': 'what a d*ck',
+    'sh1t': 'sh*t', 'you cum': 'you c*m', 'nazis': 'n*zis', 'motherfucker': 'motherf*cker', 'fucking shit': 'f*cking sh*t',
+    'BITCH please': 'B*TCH please', 'tits': 't*ts', '  Shit happens ': 'Sh*t happens',
+  };
+  for (const [bad, shown] of Object.entries(starred)) assert.equal(cleanText(bad), shown, bad);
   assert.equal(cleanText(7), null);
+});
+
+test('slurs are found (the sender is muted), through spacing and digit swaps; innocent look-alikes are not', () => {
+  for (const bad of ['n1gger', 'you fag', 'faggot', 'r e t a r d', 'retarded', 'spics', 'chinks', 'coon', 'tranny', 'kikes'])
+    assert.equal(hasSlur(bad), true, bad);
+  for (const ok of ['raccoon', 'retardant', 'snigger', 'fagioli', 'spicy', 'fuck off', 'hello', '', 7])
+    assert.equal(hasSlur(ok), false, String(ok));
+  assert.equal(LIMITS.muteS, 600);
 });
 
 test('chat messages parse, and are limited to one every 2 s', () => {

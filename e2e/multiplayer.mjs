@@ -141,6 +141,32 @@ try {
       assert.equal(await b.evaluate(() => document.getElementById('chat-log').textContent.includes('second line')), false, 'muted line shown');
       assert.equal(await b.evaluate(() => window.__ascii.world.entities.map((e) => e.glyph).join('').includes('secondline')), false, 'muted speech drawn');
     });
+    await check('chat filter: a swear reaches the other page with one letter starred; a slur is not sent and mutes my chat', async () => {
+      await sleep(2100);
+      await b.focus('#stage');
+      await b.keyboard.press('KeyT');
+      await b.waitForSelector('#chat-form:not([hidden])');
+      await b.keyboard.type('oh shit');
+      await b.keyboard.press('Enter');
+      await a.waitForFunction(() => document.getElementById('chat-log').textContent.includes('oh sh*t'), { timeout: 3000 });
+      assert.equal(await a.evaluate(() => document.getElementById('chat-log').textContent.includes('oh shit')), false);
+      await sleep(2100);
+      await b.focus('#stage');
+      await b.keyboard.press('KeyT');
+      await b.waitForSelector('#chat-form:not([hidden])');
+      await b.keyboard.type('f a g');
+      await b.keyboard.press('Enter');
+      assert.equal(await b.$eval('#chat-msg', (e) => e.textContent), 'chat muted for 10 min');
+      await b.keyboard.type('sorry');
+      await b.keyboard.press('Enter');
+      assert.equal(await b.$eval('#chat-msg', (e) => e.textContent), 'chat muted for 10 min', 'still muted');
+      await sleep(1000);
+      const log = await a.evaluate(() => document.getElementById('chat-log').textContent);
+      assert.ok(!/f a g|sorry/.test(log), `reached the other page: ${log}`);
+      await b.$eval('#chat-input', (e) => { e.value = ''; });
+      await b.keyboard.press('Escape');
+      await b.evaluate(() => localStorage.removeItem('faiz-chat-muted')); // the later checks chat
+    });
     await check('arena: two people inside see each other as stickmen (colour, name above the head, chat above the name), run and jump; from outside nobody inside is drawn', async () => {
       const ats = (p) => p.evaluate(() => window.__ascii.world.entities.filter((e) => e.glyph === '@').length);
       const entry = await a.evaluate(() => window.__ascii.map.arena.entry);
@@ -307,13 +333,14 @@ try {
     // new state, a third of a second after the last (the clamp allows more after a longer gap).
     const putAt = async (p, q, x, y, f) => {
       const id = p === a ? ids.a : ids.b;
-      for (let k = 0; k < 16; k++) {
+      let s = null, me = null;
+      for (let k = 0; k < 40; k++) { // the pickups are at random spots: it may come from across the level
         await p.evaluate((x, y, f) => { window.__ascii.teleport(x, y); window.__ascii.world.player.facing = f; }, x + (k % 2) * 0.01, y, f);
         await sleep(350);
-        const s = await bodyOn(q, id), me = await meOn(p);
+        s = await bodyOn(q, id); me = await meOn(p);
         if (s && Math.abs(s.x - me.x) < 0.3 && Math.abs(s.y - me.y) < 0.3) return;
       }
-      throw new Error(`${id} isn't seen where it was put (${x}, ${y})`);
+      throw new Error(`${id} isn't seen where it was put (${x}, ${y}): there ${me && [me.x, me.y]}, seen at ${s && [s.x, s.y]}`);
     };
     let S;
     for (const r of ['canvas', 'gl']) {
@@ -437,8 +464,9 @@ try {
       await b.screenshot({ path: `${SHOTS}/pvp-aim-line.png` });
     });
     await check('arena PvP: A double-taps → and rolls about 14 cells on both screens, through B (who isn\'t pushed)', async () => {
-      await putAt(b, a, S.open + 12, S.floor, -1);
+      // A first: the sniper's random spot (the last check) may be where B goes, and bodies collide.
       await putAt(a, b, S.open + 5, S.floor, 1);
+      await putAt(b, a, S.open + 12, S.floor, -1);
       await sleep(700);
       const own = a.evaluate(() => new Promise((resolve) => {
         const p = window.__ascii.world.player, out = [], t0 = performance.now();

@@ -2,7 +2,7 @@ import { GUNS } from '../src/fight.js';
 import { LEVEL_COLS, LEVEL_ROWS } from '../src/level.js';
 
 // Checks shared by the multiplayer Worker and its tests. Pure: no Workers or Node APIs.
-export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000 };
+export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000, muteS: 600 };
 export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
 
 export function allowedOrigin(origin) {
@@ -25,29 +25,77 @@ export function cleanName(raw) {
   return BLOCKED.some((w) => flat.includes(w)) ? null : name;
 }
 
-// Chat is sentences, so it is checked word by word: some words are blocked wherever they appear, some
-// only at the start of a word (so "Scunthorpe" is fine), and some only as a whole word (so "cockpit" and
-// "cumulus" are fine). Letters spelled out one at a time ("f u c k", "f.u.c.k") are joined back up first.
-const ANYWHERE = ['fuck', 'shit', 'nigg', 'whore', 'slut', 'pussy', 'retard', 'hitler', 'kike', 'porn'];
-const PREFIX = ['cunt', 'nazi', 'fag'];
-const WHOLE = ['cum', 'cock', 'dick', 'spic', 'rape', 'raped', 'rapist', 'tits', 'twat', 'chink'];
+// Chat is sentences, so it is checked word by word: some words match wherever they appear, some only at
+// the start of a word (so "Scunthorpe" is fine), and some only as a whole word (so "cockpit" and "cumulus"
+// are fine). Letters spelled out one at a time ("f u c k", "f.u.c.k") are joined back up first.
+// Swears are censored, one letter starred (sh*t, f*ck); a slur isn't sent at all and mutes the sender's
+// chat for LIMITS.muteS (chat filter addendum).
+const ANYWHERE = ['fuck', 'shit', 'whore', 'slut', 'pussy', 'hitler', 'porn', 'bitch'];
+const PREFIX = ['cunt', 'nazi'];
+const WHOLE = ['cum', 'cock', 'dick', 'rape', 'raped', 'rapist', 'tits', 'twat'];
+const SLUR_ANYWHERE = ['nigg', 'kike'];
+const SLUR_PREFIX = ['fag', 'retard'];
+const SLUR_WHOLE = ['spic', 'chink', 'coon', 'tranny', 'trannie'];
+const NOT_SLURS = ['snigger', 'retardant', 'fagiol']; // innocent words that start like one
 
-export function cleanText(raw) {
+// The words of a line as letters, each with its index in the line: lower-cased, digit swaps undone,
+// punctuation dropped, and a run of single letters joined into one word.
+function wordsOf(text) {
+  const words = [];
+  let run = [];
+  for (const m of text.matchAll(/\S+/g)) {
+    const w = [];
+    for (let i = 0; i < m[0].length; i++) {
+      const c = m[0][i].toLowerCase();
+      if (/[a-z]/.test(c)) w.push({ c, at: m.index + i });
+      else if (/[0-9]/.test(c)) w.push({ c: SWAPS[c] || c, at: m.index + i });
+    }
+    if (w.length === 1) { run.push(w[0]); continue; }
+    if (run.length) { words.push(run); run = []; }
+    if (w.length) words.push(w);
+  }
+  if (run.length) words.push(run);
+  return words;
+}
+
+// Where in word w (a string) each listed word matches: [start, length] pairs.
+function matches(w, anywhere, prefix, whole) {
+  const out = [];
+  for (const b of anywhere) for (let i = w.indexOf(b); i >= 0; i = w.indexOf(b, i + b.length)) out.push([i, b.length]);
+  for (const b of prefix) if (w.startsWith(b)) out.push([0, b.length]);
+  for (const b of whole) if (w === b || w === b + 's') out.push([0, b.length]);
+  return out;
+}
+
+const plain = (raw) => {
   if (typeof raw !== 'string') return null;
   const text = raw.trim();
-  if (!text || text.length > LIMITS.chat || !/^[\x20-\x7E]+$/.test(text)) return null;
-  const words = [];
-  let run = '';
-  for (const token of text.toLowerCase().split(/\s+/)) {
-    const w = token.replace(/[^a-z0-9]/g, '').replace(/[0-9]/g, (d) => SWAPS[d] || d);
-    if (w.length === 1) { run += w; continue; }
-    if (run) { words.push(run); run = ''; }
-    if (w) words.push(w);
+  return !text || text.length > LIMITS.chat || !/^[\x20-\x7E]+$/.test(text) ? null : text;
+};
+
+// Whether a line has a slur in it (its sender is muted instead).
+export function hasSlur(raw) {
+  const text = plain(raw);
+  return !!text && wordsOf(text).some((l) => {
+    const w = l.map((q) => q.c).join('');
+    return !NOT_SLURS.some((ok) => w.startsWith(ok)) && matches(w, SLUR_ANYWHERE, SLUR_PREFIX, SLUR_WHOLE).length > 0;
+  });
+}
+
+// The line as it is shown: trimmed, with one letter of each swear starred (the first vowel after its first
+// letter, or its middle letter), or null if it can't be sent (empty, too long, outside the drawable set).
+export function cleanText(raw) {
+  const text = plain(raw);
+  if (text === null) return null;
+  const out = text.split('');
+  for (const w of wordsOf(text)) {
+    for (const [i, n] of matches(w.map((l) => l.c).join(''), ANYWHERE, PREFIX, WHOLE)) {
+      let k = w.slice(i + 1, i + n).findIndex((l) => 'aeiou'.includes(l.c));
+      k = k >= 0 ? i + 1 + k : i + Math.floor(n / 2);
+      out[w[k].at] = '*';
+    }
   }
-  if (run) words.push(run);
-  const bad = (w) => ANYWHERE.some((b) => w.includes(b)) || PREFIX.some((b) => w.startsWith(b))
-    || WHOLE.some((b) => w === b || w === b + 's');
-  return words.some(bad) ? null : text;
+  return out.join('');
 }
 
 const pos = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 2000;

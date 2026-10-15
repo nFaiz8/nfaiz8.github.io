@@ -226,6 +226,16 @@ test('with fighting off (no fight hash) a welcome warns of nothing; a hash that 
   });
 });
 
+test('chat-muted reaches onChatMuted with the seconds left; chat-rejected onChatRejected', () => {
+  const got = [];
+  withLive({ onChatMuted: (s) => got.push(['muted', s]), onChatRejected: () => got.push(['rejected']) }, ({ say }) => {
+    say({ t: 'welcome', id: 'me', peers: [] });
+    say({ t: 'chat-muted', s: 600 });
+    say({ t: 'chat-rejected' });
+  });
+  assert.deepEqual(got, [['muted', 600], ['rejected']]);
+});
+
 test('arena message types reach onArena; positions and chat do not', () => {
   const got = [];
   withLive({ fightHash: 'abc', onArena: (m) => got.push(m.t) }, ({ say }) => {

@@ -8,7 +8,7 @@ import { createPvp } from './pvp.js';
 import { createFightHud } from './fighthud.js';
 import { createLive, peerEntities, heartEntities, localEcho, peerColor } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
-import { cleanName, cleanText } from '../server/rules.js';
+import { cleanName, cleanText, hasSlur, LIMITS } from '../server/rules.js';
 import { loadData, captionText, describe } from './data.js';
 import { buildLayout, isWalkable } from './layout.js';
 import { createWorld, step, walkTo, frameAtCell, teleport, roomAt, enterSide, exitSide, inArena, snapCamera } from './world.js';
@@ -843,12 +843,20 @@ async function boot() {
   const closeChat = () => { if (chatForm.hidden) return; chatForm.hidden = true; stage.focus({ preventScroll: true }); };
   chatBtn.addEventListener('click', () => {
     if (!chatForm.hidden) return closeChat();
-    chatMsg.textContent = '';
+    chatMsg.textContent = mutedFor() > 0 ? mutedText() : '';
     chatForm.hidden = false;
     chatInput.focus();
   });
+  // A slur isn't sent: it mutes my chat for LIMITS.muteS, remembered in this browser (the server keeps
+  // its own mute too). Swears go out with a letter starred (chat filter addendum).
+  const MUTE_KEY = 'faiz-chat-muted';
+  const mutedFor = () => { let u = 0; try { u = Number(localStorage.getItem(MUTE_KEY)) || 0; } catch {} return Math.max(0, u - Date.now()); };
+  const muteChat = (s) => { try { localStorage.setItem(MUTE_KEY, String(Date.now() + s * 1000)); } catch {} };
+  const mutedText = () => `chat muted for ${Math.ceil(mutedFor() / 60000)} min`;
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (hasSlur(chatInput.value)) { muteChat(LIMITS.muteS); chatInput.value = ''; }
+    if (mutedFor() > 0) { chatMsg.textContent = mutedText(); return; }
     const text = cleanText(chatInput.value);
     if (text === null) { chatMsg.textContent = chatInput.value.trim() ? 'try different words' : ''; return; }
     const at = performance.now();
@@ -887,6 +895,7 @@ async function boot() {
     onRejected: () => note('try another name'),
     onChat: ({ id, name, text }) => { if (!muted.has(id)) addLog(id, name, text); },
     onChatRejected: () => note('try different words'),
+    onChatMuted: (s) => { muteChat(s); note(mutedText()); },
   });
   if (live) { emoteBtn.hidden = false; nameBtn.hidden = false; chatBtn.hidden = false; }
   if (debug) debugEl.hidden = false;
