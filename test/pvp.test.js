@@ -843,6 +843,7 @@ test('the impact frame: for my kill and my death, not for someone else\'s kill o
   s.pvp.onMessage({ t: 'k', id: 'me', by: 'a', kills: 2 }, s.now);
   assert.equal(s.impacts.length, 2);
   assert.deepEqual(s.impacts.map((e) => e.me), [false, true], 'whether I was the one popped');
+  assert.deepEqual(s.impacts.map((e) => e.text), ['you popped Bo', 'Ann popped you'], 'the kill\'s line, for the picture');
 });
 
 test('the impact frame: popping the dummy offline gives one; Reduce Motion gives none', () => {
@@ -851,6 +852,7 @@ test('the impact frame: popping the dummy offline gives one; Reduce Motion gives
   for (let k = 0; k < 8 && s.pvp.bodies(s.now).find((b) => b.dummy).state.act !== 'dead'; k++) { s.frames(1, { fire: true }); s.frames(30); }
   assert.equal(s.pvp.bodies(s.now).find((b) => b.dummy).state.act, 'dead');
   assert.equal(s.impacts.length, 1);
+  assert.equal(s.impacts[0].text, 'you popped the dummy');
   const r = setupNamed({ reducedMotion: true });
   r.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('b', 40.5)] }, r.now);
   r.pvp.onMessage({ t: 'k', id: 'b', by: 'me', kills: 1 }, r.now);

@@ -76,7 +76,8 @@ export function createPvp({
   const myHeadshot = (m) => { if (m.hs && isMe(m.by) && !isMe(m.id)) shake(HEAD_SHAKE); };
   // A kill I'm in (I popped someone, the dummy too, or I was popped) freezes the picture a moment (parry
   // addendum §2); a flee hits nobody. Never with Reduce Motion: it is motion, and its flash a strobe.
-  const impact = (m) => { if (!reducedMotion && !m.fled && (isMe(m.by) || isMe(m.id))) onImpact({ me: isMe(m.id) }); };
+  // It carries the kill's line, for the picture kept of it (shots.js).
+  const impact = (m) => { if (!reducedMotion && !m.fled && (isMe(m.by) || isMe(m.id))) onImpact({ me: isMe(m.id), text: popLine(m) }); };
 
   // My state for the wire and the local referee (arena-local). The input bits gain 32 rolling, and 64
   // crouched or 128 prone from what my body does (crouch addendum §4).
@@ -170,7 +171,11 @@ export function createPvp({
   // ---------- messages ----------
   function feed(m) {
     if (!isMe(m.id) && !fighters.get(m.id)) return; // someone already gone: stale
-    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : `${name(m.by)} popped ${name(m.id)}${m.hs ? ' ◎ headshot' : ''}${m.pr ? ' ↩ parry' : ''}`);
+    onFeed(m.fled ? `${name(m.id)} fled from ${name(m.by)}` : popLine(m));
+  }
+  function popLine(m) {
+    const who = (id) => (id === DUMMY ? 'the dummy' : name(id));
+    return `${who(m.by)} popped ${who(m.id)}${m.hs ? ' ◎ headshot' : ''}${m.pr ? ' ↩ parry' : ''}`;
   }
 
   // A round parried (parry addendum §1): drawn back from the parry point, as if sent half my round trip ago.

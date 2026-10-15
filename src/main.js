@@ -22,6 +22,7 @@ import { createLighting } from './light.js';
 import { createViewer } from './viewer.js';
 import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH } from './router.js';
 import { createMap } from './map.js';
+import { createShots } from './shots.js';
 import { createGrid } from './grid.js';
 
 const stage = document.getElementById('stage');
@@ -29,6 +30,7 @@ const captionEl = document.getElementById('caption');
 const noteEl = document.getElementById('note');
 const fightSr = document.getElementById('fight-sr');
 const rendererBtn = document.getElementById('renderer-btn');
+const shotsBtn = document.getElementById('shots-btn');
 const debugEl = document.getElementById('debug');
 document.getElementById('hud-name').textContent = SITE.name;
 
@@ -223,7 +225,7 @@ function openGrid() {
 const inKiosk = (x, y) => { const k = map.kiosk; return x >= k.x && x < k.x + k.w && y >= k.y && y < k.y + k.h; };
 
 function onTap(px, py) {
-  if (viewer.isOpen || mapView.isOpen || grid.isOpen) return;
+  if (viewer.isOpen || mapView.isOpen || grid.isOpen || shots?.isOpen) return;
   if (world.mode === 'side' || tilting) return; // in the arena you run and jump
   const cell = renderer.cellAt(world, px, py);
   const peer = peerAtCell(cell.x, cell.y);
@@ -254,6 +256,7 @@ function onKey(e) {
   if (viewer.isOpen || grid.isOpen) return false;
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
+  if (e.code === 'KeyI' && shots && !shotsBtn.hidden) { shots.toggle(); return true; }
   if (e.code === 'KeyG') { openGrid(); return true; }
   if (e.code === 'KeyF') { toggleFullscreen(); return true; }
   if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
@@ -331,7 +334,7 @@ let padJump = false; // the pad's JUMP is held
 let keysNoted = false, linkUp = false; // linkUp: this connection's welcome came (so fightOk is its own)
 const fightOnline = () => !!live && linkUp && live.state === 'live' && live.fightOk;
 function syncFight(t) {
-  const want = world.mode === 'side' && !tilting && !world.want && !viewer.isOpen && !mapView.isOpen && !grid.isOpen && !document.hidden;
+  const want = world.mode === 'side' && !tilting && !world.want && !viewer.isOpen && !mapView.isOpen && !grid.isOpen && !shots?.isOpen && !document.hidden;
   if (want && !pvp.entered) {
     // A last p first, from in here: arriving by a link or teleport, the last one went out somewhere else,
     // and the gallery would keep drawing me there while I fight.
@@ -349,7 +352,7 @@ function loop(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
   last = now;
   const t = performance.now(); // the fight's clock, the same as its messages'
-  const away = viewer.isOpen || mapView.isOpen || grid.isOpen;
+  const away = viewer.isOpen || mapView.isOpen || grid.isOpen || !!shots?.isOpen;
   if (pvp) syncFight(t);
   sideView(t);
   syncView();
@@ -363,10 +366,11 @@ function loop(now) {
     input.clear(); // nothing held, no strike or roll carried in or out of the arena
     document.body.classList.toggle('side', world.mode === 'side');
     showR(); // [R] is the train's look in the arena, the renderer outside
+    showShotsBtn();
     if (world.mode === 'side') meEntry++; // a fresh motion-memory entry: my fly-in plays on every entry
     if (world.mode === 'side' && touch && innerHeight > innerWidth) { note('turn your phone sideways for the arena ↻', 4000); hintOn = true; }
   }
-  const showPad = touch && world.mode === 'side' && !viewer.isOpen && !grid.isOpen && !mapView.isOpen;
+  const showPad = touch && world.mode === 'side' && !viewer.isOpen && !grid.isOpen && !mapView.isOpen && !shots?.isOpen;
   if (padEl.hidden === showPad) {
     padEl.hidden = !showPad;
     document.body.classList.toggle('pad-on', showPad);
@@ -493,6 +497,8 @@ function loop(now) {
   const since = impact ? t - impact.at : Infinity;
   stage.classList.toggle('impact', since < IMPACT.flash);
   if (!(since > 0 && since < IMPACT.hold)) renderer.draw(world);
+  // The kill's frame is kept (shots.js): copied now, before the browser shows it, baked once the hold is over.
+  if (since === 0) shots.capture(stage.querySelector('canvas'), impact.text, IMPACT.hold);
   if (since >= IMPACT.hold) impact = null;
   viewer.sync();
   mapView.sync(world.player, roomAt(map, world.player.x, world.player.y), world.others);
@@ -511,8 +517,15 @@ function loop(now) {
 }
 
 let live = null;
-const IMPACT = { flash: 70, hold: 150 }; // ms
-let impact = null; // a kill I'm in: { at } in ms, or at null until the frame of it is drawn
+const IMPACT = { flash: 200, hold: 400 }; // ms
+let impact = null; // a kill I'm in: { at, text }, at in ms, or null until the frame of it is drawn
+let shots = null, shotsNoted = false; // the impact frames kept (shots.js)
+// [I]: in the arena always (its switch turns impact frames off); elsewhere once one is kept.
+function showShotsBtn() {
+  if (!shots) return;
+  shotsBtn.hidden = !(world.mode === 'side' || shots.count > 0);
+  shotsBtn.querySelector('.n').textContent = shots.count ? ` ${shots.count}` : '';
+}
 let lightingTop = null, tilting = false, lastMode = 'top';
 let train = null, trainGlows = [];
 let trainAt = null; // __ascii.freezeTrain (localhost): the train held at this time (ms), for screenshots
@@ -663,7 +676,7 @@ async function boot() {
       colorOf: (id) => (id === myId() ? C.player : peerColor(id)),
       nameOf: (id) => (live && live.peers.get(id)?.name) || '',
       onNote: (text) => note(text, 3000),
-      onImpact: () => { impact = { at: null }; },
+      onImpact: (e) => { if (shots.on) impact = { at: null, text: e.text }; },
       onFeed: (text) => {
         fightHud.line(text);
         // For screen readers, politely (the box is aria-hidden); cleared first so a repeat is read again.
@@ -671,6 +684,15 @@ async function boot() {
         setTimeout(() => { fightSr.textContent = text; }, 50);
       },
     });
+    shots = createShots({
+      onOpen: () => { input.clear(); stopFollowing(); },
+      onClose: () => stage.focus({ preventScroll: true }),
+      onCount: () => {
+        showShotsBtn();
+        if (!shotsNoted) { shotsNoted = true; note('impact frame kept · I to see and save it', 3000); }
+      },
+    });
+    shotsBtn.addEventListener('click', () => shots.toggle());
     fightHud = createFightHud({
       root: document.getElementById('fight'), hp: document.getElementById('fight-hp'),
       board: document.getElementById('fight-board'), feed: document.getElementById('fight-feed'),

@@ -37,16 +37,35 @@ kill". The details below are choices made without them (§3). This addendum amen
 When I pop someone (the dummy too), or someone pops me, the fight's picture freezes for a moment, the way a
 fighting game's hitstop does:
 
-- **The flash.** The frame of the kill is drawn, then shown for `IMPACT.flash` = 70 ms inverted, grey and
+- **The flash.** The frame of the kill is drawn, then shown for `IMPACT.flash` = 200 ms inverted, grey and
   at high contrast: a stark black-and-white impact frame. It is a CSS filter on the stage, so it works the
   same in all three renderers.
-- **The hold.** The picture stays frozen until `IMPACT.hold` = 150 ms after the kill. Then the next frame is
-  drawn.
+- **The hold.** The picture stays frozen until `IMPACT.hold` = 400 ms after the kill. Then the next frame is
+  drawn. (Both were 70 and 150 ms at first. The user asked on 2026-10-14 to "make the impact frame last
+  longer".)
 - **Only the picture freezes.** The fight goes on underneath: other players, the server and my own body
   can't be paused. After the hold, the picture catches up in one frame.
 - **A flee doesn't count.** Leaving within 3 s of a hit still gives the hitter the kill, but there is no
   impact frame for it, since nobody is hit at that moment. Nor is there one for kills I'm not part of.
 - **Reduce Motion:** neither the flash nor the hold. Both are motion, and the flash is a strobe.
+- **Each one is kept as a picture** (`src/shots.js`). The user asked: "add it as a screen shot that u can
+  view and save, the server doesnt save it so u lose it when u reload the page".
+  - The kill's frame is copied from the stage's canvas right after it is drawn, before the browser shows
+    it, since a WebGL canvas reads blank after that.
+  - Once the hold is over, the copy gets the same filter, baked in, and becomes a PNG blob. It uses the 2D
+    context's `filter` where that really works (tested with a one-pixel probe), and otherwise
+    `impactPixels`. The copy is at most 1920 px wide.
+  - It is kept in memory only, with the kill's line as its caption ("you popped Bo ◎ headshot"). A reload
+    loses it. The newest 20 are kept.
+  - **`[I]` in the HUD**, or the I key, opens them: newest first, each with a `save` link. The link
+    downloads `impact-YYYY-MM-DD-HH-MM-SS.png`. On a phone you can also long-press the picture.
+  - The button shows in the arena always, and elsewhere once a picture has been kept. Opening it takes you
+    out of the fight, as the map does. The first picture kept gives a note: "impact frame kept · I to see
+    and save it".
+- **Off switch.** The user asked: "add a disable button for impact frames". At the top of the `[I]` panel,
+  `impact frames: on/off` turns off the flash, the hold and the keeping. It is remembered in this browser
+  (`localStorage` `ascii-impact`), unlike the train's look: a switch that turned itself back on at every
+  visit would be no use.
 
 ## 3. Choices made for you
 
