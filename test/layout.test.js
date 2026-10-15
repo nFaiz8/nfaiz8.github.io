@@ -157,3 +157,29 @@ test('a missing arena photo leaves the room with no backdrop; no arena option is
   assert.ok(!plain.labels.some((l) => l.text === '← ARENA'));
   assert.deepEqual([...plain.tiles], [...old.tiles]);
 });
+
+test('the lobby has a stairwell down to the subway, which you can walk into', () => {
+  const map = buildLayout(real, SITE);
+  const s = map.stairs, lobby = map.rooms[0];
+  assert.ok(s, 'stairs exist');
+  assert.ok(s.x > lobby.x && s.x + s.w < lobby.x + lobby.w && s.y > lobby.y && s.y + s.h < lobby.y + lobby.h, 'inside the lobby');
+  for (let y = s.inside.y; y < s.inside.y + s.inside.h; y++)
+    for (let x = s.inside.x; x < s.inside.x + s.inside.w; x++) assert.ok(isWalkable(map, x, y), `treads walkable at ${x},${y}`);
+  for (let y = s.y; y < s.y + s.h; y++) {
+    assert.equal(map.tiles[y * map.W + s.x], T.PROP, 'west side walled');
+    assert.equal(map.tiles[y * map.W + s.x + s.w - 1], T.PROP, 'east side walled');
+  }
+  for (let x = s.x; x < s.x + s.w; x++) assert.equal(map.tiles[(s.y + s.h - 1) * map.W + x], T.PROP, 'bottom walled');
+  assert.ok(map.glyphs.has(s.inside.y * map.W + s.inside.x), 'the treads are drawn');
+  const sx = Math.floor(map.spawn.x), sy = Math.floor(map.spawn.y);
+  assert.ok(findPath(map.W, map.H, (x, y) => isWalkable(map, x, y), sx, sy, s.inside.x + 2, s.inside.y), 'reachable from the spawn');
+  assert.ok(isWalkable(map, Math.floor(s.front.x), Math.floor(s.front.y)), 'you can stand in front');
+  assert.ok(Math.floor(s.front.y) < s.inside.y - 1, 'in front means off the treads');
+  assert.ok(map.labels.some((l) => l.text === '▼ SUBWAY' && l.y === s.y - 1), 'signed');
+  for (const l of map.labels) {
+    if (l.text === '▼ SUBWAY') continue;
+    const clear = l.y < s.y - 2 || l.y >= s.y + s.h || l.x + l.text.length <= s.x || l.x >= s.x + s.w;
+    assert.ok(clear, `label "${l.text}" clear of the stairwell`);
+  }
+  assert.ok(Math.abs(map.spawn.x - (s.x + s.w / 2)) > s.w, 'off the line you walk from the spawn');
+});

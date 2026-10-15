@@ -466,9 +466,24 @@ export function buildLayout(data, site, { arena = null } = {}) {
   const sign = '· information ·';
   labels.push({ x: kiosk.x + Math.round((kw - sign.length) / 2), y: top, text: sign, role: 'sign' });
 
+  // The subway stairwell (station spec §1): stairs going down in the lobby's south-west corner, against the
+  // south wall. Open to the north, where you walk in; walled on the other three sides, so no path passes
+  // through it on the way somewhere else. Standing on a tread takes you down.
+  const stairArt = ['│▀▀▀▀▀▀▀│', '│═══════│', '│───────│', '│▄▄▄▄▄▄▄│', '└───────┘'];
+  const stairs = { x: lobby.x + 3, y: lobby.y + lobby.h - 1 - stairArt.length, w: stairArt[0].length, h: stairArt.length };
+  stairs.inside = { x: stairs.x + 1, y: stairs.y, w: stairs.w - 2, h: stairs.h - 1 };
+  stairs.front = { x: stairs.x + Math.floor(stairs.w / 2) + 0.5, y: stairs.y - 2.5 };
+  stairArt.forEach((line, dy) => [...line].forEach((ch, dx) => {
+    const i = at(stairs.x + dx, stairs.y + dy);
+    const tread = dx > 0 && dx < stairs.w - 1 && dy < stairs.h - 1;
+    tiles[i] = tread ? T.FLOOR : T.PROP;
+    glyphs.set(i, { ch, role: 'prop' });
+  }));
+  labels.push({ x: stairs.x, y: stairs.y - 1, text: '▼ SUBWAY', role: 'sign' });
+
   // You start just below the desk, facing it.
   const spawn = { x: lobby.x + cx + 0.5, y: Math.min(lobby.y + lobby.h - 3, Math.max(lobby.y + lobby.h - 6, kiosk.stand.y + 3)) + 0.5 };
-  return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk, arena: arenaInfo, faces, view: VIEW };
+  return { W, H, tiles, roomOf, glyphs, rooms, frames, labels, lines, spawn, kiosk, stairs, arena: arenaInfo, faces, view: VIEW };
 }
 
 function wrap(text, width) {

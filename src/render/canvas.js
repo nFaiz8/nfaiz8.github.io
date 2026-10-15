@@ -243,7 +243,9 @@ export function createCanvasRenderer() {
         const dark = inDarkRect(wx, wy);
         if (t === T.WALL) put(c, '#', x, y, dark ? C.dWall : (tints[roomNear(wx, wy)] || C).wall || C.wall, dark ? C.dWallBg : C.wallBg);
         else if (t === T.FLOOR || t === T.DOOR) {
-          if ((wx * 7 + wy * 13) % 17 === 0) put(c, '·', x, y, dark || inDark(wx, wy) ? C.dFloorDot : (tints[map.roomOf[i]] || C).dot || C.floorDot);
+          const g = map.glyphs.get(i);
+          if (g) put(c, g.ch, x, y, C.prop);
+          else if ((wx * 7 + wy * 13) % 17 === 0) put(c, '·', x, y, dark || inDark(wx, wy) ? C.dFloorDot : (tints[map.roomOf[i]] || C).dot || C.floorDot);
         } else if (t === T.PROP) {
           const g = map.glyphs.get(i);
           if (g) put(c, g.ch, x, y, C.prop);

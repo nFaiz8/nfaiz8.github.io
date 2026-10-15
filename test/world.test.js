@@ -14,7 +14,8 @@ test('walking into a wall stops at the wall instead of passing through', () => {
   const w = createWorld(map);
   run(w, 10, { x: 0, y: 1 }); // lobby south wall has a corridor door in the middle, so walk off-centre
   const w2 = createWorld(map);
-  teleport(w2, map.rooms[0].x + 3.5, map.spawn.y);
+  // a row clear of the stairwell, which fills the lobby's south-west corner
+  teleport(w2, map.rooms[0].x + 3.5, map.stairs.y - 3.5);
   run(w2, 10, { x: -1, y: 0 });
   assert.ok(w2.player.x > map.rooms[0].x + 1, 'stayed inside the lobby');
   assert.ok(w2.player.x < map.rooms[0].x + 1.5, 'reached the wall');
