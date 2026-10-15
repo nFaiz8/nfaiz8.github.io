@@ -2,12 +2,12 @@
 // plane, its origin at the feet, sized in world units so it scales with distance like everything else.
 import * as THREE from 'three';
 
-const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+export const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const PX = 64; // the font's pixel size on a sprite's canvas
 
 // Every sprite is drawn on one fixed character grid: each glyph left-aligned in its own cell, cells a font advance
 // wide, and lines exactly one '│' tall, so box-drawing strokes meet across lines. `centre` is the column the
-// mesh's origin (and its mirror line, when it flips) sits on; by default the middle of the widest line.
+// mesh's origin sits on; by default the middle of the widest line.
 const grid = (() => {
   let g = null;
   return () => {
@@ -34,7 +34,7 @@ export function makeSprite(lines, colors, height, { glow = false, centre = null 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  // Glowing sprites (you) skip tone mapping, so they stay the brightest, crispest thing on screen.
+  // Glowing sprites (the way-out sign) skip tone mapping, so they stay the brightest, crispest thing on screen.
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.05, depthWrite: false, side: THREE.DoubleSide, toneMapped: !glow });
   const geo = new THREE.PlaneGeometry((height * canvas.width) / canvas.height, height);
   geo.translate(0, height / 2, 0);
@@ -55,15 +55,6 @@ export function makeSprite(lines, colors, height, { glow = false, centre = null 
   draw(lines);
   return { mesh, draw, dispose() { geo.dispose(); mat.dispose(); tex.dispose(); } };
 }
-
-// You: 5 lines of box-drawing strokes that join up, holding a lantern. Frame 0 is standing (and the stride),
-// frame 1 the passing step. Draw it with { centre: PLAYER_CENTRE } so you flip about your body, not the lantern.
-export const PLAYER = [
-  [' ● ', '─┼─¤', ' │ ', '┌┴┐', '│ │'],
-  [' ● ', '─┼─¤', ' │ ', ' ├┐', ' │ '],
-];
-export const PLAYER_CENTRE = 1; // the ┼ column
-export const PLAYER_COLORS = ['#ffe6bd', '#ffdcae', '#f0bf7a', '#e9a23b', '#c98a3a'];
 
 export const PROPS = {
   bin: { lines: [' ___ ', '|###|', '|___|'], colors: ['#a7afc2', '#6f7890', '#6f7890'], h: 0.9 },

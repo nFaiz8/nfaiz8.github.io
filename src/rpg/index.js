@@ -4,22 +4,25 @@
 import * as THREE from 'three';
 import stationText from './station.txt?raw';
 import { parseStation } from './map.js';
-import { createWalker, stepWalker } from './move.js';
+import { createWalker, stepWalker, SPEED } from './move.js';
 import { trainAt } from './train.js';
 import { createCamera, followCamera, eyeFor, fovFor } from './camera.js';
 import { buildScene } from './scene.js';
-import { makeSprite, PLAYER, PLAYER_COLORS, PLAYER_CENTRE } from './sprites.js';
+import { createFigure } from './figure.js';
+import { poseFigure, turnToward, advancePhase } from './rig.js';
 import { createPost } from './post.js';
+
+const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
 
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, me, blobGeo, blobMat, post, raf = 0, resize = null, hook = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, raf = 0, resize = null, hook = null;
   const teardown = () => {
     cancelAnimationFrame(raf);
     if (resize) removeEventListener('resize', resize);
     world?.dispose();
-    me?.dispose();
+    figure?.dispose();
     blobGeo?.dispose();
     blobMat?.dispose();
     post?.dispose();
@@ -43,13 +46,15 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     world = buildScene(scene, map, { reducedMotion });
     const walker = createWalker(map);
 
-    me = makeSprite(PLAYER[0], PLAYER_COLORS, 1.6, { glow: true, centre: PLAYER_CENTRE });
+    // You: the arena's stick figure, posed each frame (rig.js) and drawn as glyphs (figure.js).
+    figure = createFigure(scene, { glow: true });
+    const joints = {}, pose = { yaw: 0, phase: 0, gait: 0, t: 0, reducedMotion };
+    let targetYaw = 0, walked = walker.walked;
     const lantern = new THREE.PointLight('#ffb35c', 9, 6.5, 1.8);
     blobGeo = new THREE.CircleGeometry(0.32, 24).rotateX(-Math.PI / 2);
     blobMat = new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.45, depthWrite: false });
     const blob = new THREE.Mesh(blobGeo, blobMat);
-    scene.add(me.mesh, lantern, blob);
-    let shownFrame = 0;
+    scene.add(lantern, blob);
 
     post = createPost(renderer, scene, camera);
     const cam = createCamera(walker);
@@ -96,13 +101,18 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       stepWalker(walker, dt, finger ? fingerInput() : keys(), map);
       if (!leaving && map.at(Math.floor(walker.x), Math.floor(walker.z))?.ch === 'E') { leaving = true; onExit(); }
 
-      const moving = Math.hypot(walker.vx, walker.vz) > 0.3;
-      const f = moving ? Math.floor(walker.walked / 0.45) % 2 : 0;
-      if (f !== shownFrame) { me.draw(PLAYER[f]); shownFrame = f; }
-      me.mesh.position.set(walker.x, walker.y, walker.z);
-      me.mesh.scale.x = walker.facing;
+      // Face where you walk (keeping the last facing when you stop); the stride follows the ground covered,
+      // and the gait is a smoothed speed, so starting and stopping blend.
+      const speed = Math.hypot(walker.vx, walker.vz);
+      if (speed > 0.3) targetYaw = Math.atan2(walker.vx, walker.vz);
+      pose.yaw = turnToward(pose.yaw, targetYaw, dt);
+      pose.gait += (speed / SPEED - pose.gait) * (1 - Math.exp(-dt / GAIT_EASE));
+      pose.phase = advancePhase(pose.phase, walker.walked - walked, pose.gait);
+      walked = walker.walked;
+      pose.t = t;
+      poseFigure(pose, joints);
       blob.position.set(walker.x, walker.y + 0.02, walker.z);
-      lantern.position.set(walker.x + 0.35 * walker.facing, walker.y + 1.1, walker.z + 0.15);
+      lantern.position.set(walker.x + joints.lantern.x, walker.y + joints.lantern.y, walker.z + joints.lantern.z);
       lantern.intensity = 9 * (reducedMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 13) * Math.sin(t * 5.1));
 
       const train = trainAt(t, map);
@@ -112,6 +122,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const eye = eyeFor(cam), shake = world.shake ? world.shake(t, walker, train) : { x: 0, y: 0 };
       camera.position.set(eye.x + shake.x, eye.y + shake.y, eye.z);
       camera.lookAt(cam.x + shake.x, cam.y + shake.y, cam.z);
+      figure.update(joints, camera, walker);
       v.set(walker.x, walker.y + 0.8, walker.z).project(camera);
       post.setFocus((v.y + 1) / 2);
       post.render();
