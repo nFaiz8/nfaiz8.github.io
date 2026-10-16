@@ -3,7 +3,9 @@
 // the timing shared with scene.js so a sound and what you see happen together (the faulty tube, the drips). Pure:
 // no Web Audio, no three.js, so the tests drive it. audio.js plays it.
 import { LEVEL } from './map.js';
-import { TRAIN, LENGTH, startOf } from './train.js';
+import { TRAIN, LOCAL, DOORS, localsAt, arrivalAtStop } from './schedule.js';
+import { sunAt } from './line.js';
+import { PITCH } from './car.js';
 
 const TAU = 2 * Math.PI;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -59,58 +61,43 @@ export function spatial(sx, sy, sz, me, ref = 3, width = 7) {
   return { gain: 1 / (1 + (d / ref) ** 2), pan: clamp((sx - me.x) / width, -1, 1) * 0.85, d };
 }
 
-// ── The train ──────────────────────────────────────────────────────────────────────────────────────────────────
-// Its layers: a rumble that builds in its tunnel for BUILD seconds before it comes out (the last TRAIN.warn of them
-// while the tunnel glows), the roar, the wheels' screech and the rails' clatter as it passes, the wind behind it,
-// and the rumble fading into the other tunnel over FADE seconds. Each 0…1, before the mixer's levels; pan −1…1;
-// muffle 0…1, how much of it reaches you through the walls (the hall is behind the platform's walls).
-export const TRAIN_SOUND = { build: 7, fade: 4.5, ref: 5 };
-export function trainSound(t, map, me) {
-  const out = { rumble: 0, roar: 0, screech: 0, wind: 0, pan: 0, muffle: 1, n: -1, phase: null };
-  if (!map.tracks.length) return out;
-  const travel = (map.cols + LENGTH + 4) / TRAIN.speed;
-  const m = Math.floor((t - TRAIN.first) / TRAIN.every);
-  const inHall = me.y > (LEVEL.hall + LEVEL.platform) / 2;
-  out.muffle = inHall ? 0.35 : 1;
-  for (let n = Math.max(0, m - 1); n <= m + 2; n++) {
-    const start = startOf(n), end = start + travel;
-    const track = map.tracks[n % map.tracks.length], dir = n % 2 ? -1 : 1;
-    const from = dir > 0 ? -2 : map.cols + 2, to = dir > 0 ? map.cols + 2 : -2;
-    const across = 1 / (1 + ((track.z - me.z) / 7) ** 2); // the far track is quieter
-    const atX = (x) => ({ g: 1 / (1 + ((x - me.x) / 18) ** 2) * across, pan: clamp((x - me.x) / 12, -1, 1) * 0.9 });
-    if (t >= start - TRAIN_SOUND.build && t < start) { // building in the tunnel
-      const k = 1 - (start - t) / TRAIN_SOUND.build, s = atX(from);
-      const r = k * k * (0.35 + 0.65 * s.g);
-      if (r > out.rumble) Object.assign(out, { rumble: r, pan: s.pan, n, phase: 'coming' });
-    } else if (t >= start && t < end) { // passing
-      const head = dir > 0 ? -2 + (t - start) * TRAIN.speed : map.cols + 2 - (t - start) * TRAIN.speed;
-      const tail = head - dir * LENGTH;
-      const lo = Math.min(head, tail), hi = Math.max(head, tail);
-      const nx = clamp(me.x, lo, hi), lit = clamp(nx, -2, map.cols + 2); // the nearest bit of it (in the station)
-      const d = Math.hypot(lit - me.x, track.z - me.z, track.y + 1.5 - me.y);
-      const near = 1 / (1 + (d / TRAIN_SOUND.ref) ** 2);
-      const inside = clamp01(Math.min(hi + 2, map.cols + 2 - lo) / 6); // 0 while it's all still in a tunnel
-      const behind = dir * (tail - me.x); // how far its tail has gone past you (negative: not yet)
-      out.n = n; out.phase = 'pass';
-      out.rumble = Math.max(out.rumble, 0.4 + 0.6 * near);
-      out.roar = near * inside * (inHall ? 0.45 : 1); // through the walls
-      out.screech = near ** 1.5 * inside * (inHall ? 0.3 : 1);
-      out.wind = across * Math.max(0.35 * near * inside, behind > 0 ? Math.exp(-behind / 9) : 0);
-      out.pan = clamp(((nx + head) / 2 - me.x) / 10, -1, 1) * 0.9;
-    } else if (t >= end && t < end + TRAIN_SOUND.fade && out.phase !== 'pass') { // gone into the other tunnel
-      const k = 1 - (t - end) / TRAIN_SOUND.fade, s = atX(to);
-      const r = 0.6 * k * k * (0.4 + 0.6 * s.g);
-      if (r > out.rumble) Object.assign(out, { rumble: r, pan: s.pan, n, phase: 'going', wind: Math.max(out.wind, 0.5 * k * k * across) });
-    }
+// ── The trains ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// The loudest train you can hear, from the schedule (subway ride spec §8): a rumble from any train near, its roar and
+// the wind by speed, a squeal while a local brakes in, all falling off with distance and the far track quieter. muffle:
+// how much reaches you through the hall's walls. Each 0…1 before the mixer; pan −1…1.
+export const TRAIN_SOUND = { ref: 5, reach: 60 };
+export function trainNoise(trains, me, { inHall = false } = {}) {
+  const out = { rumble: 0, roar: 0, screech: 0, wind: 0, pan: 0, muffle: inHall ? 0.35 : 1, id: null };
+  for (const tr of trains) {
+    let lo = Math.min(tr.head, tr.tail), hi = Math.max(tr.head, tr.tail);
+    if (tr.clip) { lo = Math.max(lo, tr.clip[0]); hi = Math.min(hi, tr.clip[1]); if (hi <= lo) continue; }
+    const nx = clamp(me.x, lo, hi), d = Math.hypot(nx - me.x, tr.track.z - me.z, LEVEL.track + 1.5 - me.y);
+    if (d > TRAIN_SOUND.reach) continue;
+    const near = 1 / (1 + (d / TRAIN_SOUND.ref) ** 2), across = 1 / (1 + ((tr.track.z - me.z) / 7) ** 2), v = clamp01(tr.speed / 25);
+    const rumble = (0.35 + 0.65 * near) * (0.3 + 0.7 * v) * Math.max(0.2, 1 - d / TRAIN_SOUND.reach);
+    if (rumble <= out.rumble) continue;
+    const braking = tr.kind === 'local' && tr.accel * tr.dir < -0.3 && tr.speed > 1;
+    Object.assign(out, {
+      id: tr.id, rumble,
+      roar: near * v * (inHall ? 0.45 : 1),
+      screech: braking ? near ** 1.2 * clamp01(tr.speed / 12) * (inHall ? 0.3 : 1) : near ** 1.5 * v * 0.4,
+      wind: across * near * v,
+      pan: clamp((nx - me.x) / 12, -1, 1) * 0.9,
+    });
   }
-  if (inHall) { out.rumble *= 0.55; out.wind *= 0.4; } // through the walls
+  if (inHall) { out.rumble *= 0.55; out.wind *= 0.4; }
   return out;
 }
 
-// The clatter: the cars' axles (two bogies of two axles a car) knocking over rail joints every JOINT units. The axles'
-// distances back from the nose:
+// Riding (§8): the motor's whine follows the speed, the bridge's steel rings hollow, a hiss as the brakes bring it in.
+export function rideNoise(tr, x) {
+  const v = clamp01(tr.speed / TRAIN.cruise), braking = tr.accel * tr.dir < -0.3;
+  return { motor: v, pitch: 70 + 160 * v, bridge: sunAt(x), brake: braking && tr.speed < 6 ? clamp01(1 - tr.speed / 6) : 0 };
+}
+
+// The clatter: each car's 4 axles (2 bogies) knocking over rail joints every JOINT tiles. Axles back from the nose:
 export const JOINT = 12;
-export const AXLES = Array.from({ length: TRAIN.cars }, (_, i) => [0.7, 1.5, TRAIN.car - 1.5, TRAIN.car - 0.7].map((o) => o + i * (TRAIN.car + TRAIN.gap))).flat();
+export const AXLES = Array.from({ length: TRAIN.cars }, (_, c) => [1.4, 3.4, TRAIN.car - 3.4, TRAIN.car - 1.4].map((o) => o + c * PITCH)).flat();
 // The joints any axle crossed while the nose went from h0 to h1 (going dir): their x, one entry per knock.
 export function knocks(h0, h1, dir) {
   const out = [];
@@ -123,8 +110,20 @@ export function knocks(h0, h1, dir) {
 }
 
 // ── The PA ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// A stop's door events between t0 and t1 at stop: the doors opening, and the chime as they start to close.
+export function doorEvents(t0, t1, stop) {
+  const out = [];
+  if (!(t1 > t0)) return out;
+  for (const l of localsAt(t1)) {
+    const a = arrivalAtStop(l.k, stop);
+    if (a + DOORS.open[0] > t0 && a + DOORS.open[0] <= t1) out.push({ k: l.k, kind: 'open' });
+    if (a + DOORS.close[0] > t0 && a + DOORS.close[0] <= t1) out.push({ k: l.k, kind: 'chime' });
+  }
+  return out;
+}
+
 // Now and then a chime and a muffled announcement. Deterministic in time, as the trains are, and never over a train:
-// one that would overlap a train (from its rumble to a little after it's gone) waits until after it.
+// one that would overlap a busy moment waits until after it.
 export const ANNOUNCE = { first: 16, every: 52, jitter: 22, dur: 5.5 };
 function hash(n) {
   let h = Math.imul(n + 7919, 2246822519) >>> 0;
@@ -133,28 +132,19 @@ function hash(n) {
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
 }
-export function announcementAt(k, map) {
+// busy(t): whether the station's too loud with a train then (the caller says, from the schedule).
+export function announcementAt(k, busy) {
   let at = ANNOUNCE.first + ANNOUNCE.every * k + ANNOUNCE.jitter * (hash(k) - 0.5);
-  if (!map?.tracks?.length) return at;
-  const travel = (map.cols + LENGTH + 4) / TRAIN.speed;
-  for (let guard = 0; guard < 4; guard++) {
-    const m = Math.floor((at - TRAIN.first) / TRAIN.every);
-    let moved = false;
-    for (let n = Math.max(0, m - 1); n <= m + 1; n++) {
-      const busyFrom = startOf(n) - TRAIN_SOUND.build, busyTo = startOf(n) + travel + 2;
-      if (at < busyTo && at + ANNOUNCE.dur > busyFrom) { at = busyTo; moved = true; }
-    }
-    if (!moved) break;
-  }
+  for (let guard = 0; guard < 40 && busy && (busy(at) || busy(at + ANNOUNCE.dur)); guard++) at += 2;
   return at;
 }
 // The announcements that start in (t0, t1]: their numbers.
-export function announcementsBetween(t0, t1, map) {
+export function announcementsBetween(t0, t1, busy) {
   const out = [];
   if (!(t1 > t0)) return out;
   const k0 = Math.max(0, Math.floor((t0 - ANNOUNCE.first) / ANNOUNCE.every) - 2);
   for (let k = k0; k < k0 + 6; k++) {
-    const at = announcementAt(k, map);
+    const at = announcementAt(k, busy);
     if (at > t0 && at <= t1) out.push(k);
   }
   return out;

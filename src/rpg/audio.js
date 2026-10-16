@@ -13,7 +13,9 @@
 // Reduced motion: everything plays, but the alarm sounds once, briefly, instead of looping, and the train is softer.
 import { isMuted, setMuted, onMuted } from '../sound-pref.js';
 import { place as placeMusic } from '../music.js';
-import { footfall, surfaceAt, spatial, trainSound, knocks, announcementsBetween, stairsMusic, rotorClicks, tubeFault, tubeStutter, dripLanded } from './sound.js';
+import { trainsAt } from './schedule.js';
+import { STOPS } from './line.js';
+import { footfall, surfaceAt, spatial, trainNoise, rideNoise, doorEvents, knocks, announcementsBetween, stairsMusic, rotorClicks, tubeFault, tubeStutter, dripLanded } from './sound.js';
 import { alarmOn, ringState, isEmergency } from './gates.js';
 import { LEVEL } from './map.js';
 import { rng } from './life.js';
@@ -99,7 +101,7 @@ export function createStationAudio({ map, sources = {}, reducedMotion = false, p
   const filt = (type, f, q = 0.7) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
   const osc = (type, f) => { const o = ctx.createOscillator(); o.type = type; o.frequency.value = f; o.start(); return o; };
 
-  let city, hum, buzz, hiss, rumble, roar, wind, screech = null, roarTone, windTone;
+  let city, hum, buzz, hiss, rumble, roar, wind, screech = null, roarTone, windTone, motor, motorOsc, ring, brakeHiss;
   function startAmbience() {
     city = voice(amb, (g) => { const s = loopSrc(brown, 0.8), f = filt('lowpass', 240); s.connect(f).connect(g); return [s]; });
     hum = voice(amb, (g) => {
@@ -111,6 +113,10 @@ export function createStationAudio({ map, sources = {}, reducedMotion = false, p
     rumble = voice(trainBus, (g) => { const s = loopSrc(brown, 1), f = filt('lowpass', 130, 0.9); s.connect(f).connect(g); return [s]; });
     roar = voice(trainBus, (g) => { const s = loopSrc(noise, 0.9); roarTone = filt('bandpass', 700, 0.5); const f = filt('lowpass', 4500); s.connect(roarTone).connect(f).connect(g); return [s]; });
     wind = voice(trainBus, (g) => { const s = loopSrc(noise, 1.1); windTone = filt('bandpass', 600, 0.9); s.connect(windTone).connect(g); return [s]; });
+    // Riding (subway ride spec §8): the motor's whine, the bridge's steel ringing, the brakes' hiss.
+    motor = voice(trainBus, (g) => { motorOsc = osc('sawtooth', 70); const f = filt('lowpass', 500, 2); motorOsc.connect(f).connect(g); return [motorOsc]; });
+    ring = voice(trainBus, (g) => { const s = loopSrc(noise, 1); const f = filt('bandpass', 1200, 6); s.connect(f).connect(g); return [s]; });
+    brakeHiss = voice(trainBus, (g) => { const s = loopSrc(noise, 1); const f = filt('highpass', 3000); s.connect(f).connect(g); return [s]; });
     startRecorded();
   }
   // The recorded layers, once they've loaded: the screech, the train's wheels-and-roar bed, the city above.
@@ -280,16 +286,21 @@ export function createStationAudio({ map, sources = {}, reducedMotion = false, p
   }
 
   // ── Each frame ──
-  let lastT = null, lastPhase = null, lastFault = 1, lastHead = null, lastTrainN = -1, flapIn = 0;
+  let lastT = null, lastTT = null, lastPhase = null, lastFault = 1, lastHead = null, lastTrainN = -1, lastRide = null, flapIn = 0;
   const gateWas = new Map(), pigeonWas = new Map(), ratWas = new Map(), peopleWas = new Map();
   let noteWas = null;
-  function update({ t, dt, walker, pose, gates, train, pigeons = [], rats = [], people = [] }) {
-    me = { x: walker.x, y: walker.y, z: walker.z };
+  // trains: everything on the line; trainT: their clock; at: where you are in the world (your walker is in its own
+  // frame); ride: your local, or null; stop: the station you're in (or your train stands at), or null; surface: what's
+  // under your feet; train: MUSEUM's view of the nearest train, for its poster.
+  function update({ t, dt, walker, pose, gates, train, trains = [], trainT = t, at = walker, ride = null, stop = 0, surface, pigeons = [], rats = [], people = [] }) {
+    me = { x: at.x, y: at.y, z: at.z };
     // The museum's music down the exit stairs (placed even before the gesture: it's music.js's, already playing).
-    placeMusic(stairsMusic(walker, map.exits));
+    placeMusic(stairsMusic(me, map.exits)); // MUSEUM's exits are in line coordinates, as `me` is
     const jump = lastT == null || t < lastT || t - lastT > 0.5; // the clock was set (tests) or the tab slept
     const t0 = jump ? t : lastT;
     lastT = t;
+    const ttJump = lastTT == null || trainT < lastTT || trainT - lastTT > 0.5, tt0 = ttJump ? trainT : lastTT;
+    lastTT = trainT;
     if (!unlocked) { lastPhase = pose.phase; return; }
 
     // Ambience.
@@ -311,10 +322,17 @@ export function createStationAudio({ map, sources = {}, reducedMotion = false, p
       hiss.set(LAYER.hiss * s.gain * (0.6 + 0.4 * Math.sin(t * 0.6)), s.pan, 0.2);
     }
     if (!jump) (sources.puddles || []).forEach((p, i) => { if (dripLanded(i, t0, t)) play('drip', { x: p.x, y: p.y, z: p.z, gain: 0.5, rate: between(0.85, 1.2), ref: 2.5 }); });
-    if (!jump) for (const k of announcementsBetween(t0, t, map)) announce(k);
+    // The PA at MUSEUM, never over a train there.
+    const busy = (s) => trainsAt(s).some((tr) => Math.abs((tr.head + tr.tail) / 2 - STOPS[0].centre) < 70);
+    if (!ttJump && stop === 0 && !ride) for (const k of announcementsBetween(tt0, trainT, busy)) announce(k);
+    // Doors where you are: the two-tone chime as they start to close, a slide as they open.
+    if (!ttJump && stop != null) for (const ev of doorEvents(tt0, trainT, stop)) {
+      if (ev.kind === 'chime') { tone(698, { dur: 0.32, gain: 0.07, decay: true }); tone(554, { at: 0.34, dur: 0.5, gain: 0.07, decay: true }); }
+      else shot(noise, { gain: 0.05, rate: 0.6 });
+    }
 
-    // The train.
-    const ts = trainSound(t, map, me);
+    // The trains you hear from where you are (your own is the ride's sound, below).
+    const ts = trainNoise(ride ? trains.filter((tr) => tr.id !== ride.id) : trains, me, { inHall: stop === 0 && me.y > (LEVEL.hall + LEVEL.platform) / 2 });
     trainTone.frequency.setTargetAtTime(700 + 15000 * ts.muffle ** 2, ctx.currentTime, 0.2);
     rumble.set(LAYER.rumble * ts.rumble, ts.pan, 0.12);
     roar.set(LAYER.roar * ts.roar * (bed ? 0.35 : 1), ts.pan, 0.05);
@@ -323,24 +341,33 @@ export function createStationAudio({ map, sources = {}, reducedMotion = false, p
     wind.set(LAYER.wind * ts.wind, ts.pan * 0.7, 0.1);
     windTone.frequency.setTargetAtTime(450 + 900 * ts.wind, ctx.currentTime, 0.1);
     screech?.set(LAYER.screech * ts.screech * (reducedMotion ? 0.5 : 0.6 + 0.4 * Math.sin(t * 2.3) ** 2), ts.pan, 0.06);
-    if (train && train.phase === 'pass') {
-      if (train.n === lastTrainN && lastHead != null && !jump) {
-        for (const x of knocks(lastHead, train.head, train.dir)) {
-          if (x < -1 || x > map.cols + 1) continue;
-          shot(click, { x, y: train.track.y, z: train.track.z, gain: 0.5, rate: between(0.85, 1.15), bus: trainBus, ref: 5 });
-        }
+    // Riding: the motor follows the speed, the bridge rings, the brakes hiss; your own wheels clatter under you.
+    const rn = ride && rideNoise(ride, me.x);
+    motor.set(rn ? 0.22 * rn.motor : 0, 0, 0.1);
+    if (rn) motorOsc.frequency.setTargetAtTime(rn.pitch, ctx.currentTime, 0.1);
+    ring.set(rn ? 0.12 * rn.bridge * rn.motor : 0, 0, 0.3);
+    brakeHiss.set(rn ? 0.18 * rn.brake : 0, 0, 0.1);
+    if (ride && lastRide && lastRide.id === ride.id && !ttJump) for (const x of knocks(lastRide.head, ride.head, ride.dir)) shot(click, { gain: 0.35, rate: between(0.85, 1.15), bus: trainBus });
+    lastRide = ride && { id: ride.id, head: ride.head };
+    // The loudest other train's clatter, where it is.
+    const loud = ts.id && trains.find((tr) => tr.id === ts.id);
+    if (loud && loud.speed > 0.5) {
+      if (loud.id === lastTrainN && lastHead != null && !ttJump) {
+        for (const x of knocks(lastHead, loud.head, loud.dir)) shot(click, { x, y: loud.track.y ?? LEVEL.track, z: loud.track.z, gain: 0.5, rate: between(0.85, 1.15), bus: trainBus, ref: 5 });
       }
-      lastHead = train.head; lastTrainN = train.n;
+      lastHead = loud.head; lastTrainN = loud.id;
+    } else lastHead = null;
+    if (train && train.phase === 'pass') {
       // The torn poster flaps in a north-track train's wind (as scene.js shows it).
       const pp = sources.poster;
       const gust = pp && train.track === map.tracks[0] ? Math.max(0, 1 - Math.abs(train.head - pp.x) / 14) : 0;
       flapIn -= dt;
-      if (gust > GUSTY && flapIn <= 0) { play('cloth', { x: pp.x, y: pp.y, z: pp.z, gain: 0.9 * gust, rate: between(0.9, 1.3), ref: 5 }); flapIn = between(0.07, 0.22); }
-    } else lastHead = null;
+      if (gust > GUSTY && flapIn <= 0) { play('cloth', { x: pp.x, y: pp.y, z: pp.z, gain: 0.9 * gust * Math.min(1, (train.speed ?? 20) / 20), rate: between(0.9, 1.3), ref: 5 }); flapIn = between(0.07, 0.22); }
+    }
 
     // You: a step each time a foot comes down, on what you're walking on.
     if (footfall(lastPhase, pose.phase) && pose.gait > 0.15) {
-      const sfc = surfaceAt(map, walker.x, walker.z);
+      const sfc = surface !== undefined ? surface : surfaceAt(map, walker.x, walker.z);
       if (sfc) play(SURFACE[sfc], { gain: 0.3 * (0.7 + 0.3 * Math.min(1, pose.gait)), rate: between(0.94, 1.06) * (sfc === 'tile' ? 1.08 : 1) });
     }
     lastPhase = pose.phase;
@@ -408,7 +435,7 @@ export function createStationAudio({ map, sources = {}, reducedMotion = false, p
     ticket,
     unlock,
     get context() { return ctx; },
-    state: () => ({ state: ctx.state, unlocked, muted: muted(), loaded: Object.keys(bufs).length }),
+    state: () => ({ state: ctx.state, unlocked, muted: muted(), loaded: Object.keys(bufs).length, motor: motor ? motor.g.gain.value : 0, bridge: ring ? ring.g.gain.value : 0 }),
     stop() {
       alive = false;
       for (const c of cleanups.splice(0)) c();

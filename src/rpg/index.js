@@ -16,6 +16,7 @@ import { createGates, gatedMap, trackGates, bumped, blocked, easeArms, turnRotor
 import { createTicketMachine } from './ticket.js';
 import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut, ridersFor } from './life.js';
 import { createStationAudio } from './audio.js';
+import { surfaceAt } from './sound.js';
 import { createOthers, createTalkBar } from './others.js';
 import { createTrains } from './trainmesh.js';
 import { createTunnel } from './tunnel.js';
@@ -359,7 +360,12 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       for (let j = fi; j < riderFigs.length; j++) riderFigs[j].figure.setVisible(false);
       ridersShown = fi;
       trainView.update(trains, { me: { x: wx, z: wz }, mine: mine ? mine.id : null, time: t, dt, sun: sunK > 0 ? 1 : 0 });
-      audio.update({ t, dt, walker, pose, gates, train: museumPass, pigeons: world.pigeons, rats: world.rats, people });
+      audio.update({
+        t, dt, walker, pose, gates, train: museumPass, trains, trainT: tt, at: feet, ride: mine,
+        stop: f.kind === 'station' ? f.stop : mine?.at ?? null,
+        surface: f.kind === 'station' ? surfaceAt(maps[f.stop], walker.x, walker.z) : 'tile', // a car's floor rings like the hall's tile
+        pigeons: world.pigeons, rats: world.rats, people,
+      });
       if (others) {
         others.update(mp.list(now), now, dt, t, camera, feet);
         mp.tick({ x: feet.x, z: feet.z, y: feet.y, a: pose.yaw });

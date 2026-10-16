@@ -255,6 +255,12 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal((await st(() => window.__station.aboard()))?.k, 0, 'aboard L0');
     await st(() => window.__station.setTime(20 + 18 + 12)); // riding
     await nFrames(page, 5);
+    // Stand where the [E] sit hint shows (a commuter may have the seat nearest the door).
+    for (const x of [5, 10, 20, 26, 36, 41, 52, 57]) {
+      await page.evaluate((x) => { window.__station.setTime(20 + 18 + 12); window.__station.board(0, x, 0.6); }, x);
+      await nFrames(page, 2);
+      if (await st(() => getComputedStyle(document.querySelector('.station-hint')).display !== 'none')) break;
+    }
     await page.keyboard.press('e');
     await nFrames(page, 5);
     assert.notEqual((await st(() => window.__station.aboard())).seat, null, 'E sat down');

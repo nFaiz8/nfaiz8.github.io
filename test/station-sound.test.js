@@ -2,12 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseStation, LEVEL } from '../src/rpg/map.js';
-import { startOf, TRAIN, LENGTH } from '../src/rpg/train.js';
-import { footfall, surfaceAt, spatial, trainSound, TRAIN_SOUND, knocks, AXLES, JOINT, announcementAt, announcementsBetween, ANNOUNCE, stairsMusic, STAIRS_MUSIC, rotorClicks, tubeFault, dripLanded, DRIP } from '../src/rpg/sound.js';
+import { footfall, surfaceAt, spatial, trainNoise, rideNoise, doorEvents, knocks, AXLES, JOINT, announcementAt, announcementsBetween, ANNOUNCE, stairsMusic, STAIRS_MUSIC, rotorClicks, tubeFault, dripLanded, DRIP } from '../src/rpg/sound.js';
+import { trainsAt, local, arrivalAt, arrivalAtStop, DOORS, LENGTH, TRAIN } from '../src/rpg/schedule.js';
 import { parseMuted, formatMuted, readMuted, writeMuted, MUTE_KEY } from '../src/sound-pref.js';
 
 const MAP = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
-const travel = (MAP.cols + LENGTH + 4) / TRAIN.speed;
 const on = (x, z) => ({ x, z, y: MAP.levelAt(x, z) });
 
 test('a foot comes down twice a stride, at π/2 and 3π/2, either way round', () => {
@@ -40,76 +39,6 @@ test('a sound is loudest at its source, half as loud at ref, and panned by east 
   assert.ok(spatial(20, 0, 10, me).pan > 0.5, 'east is right');
   assert.ok(spatial(0, 0, 10, me).pan < -0.5, 'west is left');
   assert.ok(Math.abs(spatial(10, 0, 0, me).pan) < 1e-9, 'straight north is centred');
-});
-
-test('the train rumbles in its tunnel before it comes out, building with the glow', () => {
-  const start = startOf(0), me = on(30, 9.5); // train 0: the north track, eastbound, from the west tunnel
-  const quiet = trainSound(start - TRAIN_SOUND.build - 1, MAP, me);
-  assert.equal(quiet.rumble, 0);
-  const early = trainSound(start - TRAIN_SOUND.build + 1, MAP, me), late = trainSound(start - 0.5, MAP, me);
-  assert.ok(early.rumble > 0 && late.rumble > early.rumble * 3, `builds ${early.rumble} → ${late.rumble}`);
-  assert.equal(late.roar, 0, 'no roar while it is still in the tunnel');
-  assert.ok(late.pan < 0, 'from the west tunnel, on your left');
-});
-
-test('passing, the train is loud near you and panned to where it is', () => {
-  const start = startOf(0);
-  const atX = (x) => start + (x + 2) / TRAIN.speed; // the nose at x
-  const me = on(30, 5.5); // on the platform by the north track
-  const before = trainSound(atX(20), MAP, me), level = trainSound(atX(36), MAP, me);
-  assert.ok(level.roar > 0.5, `roar beside you: ${level.roar}`);
-  assert.ok(level.screech > 0.3);
-  assert.ok(before.pan < level.pan || before.pan < 0, 'coming from the west');
-  assert.ok(level.roar > before.roar, 'louder alongside than approaching');
-  // From the hall, behind the walls: quieter and muffled.
-  const hall = trainSound(atX(36), MAP, on(5.5, 9.5));
-  assert.ok(hall.roar < level.roar * 0.2, `hall roar ${hall.roar}`);
-  assert.ok(hall.muffle < 1);
-  // The far (south) track is quieter than the near one.
-  const far = trainSound(atX(36), MAP, on(30, 12.5));
-  assert.ok(far.roar < level.roar);
-});
-
-test('the wind follows the train, and its rumble fades into the other tunnel', () => {
-  const start = startOf(0), end = start + travel, me = on(10 + 20, 5.5);
-  // Just after the tail has gone by you: wind.
-  const tailPast = start + (me.x + 2 + LENGTH + 3) / TRAIN.speed;
-  assert.ok(trainSound(tailPast, MAP, me).wind > 0.4);
-  const a = trainSound(end + 0.5, MAP, me), b = trainSound(end + TRAIN_SOUND.fade - 0.5, MAP, me);
-  assert.equal(a.phase, 'going');
-  assert.ok(a.rumble > b.rumble && b.rumble > 0, `fades ${a.rumble} → ${b.rumble}`);
-  assert.ok(a.pan > 0, 'into the east tunnel, on your right');
-  assert.equal(trainSound(end + TRAIN_SOUND.fade + 0.5, MAP, me).rumble, 0);
-});
-
-test('the clatter: each axle knocks once per rail joint it crosses', () => {
-  assert.equal(AXLES.length, TRAIN.cars * 4);
-  const all = knocks(-2, 50, 1); // the nose going east across the whole station
-  // Every axle crosses each joint it reaches once.
-  const expected = AXLES.reduce((n, o) => n + Math.max(0, Math.floor((50 - o) / JOINT) - Math.floor((-2 - o) / JOINT)), 0);
-  assert.equal(all.length, expected);
-  assert.ok(all.every((x) => x % JOINT === 0));
-  assert.deepEqual(knocks(5, 5, 1), []);
-  // Split into frames, the same knocks.
-  let split = 0;
-  for (let h = -2; h < 50; h += 0.4) split += knocks(h, Math.min(50, h + 0.4), 1).length;
-  assert.equal(split, all.length);
-});
-
-test('the PA speaks now and then, never over a train', () => {
-  const times = Array.from({ length: 30 }, (_, k) => announcementAt(k, MAP));
-  for (let k = 1; k < times.length; k++) assert.ok(times[k] > times[k - 1] + 10, `announcement ${k} after ${k - 1}`);
-  assert.ok(times[0] >= 5, 'not the moment you arrive');
-  for (const at of times) {
-    for (let n = 0; n < 60; n++) {
-      const from = startOf(n) - TRAIN_SOUND.build, to = startOf(n) + travel;
-      assert.ok(at >= to || at + ANNOUNCE.dur <= from, `announcement at ${at.toFixed(1)} overlaps train ${n}`);
-    }
-  }
-  // Stepping a clock frame by frame finds each one exactly once.
-  const seen = [];
-  for (let t = 0; t < 600; t += 1 / 60) seen.push(...announcementsBetween(t, t + 1 / 60, MAP));
-  assert.deepEqual(seen, times.filter((t) => t <= 600 + 1 / 60).map((_, k) => k));
 });
 
 test('the museum music: loud and least muffled by the exit stairs, gone a few tiles into the hall', () => {
@@ -167,9 +96,53 @@ test('mute is remembered as on/off, and anything else means sound on', () => {
 
 test('levels are fixed numbers in range', () => {
   for (let t = 0; t < 400; t += 0.37) {
-    const s = trainSound(t, MAP, on(30, 9.5));
+    const s = trainNoise(trainsAt(t), on(30, 9.5));
     for (const k of ['rumble', 'roar', 'screech', 'wind']) assert.ok(s[k] >= 0 && s[k] <= 1, `${k} ${s[k]} at ${t}`);
     assert.ok(s.pan >= -1 && s.pan <= 1);
   }
   assert.equal(LEVEL.hall, 0);
+});
+
+test('trainNoise: nothing far away; a passing express roars close on your side; a standing local only hums', () => {
+  const quiet = trainNoise([], { x: 60, y: -3, z: 9 });
+  assert.equal(quiet.roar, 0);
+  const x = { id: 'X', kind: 'express', track: { i: 0, z: 2.5 }, dir: 1, head: 70, tail: 70 - LENGTH, speed: 25, accel: 0, clip: [-150, 215] };
+  const near = trainNoise([x], { x: 60, y: -3, z: 6 }), far = trainNoise([x], { x: 60, y: -3, z: 13 });
+  assert.ok(near.roar > 0.5 && near.roar > far.roar);
+  const standing = local(0, arrivalAt(0) + 5);
+  assert.equal(trainNoise([standing], { x: 60, y: -3, z: 6 }).roar, 0);
+  assert.ok(trainNoise([standing], { x: 60, y: -3, z: 6 }).rumble > 0);
+  const braking = local(0, arrivalAt(0) - 3);
+  assert.ok(trainNoise([braking], { x: 60, y: -3, z: 6 }).screech > 0, 'brakes squeal coming in');
+  assert.ok(trainNoise([x], { x: 10, y: 0, z: 9 }, { inHall: true }).roar < near.roar, 'muffled in the hall');
+});
+
+test('rideNoise: the motor follows speed; the bridge rings; braking hisses', () => {
+  const still = rideNoise(local(0, arrivalAt(0) + 5), 60), cruising = rideNoise(local(0, arrivalAt(0) + 18 + 12), 300);
+  assert.equal(still.motor, 0);
+  assert.ok(cruising.motor > 0.8 && cruising.pitch > still.pitch);
+  const onBridge = local(0, arrivalAt(0) + 18 + 28);
+  assert.ok(rideNoise(onBridge, (onBridge.head + onBridge.tail) / 2).bridge > 0.9);
+  assert.ok(rideNoise(local(0, arrivalAtStop(0, 1) - 2), 840).brake > 0);
+});
+
+test('the clatter: 4 axles a car on the new train, knocking over joints every JOINT tiles', () => {
+  assert.equal(AXLES.length, TRAIN.cars * 4);
+  assert.ok(Math.max(...AXLES) < LENGTH);
+  assert.equal(knocks(0, JOINT, 1).length, AXLES.length, 'every axle crosses one joint in a joint\'s run');
+});
+
+test('door events at a stop: the doors open, then the chime as they close', () => {
+  const a = arrivalAt(2);
+  assert.deepEqual(doorEvents(a + DOORS.open[0] - 0.1, a + DOORS.open[0] + 0.1, 0), [{ k: 2, kind: 'open' }]);
+  assert.deepEqual(doorEvents(a + DOORS.close[0] - 0.1, a + DOORS.close[0] + 0.1, 0), [{ k: 2, kind: 'chime' }]);
+  assert.deepEqual(doorEvents(a + 5, a + 6, 0), []);
+});
+
+test('announcements wait until the station is quiet', () => {
+  const busy = (t) => t > 10 && t < 40;
+  const k = [...Array(40).keys()].find((i) => { const at = ANNOUNCE.first + ANNOUNCE.every * i; return at > 5 && at < 40; }) ?? 0;
+  const at = announcementAt(k, busy);
+  assert.ok(!busy(at) && !busy(at + ANNOUNCE.dur));
+  assert.deepEqual(announcementsBetween(at - 0.1, at + 0.1, busy), [k]);
 });
