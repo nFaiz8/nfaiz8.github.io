@@ -4,6 +4,12 @@ import { MAPS } from '../src/level.js';
 // Checks shared by the multiplayer Worker and its tests. Pure: no Workers or Node APIs.
 export const LIMITS = { people: 30, instances: 10, perIp: 4, bytes: 200, name: 12, chat: 80, floodDrops: 50, floodWindowMs: 10000, muteS: 600 };
 export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
+// Where a connection can be (station spec, Multiplayer): the gallery (the default, and all an old page knows)
+// or the station below it. Each hears only its own area's people.
+export const AREAS = ['gallery', 'station'];
+// The station's map (src/rpg/station.txt) in tiles, and how far its floors go up and down (the hall at 0, the
+// tracks at -4.2): a station position outside it is dropped. test/rules.test.js checks these against the map.
+export const STATION = { cols: 48, rows: 19, yMin: -5, yMax: 1 };
 
 export function allowedOrigin(origin) {
   return origin === 'https://faiz.pics' || /^http:\/\/localhost(:\d{1,5})?$/.test(origin || '');
@@ -116,6 +122,15 @@ const within = (n, max) => num(n) && Math.abs(n) <= max;
 // (the room's own level is the Worker's to check: a body in its walls is dropped).
 const COLS = Math.max(...Object.values(MAPS).map((m) => m.cols)), ROWS = Math.max(...Object.values(MAPS).map((m) => m.rows));
 const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= COLS + 3 && y >= -1 && y <= ROWS + 1;
+// A station position: x and z on the map, y (the floor under you, on stairs) and yaw a, each to 0.01. y and a are
+// optional; null if anything is off.
+function stationPos(m) {
+  if (!num(m.x) || !num(m.z) || m.x < 0 || m.x > STATION.cols || m.z < 0 || m.z > STATION.rows) return null;
+  const p = { x: round(m.x, 100), z: round(m.z, 100) };
+  if (m.y !== undefined) { if (!num(m.y) || m.y < STATION.yMin || m.y > STATION.yMax) return null; p.y = round(m.y, 100); }
+  if (m.a !== undefined) { if (!within(m.a, Math.PI + 1e-9)) return null; p.a = round(m.a, 100); }
+  return p;
+}
 const stamp = (n) => Number.isInteger(n) && n >= 0 && n <= 1e9;
 const round = (n, k) => Math.round(n * k) / k;
 
@@ -127,9 +142,26 @@ export function parseMessage(text) {
   switch (m.t) {
     case 'hi': {
       if (m.name !== undefined && typeof m.name !== 'string') return null;
-      if (m.x === undefined && m.y === undefined) return { t: 'hi', name: m.name || '' };
-      return pos(m.x) && pos(m.y) ? { t: 'hi', name: m.name || '', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
+      if (m.area !== undefined && !AREAS.includes(m.area)) return null;
+      const hi = { t: 'hi', name: m.name || '' };
+      if (m.area === 'station') {
+        hi.area = 'station';
+        if (m.x === undefined && m.z === undefined) return hi;
+        const p = stationPos(m);
+        return p ? { ...hi, ...p } : null;
+      }
+      if (m.x === undefined && m.y === undefined) return hi;
+      return pos(m.x) && pos(m.y) ? { ...hi, x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
     }
+    // Moving between areas, with where you are in the new one (optional): gallery cells, or a station position.
+    case 'z': {
+      if (!AREAS.includes(m.area)) return null;
+      if (m.x === undefined && m.y === undefined && m.z === undefined) return { t: 'z', area: m.area };
+      if (m.area === 'station') { const p = stationPos(m); return p ? { t: 'z', area: m.area, ...p } : null; }
+      return pos(m.x) && pos(m.y) ? { t: 'z', area: m.area, x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
+    }
+    // A position in the station (the gallery's p stays whole cells).
+    case 'q': { const p = stationPos(m); return p ? { t: 'q', ...p } : null; }
     case 'n': return typeof m.name === 'string' ? { t: 'n', name: m.name } : null;
     case 'c': return typeof m.text === 'string' && m.text.length >= 1 && m.text.length <= LIMITS.chat ? { t: 'c', text: m.text } : null;
     case 'p': return pos(m.x) && pos(m.y) ? { t: 'p', x: Math.round(m.x * 10) / 10, y: Math.round(m.y * 10) / 10 } : null;
@@ -160,7 +192,8 @@ export function parseMessage(text) {
 }
 
 // Token buckets: capacity and refill per second. 'ae' covers both ae and al.
-const RATES = { p: [8, 8], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5], a: [24, 20], pk: [2, 2], m: [2, 3.4], ae: [4, 1], rs: [2, 1], am: [3, 0.1] };
+// z: three moves in hand, then one a second (the page sends at most one a second).
+const RATES = { p: [8, 8], q: [8, 8], z: [3, 1], e: [1, 1], r: [1, 0.5], n: [1, 0.2], c: [1, 0.5], a: [24, 20], pk: [2, 2], m: [2, 3.4], ae: [4, 1], rs: [2, 1], am: [3, 0.1] };
 export function newBuckets(now) {
   return Object.fromEntries(Object.entries(RATES).map(([k, [cap]]) => [k, { tokens: cap, at: now }]));
 }

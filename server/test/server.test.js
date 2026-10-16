@@ -631,3 +631,165 @@ test('an honest full jump plus a double jump is passed on exactly as sent, never
   }
   a.close(); b.close();
 });
+
+// Areas (station spec, Multiplayer): one connection, in the gallery or the station; each hears only its own.
+const sleepFor = (ms) => new Promise((s) => setTimeout(s, ms));
+async function joined(r, name, hi = {}) {
+  const c = client({ room: r }); await c.opened;
+  c.send2({ t: 'hi', name, ...hi });
+  c.w = await c.next('welcome');
+  c.id = c.w.id;
+  return c;
+}
+
+test('an old page that never sends z is in the gallery, and welcome says so, with the server clock and the station count', async () => {
+  const r = room();
+  const a = await joined(r, 'Ann');
+  assert.equal(a.w.area, 'gallery');
+  assert.equal(a.w.station, 0);
+  assert.ok(Math.abs(a.w.now - Date.now()) < 5000, 'now is the server clock');
+  const b = await joined(r, 'Bo');
+  assert.deepEqual(b.w.peers.map((p) => p.name), ['Ann']);
+  b.send2({ t: 'p', x: 3, y: 4 });
+  assert.deepEqual(await a.next('p'), { t: 'p', id: b.id, x: 3, y: 4 });
+  a.close(); b.close();
+});
+
+test('messages are filtered by area: the gallery and the station hear only their own', async () => {
+  const r = room();
+  const g = await joined(r, 'Gal');
+  const s1 = await joined(r, 'Sta', { area: 'station', x: 10.123, z: 9.5, y: -3, a: 1.5 });
+  const s2 = await joined(r, 'Tia', { area: 'station' });
+  assert.equal(s1.w.area, 'station');
+  assert.deepEqual(s1.w.peers, [], 'nobody in the station yet');
+  assert.deepEqual(s2.w.peers, [{ id: s1.id, name: 'Sta', x: 10.12, z: 9.5, y: -3, a: 1.5 }]);
+  assert.equal((await s1.next('join')).name, 'Tia');
+  s1.send2({ t: 'q', x: 11.004, z: 9.25, y: -3, a: -0.5 });
+  assert.deepEqual(await s2.next('q'), { t: 'q', id: s1.id, x: 11, z: 9.25, y: -3, a: -0.5 });
+  s1.send2({ t: 'c', text: 'down here' });
+  assert.deepEqual(await s2.next('c'), { t: 'c', id: s1.id, text: 'down here' });
+  s1.send2({ t: 'e', e: 'wave' });
+  assert.deepEqual(await s2.next('e'), { t: 'e', id: s1.id, e: 'wave' });
+  s1.send2({ t: 'n', name: 'Stan' });
+  assert.deepEqual(await s2.next('n'), { t: 'n', id: s1.id, name: 'Stan' });
+  g.send2({ t: 'c', text: 'up here' });
+  g.send2({ t: 'p', x: 5, y: 5 });
+  await sleepFor(400);
+  const kinds = (c) => c.inbox.filter((m) => m.t !== 'zc').map((m) => m.t);
+  assert.deepEqual(kinds(g), [], 'the gallery hears nothing from the station');
+  assert.deepEqual(kinds(s1), [], 'the station hears nothing from the gallery');
+  assert.deepEqual(kinds(s2), []);
+  // A position for the area you're not in goes nowhere.
+  s1.send2({ t: 'p', x: 1, y: 1 });
+  g.send2({ t: 'q', x: 1, z: 1 });
+  await sleepFor(300);
+  assert.deepEqual([kinds(g), kinds(s2)], [[], []]);
+  g.close(); s1.close(); s2.close();
+});
+
+test('moving area tells the old area you left and the new one you joined, where you are; you get who is there', async () => {
+  const r = room();
+  const g = await joined(r, 'Gal', { x: 20, y: 20 });
+  const s = await joined(r, 'Sta', { area: 'station', x: 5, z: 9 });
+  const m = await joined(r, 'Mo', { x: 30, y: 12 });
+  await g.next('join');
+  g.inbox.length = 0; s.inbox.length = 0;
+  m.send2({ t: 'z', area: 'station', x: 2.5, z: 9.5, y: 0, a: 3.14 });
+  const zw = await m.next('zw');
+  assert.equal(zw.area, 'station');
+  assert.deepEqual(zw.peers, [{ id: s.id, name: 'Sta', x: 5, z: 9 }]);
+  assert.deepEqual(await g.next('leave'), { t: 'leave', id: m.id });
+  assert.deepEqual(await s.next('join'), { t: 'join', id: m.id, name: 'Mo', x: 2.5, z: 9.5, y: 0, a: 3.14 });
+  await sleepFor(200);
+  assert.equal(s.inbox.filter((x) => x.t === 'leave').length, 0, 'the station hears no leave');
+  assert.equal(g.inbox.filter((x) => x.t === 'join').length, 0, 'the gallery hears no join');
+  // And back up: the station hears the leave, the gallery the join at the stairs.
+  await sleepFor(1000);
+  m.send2({ t: 'z', area: 'gallery', x: 12.5, y: 30.5 });
+  const up = await m.next('zw');
+  assert.deepEqual(up.peers, [{ id: g.id, name: 'Gal', x: 20, y: 20 }]);
+  assert.deepEqual(await s.next('leave'), { t: 'leave', id: m.id });
+  assert.deepEqual(await g.next('join'), { t: 'join', id: m.id, name: 'Mo', x: 12.5, y: 30.5 });
+  // Closing from the station is a leave there only.
+  await sleepFor(100);
+  m.inbox.length = 0;
+  s.close();
+  assert.deepEqual(await m.next('zc'), { t: 'zc', station: 0 });
+  await sleepFor(200);
+  assert.equal(m.inbox.filter((x) => x.t === 'leave').length, 0, 'the gallery hears no leave from the station');
+  g.close(); m.close();
+});
+
+test('z is validated: only known areas; and rate-limited by its own bucket', async () => {
+  const r = room();
+  const a = await joined(r, 'Ann');
+  for (const bad of [{ t: 'z' }, { t: 'z', area: 'roof' }, { t: 'z', area: 'arena' }, { t: 'z', area: 'station', x: 'a', z: 1 }, { t: 'z', area: 'gallery', x: -5, y: 1 }]) a.send2(bad);
+  await sleepFor(300);
+  assert.equal(a.inbox.filter((m) => m.t === 'zw').length, 0, 'none of them moved');
+  for (let i = 0; i < 6; i++) a.send2({ t: 'z', area: i % 2 ? 'gallery' : 'station' });
+  await sleepFor(400);
+  assert.equal(a.inbox.filter((m) => m.t === 'zw').length, 3, 'three in hand');
+  await sleepFor(1100);
+  a.send2({ t: 'z', area: 'station' });
+  assert.equal((await a.next('zw')).area, 'station', 'one more a second later');
+  // Positions in the station's bucket, not the move's.
+  a.close();
+});
+
+test('station positions out of the map, NaN or with a bad yaw are dropped', async () => {
+  const r = room();
+  const s1 = await joined(r, 'One', { area: 'station' });
+  const s2 = await joined(r, 'Two', { area: 'station' });
+  await s1.next('join');
+  const bad = ['{"t":"q","x":NaN,"z":1}', { t: 'q', x: 1 }, { t: 'q', x: -0.5, z: 5 }, { t: 'q', x: 49, z: 5 }, { t: 'q', x: 5, z: 20 },
+    { t: 'q', x: 5, z: 5, y: -9 }, { t: 'q', x: 5, z: 5, y: 'up' }, { t: 'q', x: 5, z: 5, a: 7 }, { t: 'q', x: '5', z: 5 }];
+  for (const m of bad) s2.send2(m);
+  await sleepFor(300);
+  assert.equal(s1.inbox.filter((m) => m.t === 'q').length, 0);
+  s2.send2({ t: 'q', x: 48, z: 19, y: -4.2 });
+  assert.deepEqual(await s1.next('q'), { t: 'q', id: s2.id, x: 48, z: 19, y: -4.2 });
+  // A hi into the station from outside it doesn't get in.
+  const c = client({ room: r }); await c.opened;
+  c.send2({ t: 'hi', name: 'X', area: 'station', x: 100, z: 1 });
+  await sleepFor(300);
+  assert.equal(c.inbox.filter((m) => m.t === 'welcome').length, 0);
+  s1.close(); s2.close(); c.close();
+});
+
+test('the station count: in welcome, and zc to everyone when it changes', async () => {
+  const r = room();
+  const g = await joined(r, 'Gal');
+  const s = await joined(r, 'Sta', { area: 'station' });
+  assert.equal(s.w.station, 1);
+  assert.deepEqual(await g.next('zc'), { t: 'zc', station: 1 });
+  const m = await joined(r, 'Mo');
+  assert.equal(m.w.station, 1);
+  m.send2({ t: 'z', area: 'station' });
+  assert.deepEqual(await g.next('zc'), { t: 'zc', station: 2 });
+  assert.deepEqual(await s.next('zc'), { t: 'zc', station: 1 }, 'its own arrival');
+  assert.deepEqual(await s.next('zc'), { t: 'zc', station: 2 });
+  m.close();
+  assert.deepEqual(await g.next('zc'), { t: 'zc', station: 1 });
+  s.send2({ t: 'z', area: 'gallery' });
+  assert.deepEqual(await g.next('zc'), { t: 'zc', station: 0 });
+  // The same area again: its list again, no leave, join or count.
+  g.inbox.length = 0;
+  s.send2({ t: 'z', area: 'gallery' });
+  assert.deepEqual((await s.next('zw')).peers.map((p) => p.name), ['Gal']);
+  await sleepFor(300);
+  assert.deepEqual(g.inbox, []);
+  g.close(); s.close();
+});
+
+test('arena messages from the station are dropped', async () => {
+  const r = room();
+  const g = await joined(r, 'Gal');
+  const s = await joined(r, 'Sta', { area: 'station' });
+  g.send2({ t: 'ae' });
+  await g.next('aw');
+  s.send2({ t: 'ae' });
+  await sleepFor(400);
+  assert.equal(s.inbox.filter((m) => m.t === 'aw').length, 0);
+  assert.equal(g.inbox.filter((m) => m.t === 'aj').length, 0);
+  g.close(); s.close();
+});
