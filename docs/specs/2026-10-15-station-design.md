@@ -401,9 +401,11 @@ Added on 2026-10-16 ("start on sound"; then "smooth jazz in the museum and u can
   localStorage (`faiz.sound`, `on`/`off`, every access wrapped; `sound-pref.js`) and shared with the museum's music.
 - **Reduced motion:** everything plays, but the alarm sounds once briefly instead of for its 3 s, and the train is
   softer.
-- **The museum's music** (`src/music.js`): a quiet CC0 smooth-jazz loop in the gallery from the visitor's first key
-  press or tap. That gesture is when `music.js` is imported and the track loads, so the gallery's first load carries
-  only `sound-pref.js` and a few lines in `main.js`. A `[♪] sound` HUD button and `V` (M is the map) mute it, the same
+- **The museum's music** (`src/music.js`): quiet lobby jazz in the gallery (Kevin MacLeod's "Lobby Time": vibraphone,
+  piano, bass and drums; CC BY 4.0, credited under the map and in the sound button's tooltip; it replaced a 46 s CC0
+  smooth-jazz loop on 2026-10-16, "this jazz sucks"), its intro once and then 64 bars looped, from the visitor's
+  first key press or tap. That gesture is when `music.js` is imported and the track loads, so the gallery's first
+  load carries only `sound-pref.js` and a few lines in `main.js`. A `[♪] sound` HUD button and `V` (M is the map) mute it, the same
   remembered setting. Paused while the tab is hidden. There's one context and one looping source for the visit: going
   down, the station doesn't start its own copy, it places this one (`stairsMusic`): heard drifting down the exit
   stairs, muffled (low-passed), loud at their foot and gone 7 tiles into the hall; coming back up it eases back to full,
@@ -411,7 +413,8 @@ Added on 2026-10-16 ("start on sound"; then "smooth jazz in the museum and u can
 - **Assets** (`src/rpg/assets/sound/`, `CREDITS.md`): synthesized where that sounds good; small re-encoded clips of
   CC0 recordings (Kenney, Freesound) and of Adobe Audition's free sound effects (royalty-free in a project, not as
   standalone files) for the footsteps, the rotor and gate, the pigeons, rats, drips, screech, the train's roar and the
-  city. About 160 KB for the station, loaded after it starts (a clip that fails is skipped); the music is 460 KB.
+  city. About 160 KB for the station, loaded after it starts (a clip that fails is skipped); the music is 1.8 MB
+  (96 kbps, 2:27).
 - **Tests:** `sound.js` and `sound-pref.js` are unit tested; the e2e checks that nothing is made before a gesture,
   that the context runs after a key press, that M and V mute and persist across a reload, that leaving closes the
   station's context, and that fifteen trips leave only the music's context and one music source.

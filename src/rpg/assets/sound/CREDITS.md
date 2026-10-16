@@ -20,7 +20,20 @@ machine's bleeps and chime, the emergency alarm and the PA chime and voice) is s
 | `drip-0.mp3` | "Water Drip Free", https://freesound.org/s/842164/ | AardsReal | CC0 1.0 |
 | `drip-1.mp3` | "Water_drop_9.wav", https://freesound.org/s/166325/ | deleted_user_2104797 | CC0 1.0 |
 | `screech.mp3` | "Train Wheels Ringing Around Bend.wav", https://freesound.org/s/700035/ | JotrainG | CC0 1.0 |
-| `../music/smooth-104.mp3` | "Smooth 104.wav" (a 20-bar smooth RnB jazz fusion loop, 104 bpm), https://freesound.org/s/569606/ | BaDoink | CC0 1.0 |
+
+## CC BY 4.0 (attribution)
+
+| File | Source | Author | Licence |
+| --- | --- | --- | --- |
+| `../music/lobby-time.mp3` | "Lobby Time" (ISRC USUAN1600054), https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1600054 | Kevin MacLeod (incompetech.com) | CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ |
+
+What was done: the first second of silence cut; the intro kept, then the loop is the 64 bars (120 s, two choruses at
+128 bpm) from the downbeat at 27.12 s, its last 0.3 s crossfaded into the 0.3 s before that downbeat; the ending cut;
+0.15 dB quieter with a peak limiter at -1.5 dB, so it's -17.4 LUFS like the loop it replaced; 96 kbps stereo mp3. The
+licence asks for the credit where it can be seen, so the site shows it under the map (M) and in the sound button's
+tooltip: "Lobby Time" Kevin MacLeod (incompetech.com), Licensed under Creative Commons: By Attribution 4.0 License,
+http://creativecommons.org/licenses/by/4.0/ (incompetech's own credit text, from its FAQ:
+https://incompetech.com/music/royalty-free/faq.html).
 
 ## Adobe Audition sound effects
 

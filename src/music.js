@@ -1,15 +1,19 @@
-// Smooth jazz in the museum, drifting down the station's exit stairs (station spec §8). main.js imports this on the
+// Lobby jazz in the museum, drifting down the station's exit stairs (station spec §8). main.js imports this on the
 // visitor's first key press or tap, so the gallery's first load carries none of it, and calls unlock() on that gesture
-// and every later one: the first makes the AudioContext and starts the track loading (assets/music, CC0, see
-// CREDITS.md); a later one resumes the context if the browser held it back.
+// and every later one: the first makes the AudioContext and starts the track loading (assets/music: Kevin MacLeod's
+// "Lobby Time", CC BY 4.0, credited in the map and the sound button's tooltip; see CREDITS.md); a later one resumes
+// the context if the browser held it back.
 //
 // One context and one looping source for the whole visit. The station doesn't play its own copy: it moves this one
 // (place(): quieter, muffled, panned toward the stairs), and coming back up it eases back. So going down and up never
 // restarts the track or clicks, and the playback position carries on. Paused while the tab is hidden.
-import trackUrl from './rpg/assets/music/smooth-104.mp3';
+import trackUrl from './rpg/assets/music/lobby-time.mp3';
 import { isMuted, onMuted } from './sound-pref.js';
 
-export const LOOP = (20 * 4 * 60) / 104; // the track: 20 bars of 4 at 104 bpm, looped whole
+// The track plays its intro once, then loops 64 bars at 128 bpm (two choruses, 120 s) from a downbeat. The seam is
+// crossfaded into the file: the 0.3 s before LOOP_END fade into the 0.3 s before LOOP_START.
+export const LOOP_START = 27.1225;
+export const LOOP_END = LOOP_START + (64 * 4 * 60) / 128;
 export const GALLERY = { gain: 0.16, cutoff: 16000, pan: 0 }; // background level in the museum
 export const ARRIVING = { gain: 0.1, cutoff: 1100, pan: -0.4 }; // at the foot of the stairs, before the station places it
 
@@ -51,8 +55,8 @@ async function load() {
     source = ctx.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
-    source.loopStart = 0;
-    source.loopEnd = Math.min(LOOP, buffer.duration);
+    source.loopStart = LOOP_START;
+    source.loopEnd = Math.min(LOOP_END, buffer.duration);
     source.connect(filter);
     source.onended = () => { sources--; };
     source.start();

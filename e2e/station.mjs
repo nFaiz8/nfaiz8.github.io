@@ -44,7 +44,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(500);
     assert.deepEqual(await page.evaluate(() => window.__contexts()), { created: 0, closed: 0 });
     assert.equal((await page.evaluate(() => window.__ascii.music())).state, 'none');
-    assert.deepEqual(requested.filter((u) => /music|smooth-104|\/rpg\/audio/.test(u)), []);
+    assert.deepEqual(requested.filter((u) => /music|lobby-time|\/rpg\/audio/.test(u)), []);
   });
 
   await check('walking onto the lobby stairs goes down to the station', async () => {

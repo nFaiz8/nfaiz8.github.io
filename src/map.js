@@ -26,7 +26,7 @@ export function createMap(map, { onGo, onOpen, onClose }) {
   plan.className = 'map-plan';
   plan.style.aspectRatio = `${map.W} / ${map.H * 2}`;
   // As wide as fits, without growing taller than the screen.
-  plan.style.width = `min(100%, calc((100vh - 140px) * ${(map.W / (map.H * 2)).toFixed(4)}))`;
+  plan.style.width = `min(100%, calc((100vh - 160px) * ${(map.W / (map.H * 2)).toFixed(4)}))`;
   const canvas = document.createElement('canvas');
   const you = document.createElement('span');
   you.className = 'map-you';
@@ -35,7 +35,11 @@ export function createMap(map, { onGo, onOpen, onClose }) {
   plan.append(canvas);
   const list = document.createElement('div');
   list.className = 'map-list';
-  panel.append(head, plan, list);
+  // The museum music's credit (CC BY 4.0 asks for it where it can be seen; station spec §8).
+  const credit = document.createElement('p');
+  credit.className = 'map-credit';
+  credit.innerHTML = 'music: “Lobby Time” Kevin MacLeod (<a href="https://incompetech.com" target="_blank" rel="noopener">incompetech.com</a>), licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>';
+  panel.append(head, plan, list, credit);
   root.append(panel);
   document.body.append(root);
 
