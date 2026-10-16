@@ -4,10 +4,14 @@
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
 import { makeSprite, PROPS } from './sprites.js';
+import { TRAIN } from './train.js';
 
 const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 export const WALL_HEIGHT = 4; // over the highest floor beside a wall
-const FADE_REACH = 7; // walls this close on the camera's side fade (spec §4)
+// Walls this close on the camera's side fade (spec §4). The eye sits cos 35° × 10 ≈ 8.2 south of the focus, plus
+// up to ~1 of spring lag, and is lower than the outer walls' tops; a reach shorter than that left the south wall
+// solid between the eye and you (a black screen walking north past z ≈ 11.5 on the platform).
+const FADE_REACH = 10;
 const TUNNEL = 3.4; // a tunnel mouth's height over the track
 
 // A tile texture: a base colour with one faint glyph over it.
@@ -31,6 +35,7 @@ const SURF = {
 };
 
 export function buildScene(scene, map, { reducedMotion = false } = {}) {
+  const SHAKE = { x: 0, y: 0 }; // reused each frame
   const owned = []; // everything to dispose
   const own = (x) => { owned.push(x); return x; };
   scene.background = new THREE.Color('#05060a');
@@ -191,14 +196,150 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   prop('vending', 6.5, 12.8);
   for (const c of [23, 35]) prop('bin', c + 0.5, 10.1);
 
+  // The passing train (spec §5): 4 cars with ASCII panels and lit windows, headlights that bloom, and a light
+  // that sweeps the platform edge ahead of it.
+  const carTex = own(trainTexture(false)), carGlow = own(trainTexture(true));
+  const carMat = own(new THREE.MeshStandardMaterial({ map: carTex, emissiveMap: carGlow, emissive: '#ffffff', emissiveIntensity: 1, roughness: 0.6, metalness: 0.3 }));
+  // The panels go on the long sides only; the camera looks down on the roofs, and the ends meet the next car.
+  const roofTex = own(glyphTexture(['#5a606c', '#a9afc2', '▤'], 0.3));
+  roofTex.wrapS = roofTex.wrapT = THREE.RepeatWrapping;
+  roofTex.repeat.set(TRAIN.car / 1.5, 2);
+  const roofMat = own(new THREE.MeshStandardMaterial({ map: roofTex, emissive: '#1c2028', roughness: 0.7, metalness: 0.4 })); // a faint shape in the dark
+  const carGeo = own(new THREE.BoxGeometry(TRAIN.car, 2.6, 2.3));
+  const carMats = [roofMat, roofMat, roofMat, roofMat, carMat, carMat]; // +x, -x, +y, -y, +z, -z
+  const train = new THREE.Group();
+  const cars = [];
+  for (let i = 0; i < TRAIN.cars; i++) { const m = new THREE.Mesh(carGeo, carMats); cars.push(m); train.add(m); }
+  const lampGeo = own(new THREE.SphereGeometry(0.12, 12, 8));
+  const lampMat = own(new THREE.MeshBasicMaterial({ color: '#fff3d0', toneMapped: false }));
+  const lamps = [new THREE.Mesh(lampGeo, lampMat), new THREE.Mesh(lampGeo, lampMat)];
+  train.add(...lamps);
+  train.visible = false;
+  // The headlight and the tunnel glow are single lights that stay in the scene at intensity 0 between trains:
+  // adding or hiding a light changes the light count, which recompiles every material (a hitch).
+  const headlight = new THREE.PointLight('#fff1cc', 0, 14, 1.4);
+  // Only one train runs at a time, so one light serves every tunnel mouth: it moves to the one a train is coming
+  // out of, and glows for the 3 s of warning.
+  const mouthLight = new THREE.PointLight('#ffd9a0', 0, 12, 1.5);
+  scene.add(train, headlight, mouthLight);
+  // Each mouth is closed by a dark plane, so a train out past the map's ends (in the void) is hidden and comes out
+  // of the dark. It warms a little with the glow.
+  const mouthGeo = own(new THREE.PlaneGeometry(1, 1));
+  const mouths = map.tracks.flatMap((t) => [-1, 1].map((side) => {
+    const mat = own(new THREE.MeshBasicMaterial({ color: '#05060a' }));
+    const plane = new THREE.Mesh(mouthGeo, mat);
+    plane.scale.set(t.z1 - t.z0, TUNNEL + 0.4, 1);
+    plane.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
+    plane.position.set(side < 0 ? 0 : map.cols, t.y - 0.2 + (TUNNEL + 0.4) / 2, t.z);
+    scene.add(plane);
+    return { track: t, side, mat, x: side < 0 ? 0.3 : map.cols - 0.3 };
+  }));
+  const MOUTH_DARK = new THREE.Color('#05060a'), MOUTH_LIT = new THREE.Color('#2e2212');
+
+  // Dust in the light, blown along when a train passes.
+  const DUST = reducedMotion ? 80 : 160;
+  const dustPos = new Float32Array(DUST * 3), dustVel = new Float32Array(DUST);
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < DUST; i++) { dustPos[i * 3] = rnd() * 14 - 7; dustPos[i * 3 + 1] = rnd() * 3.2; dustPos[i * 3 + 2] = rnd() * 10 - 5; dustVel[i] = 0.05 + rnd() * 0.1; }
+  const dustGeo = own(new THREE.BufferGeometry());
+  dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+  const dustMat = own(new THREE.PointsMaterial({ color: '#cdd6ea', size: 0.05, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const dust = new THREE.Points(dustGeo, dustMat);
+  dust.frustumCulled = false; // it follows you, and its bounding sphere is computed once
+  scene.add(dust);
+
+  // Drips into each puddle, with a ripple.
+  const dripGeo = own(new THREE.SphereGeometry(0.03, 6, 4));
+  const ringGeo = own(new THREE.RingGeometry(0.05, 0.08, 24).rotateX(-Math.PI / 2));
+  const waterMat = own(new THREE.MeshBasicMaterial({ color: '#9fc7ff', transparent: true, opacity: 0.8, depthWrite: false }));
+  const puddles = map.cells.filter((c) => c.ch === '~').map((c, i) => {
+    const drop = new THREE.Mesh(dripGeo, waterMat), ring = new THREE.Mesh(ringGeo, own(waterMat.clone()));
+    scene.add(drop, ring);
+    return { x: c.c + 0.5, z: c.r + 0.5, y: c.level, drop, ring, period: 1.3 + i * 0.37 };
+  });
+
+  // A sheet of newspaper on the platform, which the train's wind skitters along.
+  const news = makeSprite(PROPS.news.lines, PROPS.news.colors, PROPS.news.h);
+  owned.push(news);
+  news.mesh.position.set(30.5, LEVEL.platform, 12.4);
+  scene.add(news.mesh);
+  const flicker = tubes.length > 3 ? 3 : 0; // the one tube with a fault
+
   return {
     tubes, owned,
-    update(time, dt, walker) {
+    update(time, dt, walker, pass) {
       placeWalls(walker);
-      for (const t of tubes) {
-        t.light.intensity = t.base;
+      const passing = !!pass && pass.phase === 'pass';
+      // Tubes: steady, but one has a fault, and the ones near a passing train shudder (spec §5; neither with
+      // reduced motion).
+      for (let i = 0; i < tubes.length; i++) {
+        const t = tubes[i];
+        let k = 1;
+        if (i === flicker && !reducedMotion) k = Math.sin(time * 31) + Math.sin(time * 7.3) > 1.3 ? 0.15 : 1;
+        if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 0.55 + 0.45 * Math.abs(Math.sin(time * 53 + i));
+        t.light.intensity = t.base * k;
+        t.bar.visible = k > 0.3;
         t.bar.material = nearCamera(t.x, t.z, walker, 1.6) ? tubeFadeMat : tubeMat;
       }
+      // The tunnel the train comes out of glows for the warning, and stays lit while it passes.
+      let glow = 0;
+      for (let i = 0; i < mouths.length; i++) {
+        const m = mouths[i];
+        const coming = !!pass && pass.track === m.track && (pass.dir > 0 ? m.side < 0 : m.side > 0);
+        const g = coming ? (pass.phase === 'warn' ? pass.warn : 1) : 0;
+        m.mat.color.lerpColors(MOUTH_DARK, MOUTH_LIT, g);
+        if (coming) { glow = g; mouthLight.position.set(m.x, m.track.y + 1.6, m.track.z); }
+      }
+      mouthLight.intensity = 25 * glow;
+      train.visible = passing;
+      headlight.intensity = 0;
+      if (passing) {
+        const t = pass.track, y = t.y + 1.45;
+        for (let i = 0; i < cars.length; i++) cars[i].position.set(pass.head - pass.dir * (TRAIN.car / 2 + i * (TRAIN.car + TRAIN.gap)), y, t.z);
+        lamps[0].position.set(pass.head + pass.dir * 0.02, y - 0.6, t.z - 0.7);
+        lamps[1].position.set(pass.head + pass.dir * 0.02, y - 0.6, t.z + 0.7);
+        headlight.position.set(pass.head + pass.dir * 3, y - 0.4, t.z);
+        // Off while the nose is still inside the tunnel, so it doesn't light the walls from the void.
+        headlight.intensity = pass.head > 0 && pass.head < map.cols ? 18 : 0;
+      }
+      // Dust follows the view, drifting; a passing train blows it along, and it stirs before.
+      const wind = passing ? pass.dir * 6 * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 25) : pass && pass.phase === 'warn' ? 0.6 * pass.dir : 0;
+      const slow = reducedMotion ? 0.4 : 1;
+      for (let i = 0; i < DUST; i++) {
+        dustPos[i * 3] += (wind + Math.sin(time * 0.3 + i) * 0.05) * dt * slow;
+        dustPos[i * 3 + 1] += dustVel[i] * Math.sin(time * 0.5 + i * 1.7) * dt * slow;
+        if (dustPos[i * 3] > 7) dustPos[i * 3] -= 14; else if (dustPos[i * 3] < -7) dustPos[i * 3] += 14;
+      }
+      dust.position.set(walker.x, walker.y, walker.z - 1);
+      dustGeo.attributes.position.needsUpdate = true;
+      // Drips: 0.6 s falling from the ceiling, then a ripple for 0.8 s.
+      for (let i = 0; i < puddles.length; i++) {
+        const p = puddles[i];
+        const ph = (time % p.period) / p.period, fallEnd = 0.6 / p.period;
+        p.drop.visible = ph < fallEnd;
+        p.drop.position.set(p.x, p.y + 3.4 * (1 - ph / fallEnd), p.z);
+        const rt = (ph - fallEnd) * p.period;
+        p.ring.visible = rt > 0 && rt < 0.8;
+        p.ring.position.set(p.x, p.y + 0.02, p.z);
+        p.ring.scale.setScalar(1 + rt * 7);
+        p.ring.material.opacity = 0.8 * (1 - rt / 0.8);
+      }
+      // The newspaper skitters in the wind where it lies (a train on the far track barely stirs it), and stops
+      // at the platform's ends.
+      const nm = news.mesh;
+      const near = passing ? (Math.abs(pass.track.z - nm.position.z) < 6 ? 1 : 0.3) * Math.max(0, 1 - Math.abs(pass.head - nm.position.x) / 12) : 0;
+      if (near > 0) {
+        nm.position.x = Math.min(45, Math.max(21, nm.position.x + pass.dir * 3 * near * dt));
+        nm.rotation.z = Math.sin(time * 9) * 0.3 * near;
+      } else nm.rotation.z *= Math.exp(-dt * 6);
+    },
+    // A very slight shake while a train passes near you (spec §5; none with reduced motion).
+    shake(time, walker, pass) {
+      if (reducedMotion || !pass || pass.phase !== 'pass') { SHAKE.x = SHAKE.y = 0; return SHAKE; }
+      const a = 0.05 * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 20);
+      SHAKE.x = a * Math.sin(time * 61); SHAKE.y = a * Math.sin(time * 47);
+      return SHAKE;
     },
     dispose() {
       scene.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });
@@ -215,6 +356,23 @@ function nameTexture(name) {
   g.strokeStyle = '#d8e2f5'; g.lineWidth = 6; g.strokeRect(8, 8, 496, 112);
   g.fillStyle = '#eef3ff'; g.font = `700 64px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(name, 256, 68);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function trainTexture(glow) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = glow ? '#000' : '#7d8592'; g.fillRect(0, 0, 512, 256);
+  if (!glow) { g.fillStyle = '#b8323a'; g.fillRect(0, 176, 512, 18); }
+  for (let i = 0; i < 6; i++) { // windows
+    g.fillStyle = glow ? '#d9b070' : '#2a2620';
+    g.fillRect(24 + i * 82, 56, 64, 72);
+    if (!glow) { g.fillStyle = 'rgba(255,255,255,0.35)'; g.font = `40px ${FONT}`; g.fillText('▤', 40 + i * 82, 110); }
+  }
+  if (!glow) { g.fillStyle = '#e8ecf2'; g.font = `700 22px ${FONT}`; g.fillText('MUSEUM LINE', 190, 230); }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

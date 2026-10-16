@@ -1,4 +1,4 @@
-// The station (station spec §6): down the lobby's stairs, walking, back up, the back button, a direct link,
+// The station (station spec §6): down the lobby's stairs, walking, a passing train, back up, the back button, a direct link,
 // a resize, and staying in the gallery when the station can't load. Usage: node e2e/station.mjs
 import { withBrowser, ready, sleep, SHOTS } from './lib.mjs';
 import assert from 'node:assert/strict';
@@ -38,6 +38,15 @@ await withBrowser(async ({ page, url, errors }) => {
     try { await sleep(600); } finally { await page.keyboard.up('KeyD'); }
     const b = await page.evaluate(() => ({ ...window.__station.walker }));
     assert.ok(b.x > a.x + 1, `moved east ${a.x.toFixed(2)} → ${b.x.toFixed(2)}`);
+  });
+
+  await check('a train comes out of the tunnel and passes', async () => {
+    await page.evaluate(() => { window.__station.teleport(30.5, 9.5); window.__station.setTime(4); });
+    await page.waitForFunction(() => window.__station.train()?.phase === 'warn', { timeout: 10000 });
+    await page.waitForFunction(() => window.__station.train()?.phase === 'pass', { timeout: 10000 });
+    await page.waitForFunction(() => { const t = window.__station.train(); return t && Math.abs(t.head - 30) < 6; }, { timeout: 5000 });
+    await page.screenshot({ path: `${SHOTS}/station-train.png` });
+    await page.waitForFunction(() => !window.__station.train(), { timeout: 10000 });
   });
 
   await check('resizing keeps the station filling the window', async () => {
