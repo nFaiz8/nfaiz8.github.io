@@ -1,10 +1,7 @@
-// Noir jazz in the museum, drifting down the station's exit stairs (station spec §8). main.js imports this on the
+// Jazz in the museum, drifting down the station's exit stairs (station spec §8). main.js imports this on the
 // visitor's first key press or tap, so the gallery's first load carries none of it, and calls unlock() on that gesture
 // and every later one: the first makes the AudioContext and starts the track loading; a later one resumes the context
-// if the browser held it back. The track is the site's own jazz (streamed; track-choice.js ?track=1, the default) or
-// one of three noir jazz pieces to compare (?track=2, 3 or 4;
-// all CC BY 4.0, the playing one credited in the map and the sound button's tooltip; see CREDITS.md). Only the
-// chosen one is fetched.
+// if the browser held it back. The track is the site's own jazz (track-choice.js), streamed.
 //
 // One context and one looping source for the whole visit. The station doesn't play its own copy: it moves this one
 // (place(): quieter, muffled, panned toward the stairs), and coming back up it eases back. So going down and up never
@@ -19,9 +16,6 @@ export const LOOP_END = TRACK.loopEnd;
 // Each a literal URL, not an import, so nothing loads but the chosen file (Vite still bundles all three).
 const URLS = {
   tuffjazz: () => new URL('./rpg/assets/music/tuffjazz.mp3', import.meta.url).href,
-  'signs-to-nowhere': () => new URL('./rpg/assets/music/signs-to-nowhere.mp3', import.meta.url).href,
-  'spy-glass': () => new URL('./rpg/assets/music/spy-glass.mp3', import.meta.url).href,
-  'covert-affair': () => new URL('./rpg/assets/music/covert-affair.mp3', import.meta.url).href,
 };
 const trackUrl = URLS[TRACK.file]();
 export const GALLERY = { gain: 0.16, cutoff: 16000, pan: 0 }; // background level in the museum

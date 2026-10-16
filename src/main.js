@@ -702,7 +702,7 @@ function whenStill(fn, waited = 0) {
 addEventListener('keydown', unlockAudio, true);
 addEventListener('pointerdown', unlockAudio, true);
 const soundBtn = document.getElementById('sound-btn');
-if (soundBtn) soundBtn.title = creditText() ? `Sound (V) · ${creditText()}` : 'Sound (V)'; // the track ?track= chose (index.html names the default)
+if (soundBtn) soundBtn.title = creditText() ? `Sound (V) · ${creditText()}` : 'Sound (V)'; // a credit only for a track that needs one
 function showSound(m) {
   if (!soundBtn) return;
   soundBtn.firstChild.textContent = m ? '[×]' : '[♪]';

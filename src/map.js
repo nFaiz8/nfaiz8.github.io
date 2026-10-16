@@ -39,7 +39,7 @@ export function createMap(map, { onGo, onOpen, onClose }) {
   // The museum music's credit (CC BY 4.0 asks for it where it can be seen; station spec §8).
   const credit = document.createElement('p');
   credit.className = 'map-credit';
-  credit.innerHTML = creditHTML(); // whichever track ?track= chose
+  credit.innerHTML = creditHTML(); // empty for the site's own track
   panel.append(head, plan, list, credit);
   root.append(panel);
   document.body.append(root);
