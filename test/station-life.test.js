@@ -120,3 +120,18 @@ test("a pacing commuter waits rather than walking into you", () => {
   for (let t = 0; t < 2; t += DT) stepCommuter(c, DT, { train: null, walker: you }, MAP);
   assert.ok(c.x < you.x - 0.4, `stopped short: ${c.x}`);
 });
+
+test('riders aboard a local: two or three a car, seeded by its number, seated on real seats or holding a pole', async () => {
+  const { ridersFor } = await import('../src/rpg/life.js');
+  const { SEATS, POLES, trainSolid } = await import('../src/rpg/car.js');
+  const a = ridersFor(12), b = ridersFor(12), c = ridersFor(13);
+  assert.deepEqual(a, b);
+  assert.notDeepEqual(a, c);
+  assert.ok(a.length >= 10 && a.length <= 15);
+  const seats = a.filter((r) => r.seat != null).map((r) => r.seat);
+  assert.equal(new Set(seats).size, seats.length, 'no two on one seat');
+  for (const r of a) {
+    if (r.seat != null) { assert.equal(r.sit, 1); assert.deepEqual([r.x, r.z], [SEATS[r.seat].x, SEATS[r.seat].z]); }
+    else { assert.equal(r.hold, 1); assert.ok(!trainSolid(r.x, r.z), 'standing in the aisle'); assert.ok(POLES.some((p) => Math.hypot(p.x - r.x, p.z - r.z) < 0.5)); }
+  }
+});

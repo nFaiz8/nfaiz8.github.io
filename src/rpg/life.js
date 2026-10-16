@@ -2,6 +2,8 @@
 // bed, and a few commuters waiting on the platform. Pure: no three.js, no DOM. Each creature is a
 // small state machine stepped with dt; scene.js and index.js draw them. Seeded, so a run can be replayed.
 import { RADIUS, blocked } from './move.js';
+import { SEATS, POLES } from './car.js';
+import { TRAIN } from './schedule.js';
 import { turnToward } from './rig.js';
 
 const TAU = 2 * Math.PI;
@@ -240,4 +242,28 @@ export function pushOut(w, people, map, r = COMMUTER.radius) {
     else if (!blocked(map, w.x, nz)) w.z = nz;
   }
   return w;
+}
+
+// Riders aboard a local (subway ride spec §4): two or three a car, most seated, one holding a pole, some on their
+// phones. Seeded by the local's number, so every player sees the same people on the same train. In the train's frame.
+export const RIDERS = { perCar: [2, 3], colors: ['#7d8595', '#949aa6', '#5f9e9a', '#a5605a', '#8a7f6a', '#6a6f9e'] };
+export function ridersFor(k) {
+  const r = rng(1000 + k), out = [], used = new Set();
+  for (let c = 0; c < TRAIN.cars; c++) {
+    const seats = SEATS.filter((s) => s.car === c), n = RIDERS.perCar[0] + Math.floor(r() * (RIDERS.perCar[1] - RIDERS.perCar[0] + 1));
+    for (let i = 0; i < n; i++) {
+      const color = RIDERS.colors[Math.floor(r() * RIDERS.colors.length)], phone = r() < 0.3;
+      if (i < n - 1) {
+        let s = seats[Math.floor(r() * seats.length)];
+        for (let g = 0; used.has(s.i) && g < seats.length; g++) s = seats[(seats.indexOf(s) + 1) % seats.length];
+        if (used.has(s.i)) continue;
+        used.add(s.i);
+        out.push({ seat: s.i, x: s.x, z: s.z, yaw: s.yaw, sit: 1, hold: 0, phone, color });
+      } else {
+        const p = POLES[c * 3 + Math.floor(r() * 3)], side = r() < 0.5 ? -1 : 1;
+        out.push({ seat: null, x: p.x + 0.3 * side, z: p.z, yaw: side > 0 ? -Math.PI / 2 : Math.PI / 2, sit: 0, hold: 1, phone: false, color });
+      }
+    }
+  }
+  return out;
 }

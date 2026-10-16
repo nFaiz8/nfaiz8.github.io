@@ -275,6 +275,8 @@ await withBrowser(async ({ page, url, errors }) => {
     const a = await page.evaluate(() => window.__station.aboard());
     assert.equal(a.k, 0);
     assert.ok(await page.evaluate(() => window.__station.tunnelShown() > 10), 'tunnel segments drawn around you');
+    assert.ok(await page.evaluate(() => window.__station.ridersShown() >= 10), 'people aboard your train');
+    assert.ok(await page.evaluate(() => window.__station.ridersShown() >= 10), 'people aboard your train');
     await page.screenshot({ path: 'e2e/shots/station-tunnel.png' });
   });
 

@@ -173,6 +173,8 @@ function build(scene, { glow = true, color = COLOR, lantern: hasLantern = true, 
       if (lantern) face(lantern, joints.lantern, at);
       if (screen) { square(screen.edge, screen.rim, joints.lantern, at); square(screen.fill, screen, joints.lantern, at); }
     },
+    // Shown or not (a pooled figure with nobody to be).
+    setVisible(on) { for (const o of meshes) o.visible = on; },
     dispose: free,
   };
 }

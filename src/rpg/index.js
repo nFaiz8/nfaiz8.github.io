@@ -14,7 +14,7 @@ import { poseFigure, turnToward, advancePhase, stepGait, GAIT_EASE } from './rig
 import { createPost } from './post.js';
 import { createGates, gatedMap, trackGates, bumped, blocked, easeArms, turnRotors, swingGates, rotorTurns, refused, ringState, alarmOn } from './gates.js';
 import { createTicketMachine } from './ticket.js';
-import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut } from './life.js';
+import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut, ridersFor } from './life.js';
 import { createStationAudio } from './audio.js';
 import { createOthers, createTalkBar } from './others.js';
 import { createTrains } from './trainmesh.js';
@@ -53,6 +53,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
   let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, bridge = null, hint = null, fader = null, onKey = null;
   const stations = [null, null], groups = [null, null]; // the line's two stations (MUSEUM's is built at once)
   const people = []; // the commuters' figures
+  const riderFigs = []; // the riders aboard trains (a pool)
   const teardown = () => {
     cancelAnimationFrame(raf);
     if (resize) removeEventListener('resize', resize);
@@ -71,6 +72,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     bridge?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
+    for (const p of riderFigs) p.figure.dispose();
     blobGeo?.dispose();
     blobMat?.dispose();
     post?.dispose();
@@ -166,7 +168,15 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
     // Sitting (§4): E sits at the nearest free seat, or stands you up. Not while typing.
-    const taken = () => new Set(); // Task 11: the commuters' seats on your train
+    // Riders aboard (life.js): figures from a pool, on the locals nearest you (yours first).
+    const RIDER_FIGS = 18, ridersCache = new Map();
+    const riders = (k) => { if (!ridersCache.has(k)) { if (ridersCache.size > 8) ridersCache.clear(); ridersCache.set(k, ridersFor(k)); } return ridersCache.get(k); };
+    let ridersShown = 0;
+    // The seats the riders on your train (or the one standing where you are) sit in.
+    const taken = () => {
+      const k = rider.frame.kind === 'train' ? rider.frame.k : localsAt(clock()).find((l) => l.at === rider.frame.stop)?.k;
+      return new Set(k == null ? [] : riders(k).filter((r) => r.seat != null).map((r) => r.seat));
+    };
     onKey = (e) => {
       if (e.key !== 'e' && e.key !== 'E') return;
       if (e.target?.closest?.('input, textarea')) return;
@@ -331,6 +341,23 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       camera.lookAt(o.x + cam.x + shake.x, cam.y + shake.y, o.z + cam.z);
       figure.update(joints, camera, feet);
       for (const p of people) p.figure.update(p.joints, camera, p.at);
+      let fi = 0;
+      const nearLocals = trains.filter((l) => l.kind === 'local' && Math.min(Math.abs(l.head - wx), Math.abs(l.tail - wx)) < 60)
+        .sort((a, b) => (mine && a.k === mine.k ? -1 : mine && b.k === mine.k ? 1 : 0));
+      for (const l of nearLocals) {
+        const to = trainOrigin(l);
+        for (const rd of riders(l.k)) {
+          if (fi >= RIDER_FIGS) break;
+          if (!riderFigs[fi]) riderFigs[fi] = { figure: createFigure(scene, { glow: false, color: rd.color, lantern: false, phone: rd.phone }), joints: {}, at: { x: 0, y: 0, z: 0 } };
+          const p = riderFigs[fi++];
+          p.figure.setVisible(true);
+          poseFigure({ yaw: rd.yaw, sit: rd.sit, hold: rd.hold, phone: rd.phone, t: t + rd.x, reducedMotion, gait: 0, phase: 0, shift: 0 }, p.joints);
+          p.at.x = to.x + rd.x; p.at.y = LEVEL.platform; p.at.z = to.z + rd.z;
+          p.figure.update(p.joints, camera, p.at);
+        }
+      }
+      for (let j = fi; j < riderFigs.length; j++) riderFigs[j].figure.setVisible(false);
+      ridersShown = fi;
       trainView.update(trains, { me: { x: wx, z: wz }, mine: mine ? mine.id : null, time: t, dt, sun: sunK > 0 ? 1 : 0 });
       audio.update({ t, dt, walker, pose, gates, train: museumPass, pigeons: world.pigeons, rats: world.rats, people });
       if (others) {
@@ -353,12 +380,13 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       shownTrains: () => trainView.shown(),
       tunnelShown: () => tunnel.shown(),
       env: () => ({ bridge: sunK }),
+      ridersShown: () => ridersShown,
       clock,
       setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
       others: () => (others ? others.shown() : []),
       mine: () => (others ? others.mine() : null),
-      teleport(x, z, stop = 0) { rider.frame = { kind: 'station', stop }; rider.seat = null; walker.x = x; walker.z = z; walker.vx = walker.vz = 0; walker.y = maps[stop].levelAt(x, z) ?? walker.y; },
-      board(k, x, z) { rider.frame = { kind: 'train', k }; rider.seat = null; walker.x = x; walker.z = z; walker.vx = walker.vz = 0; },
+      teleport(x, z, stop = 0) { rider.frame = { kind: 'station', stop }; rider.seat = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; walker.y = maps[stop].levelAt(x, z) ?? walker.y; },
+      board(k, x, z) { rider.frame = { kind: 'train', k }; rider.seat = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; }, // (the camera jumps with you)
       frame: () => ({ ...rider.frame }),
       aboard: () => (rider.frame.kind === 'train' ? { k: rider.frame.k, x: walker.x, z: walker.z, seat: rider.seat?.i ?? null } : null),
       world: () => ({ x: feet.x, y: feet.y, z: feet.z }),
