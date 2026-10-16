@@ -19,6 +19,7 @@ import { createStationAudio } from './audio.js';
 import { createOthers, createTalkBar } from './others.js';
 import { createTrains } from './trainmesh.js';
 import { createTunnel } from './tunnel.js';
+import { createBridge } from './bridge.js';
 import canalText from './canalst.txt?raw';
 import { STOPS, pieceAt } from './line.js';
 import { local, localsAt } from './schedule.js';
@@ -49,7 +50,7 @@ function footY(map, w) {
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, hint = null, fader = null, onKey = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, bridge = null, hint = null, fader = null, onKey = null;
   const stations = [null, null], groups = [null, null]; // the line's two stations (MUSEUM's is built at once)
   const people = []; // the commuters' figures
   const teardown = () => {
@@ -67,6 +68,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     fader?.remove();
     trainView?.dispose();
     tunnel?.dispose();
+    bridge?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
     blobGeo?.dispose();
@@ -98,6 +100,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     world = buildScene(museum, map, { reducedMotion });
     trainView = createTrains(scene, { reducedMotion });
     tunnel = createTunnel(scene, { reducedMotion });
+    bridge = createBridge(scene, { reducedMotion });
+    let sunK = 0;
     const walker = createWalker(map);
     // The line's two stations (subway ride spec §5): MUSEUM built now, CANAL ST the first time the camera comes near it.
     // A station is hidden while the camera is away from it.
@@ -284,6 +288,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
 
       // The stations, by where the camera is: each is built the first time it comes near, and hidden while it's away.
       const camX = o.x + cam.x;
+      sunK = bridge.update(camX, o.z + eyeFor(cam).z, t);
+      // Underground nothing is further than 80; out on the bridge the city is hundreds of tiles off.
+      const far = sunK > 0 ? 2400 : 80;
+      if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
       let museumPass = null;
       for (let i = 0; i < 2; i++) {
         const near = stationNear(i, camX);
@@ -314,14 +322,16 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       // The camera follows you in your frame; on the bridge, riding, it pulls back to show the city (§4).
       // Inside a car (riding, or in one standing at a platform) it comes in closer, as the car is narrow.
       const inside = !!mine || standing.some((l) => inTrain(l, STOPS[f.stop].x, walker.x, walker.z));
-      cam.want = mine && pieceAt(wx).kind === 'bridge' ? CAM.bridge : inside ? CAM.inside : CAM.dist;
+      const onBridge = !!mine && pieceAt(wx).kind === 'bridge';
+      cam.want = onBridge ? CAM.bridge : inside ? CAM.inside : CAM.dist;
+      cam.wantPitch = onBridge ? CAM.bridgePitch : CAM.pitch;
       followCamera(cam, walker, dt, f.kind === 'station' ? maps[f.stop] : FREE, camera.aspect);
       const eye = eyeFor(cam), shake = f.kind === 'station' && f.stop === 0 ? world.shake(t, walker, museumPass) : { x: 0, y: 0 };
       camera.position.set(o.x + eye.x + shake.x, eye.y + shake.y, o.z + eye.z);
       camera.lookAt(o.x + cam.x + shake.x, cam.y + shake.y, o.z + cam.z);
       figure.update(joints, camera, feet);
       for (const p of people) p.figure.update(p.joints, camera, p.at);
-      trainView.update(trains, { me: { x: wx, z: wz }, mine: mine ? mine.id : null, time: t, dt, sun: 1 });
+      trainView.update(trains, { me: { x: wx, z: wz }, mine: mine ? mine.id : null, time: t, dt, sun: sunK > 0 ? 1 : 0 });
       audio.update({ t, dt, walker, pose, gates, train: museumPass, pigeons: world.pigeons, rats: world.rats, people });
       if (others) {
         others.update(mp.list(now), now, dt, t, camera, feet);
@@ -342,6 +352,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       trains: () => trainsAt(clock()),
       shownTrains: () => trainView.shown(),
       tunnelShown: () => tunnel.shown(),
+      env: () => ({ bridge: sunK }),
       clock,
       setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
       others: () => (others ? others.shown() : []),

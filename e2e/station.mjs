@@ -278,6 +278,17 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.screenshot({ path: 'e2e/shots/station-tunnel.png' });
   });
 
+  await check('on the bridge: the skyline, the sky, sun shafts through the windows; the camera pulled back', async () => {
+    await page.evaluate(() => { window.__station.setTime(20 + 18 + 28); window.__station.board(0, 30, 0); }); // mid-bridge
+    // The camera's springs settle; the clock is held mid-bridge meanwhile (frames are slow without a GPU).
+    for (let i = 0; i < 9; i++) { await page.evaluate(() => window.__station.setTime(20 + 18 + 28)); await nFrames(page, 10); }
+    await page.evaluate(() => window.__station.setTime(20 + 18 + 28));
+    await nFrames(page, 3);
+    const env = await page.evaluate(() => window.__station.env());
+    assert.ok(env.bridge > 0.9, JSON.stringify(env));
+    await page.screenshot({ path: 'e2e/shots/station-bridge.png' });
+  });
+
   await check('staying on past the last stop brings you back on the next train the other way', async () => {
     // L1 (westbound) ends at MUSEUM at 80 and leaves at 98; still aboard at 106, you're on L2 (eastbound), ~30 s out.
     await page.evaluate(() => { window.__station.setTime(80 + 18 + 7); window.__station.board(1, 30, 0); });

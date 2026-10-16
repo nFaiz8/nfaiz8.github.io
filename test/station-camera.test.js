@@ -63,3 +63,13 @@ test('a station frame with x0: the clamp is shifted', () => {
   followCamera(cam, { x: 0, y: 0, z: 9 }, 1, { cols: 92, rows: 19, x0: 0 }, 16 / 9);
   assert.equal(cam.x, tilesAcross(16 / 9) / 2);
 });
+
+test('on the bridge the camera also tips up toward the horizon, so the skyline is in view', () => {
+  const cam = createCamera({ x: 0, y: -3, z: 0 });
+  cam.wantPitch = CAM.bridgePitch;
+  for (let i = 0; i < 300; i++) followCamera(cam, { x: 0, y: -3, z: 0 }, 1 / 60, { cols: Infinity, rows: Infinity }, 16 / 9);
+  assert.ok(Math.abs(cam.pitch - CAM.bridgePitch) < 0.01);
+  assert.ok(CAM.bridgePitch < CAM.pitch / 2);
+  const e = eyeFor(cam);
+  assert.ok(Math.abs(e.y - (cam.y + Math.sin(cam.pitch) * cam.dist)) < 1e-9, 'the eye follows the eased pitch');
+});
