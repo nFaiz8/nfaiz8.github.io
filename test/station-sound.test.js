@@ -141,8 +141,9 @@ test('the faulty tube and the drips keep scene.js timing', () => {
   for (const v of [0, 1, 2.9, 3.1, 10.2]) assert.ok([0.1, 1].includes(tubeFault(v)));
   // Each drip lands once per period, DRIP.fall after it starts falling.
   let n = 0;
-  for (let t = 0; t < 26; t += 0.01) if (dripLanded(0, t, t + 0.01)) n++;
-  assert.equal(n, Math.floor((26 - DRIP.fall) / DRIP.period(0)) + 1);
+  for (let t = 0; t < 600; t += 0.01) if (dripLanded(0, t, t + 0.01)) n++;
+  assert.equal(n, Math.floor((600 - DRIP.fall) / DRIP.period(0)) + 1);
+  for (let i = 0; i < 6; i++) assert.ok(DRIP.period(i) >= 120 && DRIP.period(i) <= 180, 'every 2–3 minutes');
   assert.equal(dripLanded(1, DRIP.fall - 0.01, DRIP.fall + 0.01), true);
   assert.equal(dripLanded(1, 5, 5), false);
 });

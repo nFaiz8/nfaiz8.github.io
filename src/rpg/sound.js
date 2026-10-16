@@ -21,8 +21,8 @@ export function tubeFault(time) {
 export const tubeStutter = (time) => (time + 1.3) % 4.1 < 0.9;
 
 // Drips: each puddle's drop falls for DRIP.fall seconds from the ceiling, lands, and ripples for DRIP.ring; puddle i
-// drips every DRIP.period(i) seconds.
-export const DRIP = { fall: 0.6, ring: 0.8, period: (i) => 1.3 + i * 0.37 };
+// drips every DRIP.period(i) seconds: now and then, every 2–3 minutes, each puddle on its own beat.
+export const DRIP = { fall: 0.6, ring: 0.8, period: (i) => 120 + ((i * 37) % 61) };
 // Did puddle i's drop land between t0 (exclusive) and t1 (inclusive)?
 export function dripLanded(i, t0, t1) {
   if (!(t1 > t0)) return false;
