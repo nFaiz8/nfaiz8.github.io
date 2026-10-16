@@ -243,12 +243,18 @@ export function buildLayout(data, site, { arena = null } = {}) {
   const dark = data.rooms.find((r) => r.wing === 'east');
   const darkPlan = dark ? planRoom(dark, true) : null;
   const darkBox = darkPlan && { x: lobby.x + lobby.w - 1 + DARK_CORRIDOR, y: cy - 2 - darkPlan.doorY, w: darkPlan.W + 2, h: darkPlan.H + 2 };
-  // West: the arena, a corridor's length past the lobby's west wall. Its door is the 3 rows of its east
-  // wall ending on the level's D (the floor line), level with the corridor, so you walk in along its floor.
-  // It rises far above the lobby, so the north wing's west-side rooms start beyond it.
+  // West: the arena, past the lobby's west wall. Its door is the 3 rows of its east wall ending on the level's D (the
+  // floor line), level with the corridor, so you walk in along its floor. It rises far above the lobby (the gorge
+  // most of all), so its corridor runs on past the wings' west-side rooms: the arena stands clear of them and they
+  // sit by the lobby, rather than starting beyond the arena's top.
   const doorRow = arena ? (arena.level.door ? arena.level.door.r : arena.level.rows - 1) : 0;
+  const corX = cx - Math.floor(CORRIDOR / 2) - 1;
+  const westRooms = data.rooms.filter((r) => r.wing === 'north' || r.wing === 'south')
+    .filter((r) => data.rooms.filter((q) => q.wing === r.wing).indexOf(r) % 2 === 0);
+  const westReach = Math.min(lobby.x, ...westRooms.map((r) => corX - (planRoom(r, false).W + 2) + 1));
+  const arenaEast = Math.min(lobby.x - DARK_CORRIDOR, westReach - 3);
   const arenaBox = arena && {
-    x: lobby.x - DARK_CORRIDOR - (arena.level.cols + 2) + 1, y: cy - doorRow,
+    x: arenaEast - (arena.level.cols + 2) + 1, y: cy - doorRow,
     w: arena.level.cols + 2, h: arena.level.rows + 2,
   };
 
@@ -260,7 +266,8 @@ export function buildLayout(data, site, { arena = null } = {}) {
     // cursor = the next room's edge row nearest the lobby (one void row away from the last thing placed)
     const cursor = { west: dir < 0 ? lobby.y - 2 : lobby.y + lobby.h + 1, east: dir < 0 ? lobby.y - 2 : lobby.y + lobby.h + 1 };
     if (darkBox) cursor.east = dir < 0 ? Math.min(cursor.east, darkBox.y - 2) : Math.max(cursor.east, darkBox.y + darkBox.h + 1);
-    if (arenaBox) cursor.west = dir < 0 ? Math.min(cursor.west, arenaBox.y - 2) : Math.max(cursor.west, arenaBox.y + arenaBox.h + 1);
+    // Only if the arena is beside the corridor (it's past the west rooms now, so normally not).
+    if (arenaBox && arenaBox.x + arenaBox.w > westReach - 1) cursor.west = dir < 0 ? Math.min(cursor.west, arenaBox.y - 2) : Math.max(cursor.west, arenaBox.y + arenaBox.h + 1);
     let far = cursor.west;
     list.forEach((room, i) => {
       const side = i % 2 === 0 ? 'west' : 'east';

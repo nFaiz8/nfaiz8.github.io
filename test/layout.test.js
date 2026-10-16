@@ -94,14 +94,16 @@ const withArena = (photoId = 'IMG_1003') => {
   return buildLayout(d, SITE, { arena: { photo: d.byId.get(photoId) || null, level } });
 };
 
-test('the arena is west of the lobby: 204 × 33 inside, its door at the level\'s D, in line with a 10-cell corridor', () => {
+test('the arena is west of the lobby: 204 × 33 inside, its door at the level\'s D, its corridor running past the west rooms', () => {
   const map = withArena();
   const a = map.arena, lobby = map.rooms[0], room = map.rooms.at(-1);
   assert.equal(room.id, 'arena');
   assert.equal(a.index, map.rooms.length - 1);
   assert.equal(a.w - 2, 204);
   assert.equal(a.h - 2, 33);
-  assert.equal(lobby.x - a.door.x, 10, 'corridor length');
+  assert.ok(lobby.x - a.door.x >= 10, 'corridor at least 10 cells');
+  // The corridor runs on past the wings' west-side rooms, so the arena (and the gorge) stands clear of them.
+  for (const r of map.rooms.slice(1, -1)) if (r.x + r.w <= lobby.x) assert.ok(a.x + a.w <= r.x, `arena clear of ${r.id}`);
   assert.ok(a.x + a.w <= lobby.x, 'west of the lobby');
   // Door: the 3 rows of the east wall ending on the D marker's row, and the matching cells of the lobby's west wall.
   for (let k = 0; k < 3; k++) {
