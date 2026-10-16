@@ -125,3 +125,39 @@ test('hi carries my position, and send reports whether it went out', () => {
   h.sockets[0].recv({ t: 'welcome', id: 'a', peers: [] });
   assert.equal(net.send({ t: 'e', e: 'heart' }), true);
 });
+
+test('areas: hi says the area I am in; setArea sends z with my position there, at most one a second, the latest winning', () => {
+  const h = harness();
+  const where = { gallery: { x: 3, y: 4, extra: 1 }, station: { x: 2.5, z: 9.5, y: 0, a: 1 } };
+  const { net } = make(h, { getPos: (a) => where[a] });
+  net.setArea('station'); // before the welcome: the hi carries it
+  h.sockets[0].open();
+  assert.deepEqual(h.sockets[0].sent, [{ t: 'hi', name: 'Sam', area: 'station', x: 2.5, z: 9.5, y: 0, a: 1 }]);
+  h.sockets[0].recv({ t: 'welcome', id: 'a', peers: [], area: 'station' });
+  assert.equal(h.sockets[0].sent.length, 1, 'no z: the server has me there already');
+  net.setArea('gallery');
+  assert.deepEqual(h.sockets[0].sent.at(-1), { t: 'z', area: 'gallery', x: 3, y: 4 });
+  net.setArea('station');
+  net.setArea('gallery');
+  net.setArea('station');
+  assert.equal(h.sockets[0].sent.length, 2, 'the next waits a second');
+  h.advance(1000);
+  assert.deepEqual(h.sockets[0].sent.slice(2).map((m) => m.area), ['station'], 'one z, for the latest');
+});
+
+test('areas: a position only goes out for the area the server has me in, not while a move waits', () => {
+  const h = harness();
+  const { net } = make(h);
+  h.sockets[0].open();
+  h.sockets[0].recv({ t: 'welcome', id: 'a', peers: [] });
+  assert.equal(net.send({ t: 'q', x: 1, z: 1 }), false, 'no q in the gallery');
+  assert.equal(net.send({ t: 'p', x: 1, y: 1 }), true);
+  h.advance(1000);
+  net.setArea('station');
+  assert.equal(net.send({ t: 'p', x: 2, y: 2 }), false, 'no p below');
+  assert.equal(net.send({ t: 'q', x: 2, z: 2 }), true);
+  net.setArea('gallery'); // within the second: queued
+  assert.equal(net.send({ t: 'p', x: 2, y: 2 }), false, 'not until the z has gone');
+  h.advance(1000);
+  assert.equal(net.send({ t: 'p', x: 2, y: 2 }), true);
+});

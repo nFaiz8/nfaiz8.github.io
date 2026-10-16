@@ -207,10 +207,14 @@ body.side .hud { background: linear-gradient(#07080bcc, transparent); }
 .fade { position: fixed; inset: 0; z-index: 60; background: #000; display: grid; place-items: center; color: rgb(233 162 59); opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
 .fade.on { opacity: 1; pointer-events: auto; }
 .fade[hidden] { display: none; }
-body.in-station .hud, body.in-station .hud-tools, body.in-station .chat-log, body.in-station .chat-form, body.in-station .emote-bar, body.in-station .pad,
+body.in-station .hud, body.in-station .hud-tools, body.in-station .chat-log, body.in-station .emote-bar, body.in-station .pad,
 body.in-station .fight, body.in-station .caption, body.in-station .name-form, body.in-station .admin-form, body.in-station .debug,
 body.in-station .viewer, body.in-station .grid, body.in-station .map, body.in-station .resolve-progress, body.in-station .resolve, body.in-station .flip { display: none !important; }
 #stage canvas.station { z-index: 1; }
+/* Multiplayer below (station spec): the chat line stays (T or Enter opens it), and a small bar to open it and emote. */
+.station-talk { position: fixed; right: 16px; bottom: 16px; z-index: 2; display: flex; gap: 6px; }
+.station-talk .hud-btn { background: rgb(7 8 11 / 0.7); }
+@media (max-width: 600px) { .station-talk { left: 16px; right: 16px; justify-content: flex-end; flex-wrap: wrap; } }
 #stage.impact canvas.station { filter: none; }
 @media (prefers-reduced-motion: reduce) { .fade { transition: none; } }
 /* The station's fare card machine (src/rpg/ticket.js): an ASCII screen in a brushed-steel bezel, New York style;

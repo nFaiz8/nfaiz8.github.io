@@ -293,6 +293,7 @@ function toggleFullscreen() {
 }
 
 function onKey(e) {
+  if (stationState === 'in') return stationKey(e);
   if (stationState !== 'off') return false;
   if (viewer.isOpen || grid.isOpen) return false;
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
@@ -435,7 +436,7 @@ function loop(now) {
     world.people.push({ x: v.x, y: v.y, glyph: v.glyph, color: v.color });
     if (v.looking && v.wait > 0) world.people.push({ x: v.x, y: v.y - 1, glyph: '·', color: v.color });
   }
-  world.entities = [];
+  world.entities = stationCountEntities(); // the ▼ SUBWAY sign's count (Multiplayer)
   world.others = [];
   // In the arena's side view people are stick figures (world.bodies → world.figures); top-down they are @.
   const side = world.mode === 'side' && !!map.arena;
@@ -632,7 +633,7 @@ async function goDown({ instant = false } = {}) {
     if (instant && location.hash !== STATION_HASH) replaceHash(STATION_HASH); // the panels' close handlers rewrote it
     const { startStation } = await import('./rpg/index.js');
     if (stationState !== 'down' || gen !== downGen) return; // the back button won while it loaded
-    station = startStation(stage, { onExit: () => goUp(), keys: () => input.state(), reducedMotion, phone: touch });
+    station = startStation(stage, { onExit: () => goUp(), keys: () => input.state(), reducedMotion, phone: touch, mp: stationNet() });
   } catch (err) {
     console.warn(err);
     if (gen !== downGen || stationState !== 'down') return; // a newer trip owns the state now
@@ -645,7 +646,7 @@ async function goDown({ instant = false } = {}) {
     note("the station couldn't load", 3000);
     return;
   }
-  if (live) live.away(true); // to the gallery, you've left (spec §1); the tab coming back doesn't rejoin
+  if (live) live.area('station'); // the gallery sees you leave, the station you arrive (station spec, Multiplayer)
   document.body.classList.add('in-station');
   if (location.hash !== STATION_HASH) history.pushState(null, '', STATION_HASH);
   stationState = 'in';
@@ -667,9 +668,9 @@ async function goUp({ fromHistory = false } = {}) {
     // Even if stopping the station threw, the gallery comes back.
     station = null;
     document.body.classList.remove('in-station');
-    if (live) live.away(false);
     input.clear(); // a key or pad direction held on the way up doesn't carry into the lobby
     standAtStairs();
+    if (live) live.area('gallery'); // back in the gallery, at the stairs
     if (!fromHistory && location.hash === STATION_HASH) replaceHash('');
     world.frozen = false;
     stationState = 'off';
@@ -710,6 +711,34 @@ showSound(isMuted());
 onMuted(showSound);
 soundBtn?.addEventListener('click', () => { setMuted(!isMuted()); soundBtn.blur(); });
 
+// Multiplayer in the station (station spec, Multiplayer): what the station needs of live, and the keys while
+// you're below: T or Enter opens the chat line, 1–5 emote. stationCount: how many are down there, shown on the
+// lobby's ▼ SUBWAY sign.
+let stationCount = 0;
+function stationNet() {
+  if (!live) return null;
+  return {
+    list: (now) => live.station.list(now),
+    tick: (pos) => live.tickStation(pos),
+    now: () => live.serverNow(),
+    chat: () => document.getElementById('chat-btn').click(),
+    emote: (kind) => sendEmote(kind),
+  };
+}
+function stationKey(e) {
+  if (!live) return false;
+  if (e.code === 'KeyT' || e.key === 'Enter') { document.getElementById('chat-btn').click(); return true; }
+  const digit = /^Digit([1-5])$/.exec(e.code);
+  if (digit) { sendEmote(EMOTES_ORDER[digit[1] - 1]); return true; }
+  return false;
+}
+// The count after the sign, as glyphs: ' · 2'.
+function stationCountEntities() {
+  if (!stationCount || !map.stairs) return [];
+  const text = ` · ${stationCount}`, x = map.stairs.x + '▼ SUBWAY'.length;
+  const color = renderer.name === 'museum' ? [233, 162, 59] : C.sign; // the sign's own colour in each look
+  return [...text].map((glyph, k) => ({ x: x + k + 0.5, y: map.stairs.y - 1 + 0.5, glyph, color })).filter((e) => e.glyph !== ' ');
+}
 const muted = new Set(); // ids whose chat you've hidden, for this visit
 function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }
 
@@ -750,6 +779,7 @@ function sendEmote(kind) {
   mine.emote = EMOTE_GLYPH[kind] || null;
   mine.emoteAt = now;
   if (live) live.emote(kind);
+  if (station) station.emote(kind);
 }
 function sendHeart(f) {
   const now = performance.now();
@@ -1043,6 +1073,7 @@ async function boot() {
     mine.say = text;
     mine.sayAt = at;
     if (live) live.chat(text);
+    if (station) station.say(text);
     addLog(null, '', text);
     chatInput.value = '';
     closeChat();
@@ -1058,6 +1089,8 @@ async function boot() {
     onArena: (m) => { if (pvp) pvp.onMessage(m, performance.now()); },
     onState: () => { linkUp = false; syncOnline(); },
     getPos: () => world.player,
+    getStationPos: () => (station ? station.pos() : null),
+    onStation: (n) => { stationCount = n; },
     getName: () => { try { return localStorage.getItem('faiz-live-name') || ''; } catch { return ''; } },
     onCount: (n) => {
       hereEl.hidden = !n;

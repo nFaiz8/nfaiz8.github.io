@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import stationText from './station.txt?raw';
 import { parseStation } from './map.js';
 import { createWalker, stepWalker, SPEED } from './move.js';
-import { trainAt } from './train.js';
+import { trainAt, sharedTime } from './train.js';
 import { createCamera, followCamera, eyeFor, fovFor } from './camera.js';
 import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
@@ -15,6 +15,7 @@ import { createGates, gatedMap, trackGates, bumped, blocked, easeArms, turnRotor
 import { createTicketMachine } from './ticket.js';
 import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut } from './life.js';
 import { createStationAudio } from './audio.js';
+import { createOthers, createTalkBar } from './others.js';
 
 // A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
 // dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
@@ -33,16 +34,21 @@ function footY(map, w) {
   return s.from + ((s.to - s.from) * front) / s.len;
 }
 
-export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false }) {
+// mp (station spec, Multiplayer; null when off the net): { list(now) (peers3d's), tick({ x, z, y, a }) (where I
+// am, every frame), now() (the server's clock, ms since 1970), chat() (opens the chat line), emote(kind) }. The
+// train runs on the shared clock (sharedTime of now(), or of this machine's clock), unless setTime pins it.
+export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null;
   const people = []; // the commuters' figures
   const teardown = () => {
     cancelAnimationFrame(raf);
     if (resize) removeEventListener('resize', resize);
     ticket?.destroy();
     audio?.stop();
+    others?.dispose();
+    talk?.destroy();
     world?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
@@ -142,8 +148,17 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     resize();
     addEventListener('resize', resize);
 
-    let last = performance.now(), t0 = last, leaving = false, frames = 0;
+    // Other players, and the bar to talk to them (Multiplayer).
+    if (mp) {
+      others = createOthers(scene, map, { reducedMotion });
+      talk = createTalkBar(document.body, { onChat: () => mp.chat(), onEmote: (k) => mp.emote(k) });
+    }
+
+    let last = performance.now(), t0 = last, leaving = false, frames = 0, pinned = false;
     const time = () => (performance.now() - t0) / 1000;
+    // The train's clock: shared by everyone (Multiplayer), or this station's own once setTime pins it (tests).
+    const epoch = () => (mp ? mp.now() : performance.timeOrigin + performance.now());
+    const clock = () => (pinned ? time() : sharedTime(epoch()));
     function frame(now) {
       raf = requestAnimationFrame(frame);
       if (document.hidden) { last = now; return; } // paused while hidden (spec §5)
@@ -182,8 +197,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       lantern.position.set(feet.x + joints.lantern.x, feet.y + joints.lantern.y, feet.z + joints.lantern.z);
       lantern.intensity = 9 * (reducedMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 13) * Math.sin(t * 5.1));
 
-      const train = trainAt(t, map);
-      world.update(t, dt, walker, train, gates);
+      const tt = clock(), train = trainAt(tt, map);
+      world.update(t, dt, walker, train, gates, tt);
       for (const p of people) {
         const c = stepCommuter(p.c, dt, { train, walker }, map);
         p.pose.yaw = c.yaw; p.pose.shift = c.shift; p.pose.t = t + c.home.x; // desynchronised breathing
@@ -206,6 +221,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       figure.update(joints, camera, feet);
       for (const p of people) p.figure.update(p.joints, camera, p.at);
       audio.update({ t, dt, walker, pose, gates, train, pigeons: world.pigeons, rats: world.rats, people });
+      if (others) {
+        others.update(mp.list(now), now, dt, t, camera, feet);
+        mp.tick({ x: walker.x, z: walker.z, y: feet.y, a: pose.yaw });
+      }
       v.set(walker.x, walker.y + 0.8, walker.z).project(camera);
       post.setFocus((v.y + 1) / 2);
       post.render();
@@ -217,8 +236,11 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       map, walker,
       frames: () => frames,
       time,
-      train: () => trainAt(time(), map),
-      setTime(s) { t0 = performance.now() - s * 1000; },
+      train: () => trainAt(clock(), map),
+      clock,
+      setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
+      others: () => (others ? others.shown() : []),
+      mine: () => (others ? others.mine() : null),
       teleport(x, z) { walker.x = x; walker.z = z; walker.vx = walker.vz = 0; walker.y = map.levelAt(x, z) ?? walker.y; },
       setWallet(cents) { gates.wallet = cents; },
       gates: () => ({ wallet: gates.wallet, pass: gates.pass, used: gates.used, open: gates.gates.map((g) => g.open), popup: ticket.isOpen,
@@ -230,6 +252,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     window.__station = hook;
 
     return {
+      // What I said or emoted, over my head at once.
+      say(text) { others?.say(text, performance.now()); },
+      pos: () => ({ x: walker.x, z: walker.z, y: footY(map, walker), a: pose.yaw }),
+      emote(kind) { others?.emote(kind, performance.now()); },
       stop() {
         canvas.removeEventListener('pointerdown', onDown);
         canvas.removeEventListener('pointermove', onMove);

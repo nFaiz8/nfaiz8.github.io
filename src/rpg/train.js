@@ -47,3 +47,12 @@ export function departures(t, map, blink = true) {
   }
   return { warn: false, lines: [row('NEXT TRAIN', minutes(start - t)), row('THEN', minutes(startOf(n + 1) - t))] };
 }
+
+// The shared clock (station spec, Multiplayer): every player's station time is the same moment of one schedule,
+// the server's clock in ms (or this machine's) in seconds, modulo PERIOD: 2400 runs, about 23 hours. So everyone
+// sees the same train at the same time; at the wrap the schedule starts again from run 0.
+export const PERIOD = TRAIN.every * 2400;
+export const sharedTime = (epochMs) => { const s = epochMs / 1000; return s - PERIOD * Math.floor(s / PERIOD); };
+// The server's clock less mine, from a message stamped `now` by the server that came back rtt ms after I asked:
+// it was sent about half the round trip ago.
+export const clockOffset = (serverNow, rtt, localNow) => serverNow + (rtt || 0) / 2 - localNow;

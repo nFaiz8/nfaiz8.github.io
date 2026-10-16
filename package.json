@@ -9,7 +9,7 @@
     "build": "node scripts/prepare-photos.mjs && vite build",
     "preview": "vite preview",
     "test": "node --test \"test/*.test.js\"",
-    "e2e": "node e2e/run.mjs && node e2e/editor.mjs && node e2e/multiplayer.mjs && node e2e/station.mjs",
+    "e2e": "node e2e/run.mjs && node e2e/editor.mjs && node e2e/multiplayer.mjs && node e2e/station.mjs && node e2e/station-mp.mjs",
     "e2e:live": "node e2e/multiplayer.mjs",
     "e2e:edit": "node e2e/editor.mjs",
     "photos": "node scripts/prepare-photos.mjs"

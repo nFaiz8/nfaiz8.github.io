@@ -225,3 +225,19 @@ test('a: the input bits go up to 1023 (64 crouched, 128 prone: the crouch addend
     assert.equal(parseMessage(JSON.stringify({ t: 'a', x: 10, y: 20, vx: 0, vy: 0, f: 1, g: 1, i, a: 0, ts: 0 })).i, i);
   }
 });
+
+test('areas: hi may say the area; z moves between known areas; q is a station position to 0.01, inside the map', () => {
+  assert.deepEqual(parseMessage('{"t":"hi","name":"A","area":"station","x":2.5,"z":9.5,"y":0,"a":1}'), { t: 'hi', name: 'A', area: 'station', x: 2.5, z: 9.5, y: 0, a: 1 });
+  assert.deepEqual(parseMessage('{"t":"hi","area":"gallery","x":3,"y":4}'), { t: 'hi', name: '', x: 3, y: 4 });
+  assert.equal(parseMessage('{"t":"hi","area":"roof"}'), null);
+  assert.deepEqual(parseMessage('{"t":"z","area":"station"}'), { t: 'z', area: 'station' });
+  assert.deepEqual(parseMessage('{"t":"z","area":"gallery","x":3.04,"y":4}'), { t: 'z', area: 'gallery', x: 3, y: 4 });
+  assert.equal(parseMessage('{"t":"z","area":"arena"}'), null);
+  assert.equal(parseMessage('{"t":"z"}'), null);
+  assert.deepEqual(parseMessage('{"t":"q","x":1.234,"z":2,"y":-3,"a":-1.5}'), { t: 'q', x: 1.23, z: 2, y: -3, a: -1.5 });
+  for (const bad of ['{"t":"q","x":1}', '{"t":"q","x":-1,"z":1}', '{"t":"q","x":1,"z":99}', '{"t":"q","x":1,"z":1,"y":-8}', '{"t":"q","x":1,"z":1,"a":4}', '{"t":"q","x":null,"z":1}', '{"t":"q","x":"1","z":1}', '{"t":"q","x":1e999,"z":1}'])
+    assert.equal(parseMessage(bad), null, bad);
+  const b = newBuckets(0);
+  assert.deepEqual([take(b, 'z', 0), take(b, 'z', 0), take(b, 'z', 0), take(b, 'z', 0)], [true, true, true, false]);
+  assert.equal(take(b, 'z', 1000), true, 'one more a second later');
+});

@@ -83,6 +83,19 @@ Server → client:
 
 Ids are random 8-character strings, new for every connection.
 
+**Areas** (station spec §5c, added 2026-10-16). Each connection is in the `gallery` (the default) or the
+`station`, and hears `join`, `leave`, `p`, `q`, `e`, `r`, `c` and `n` only from its own area. The arena is
+the gallery's.
+
+| Message | Meaning |
+|---|---|
+| `{t:'hi', name, area?, …}` | `area: 'station'` comes with a station position (`x, z, y?, a?`) instead of cells |
+| `{t:'z', area, …position?}` | move to an area (bucket: 3, then 1/s); the old area gets `leave`, the new `join` |
+| `{t:'q', x, z, y?, a?}` | my station position, to 0.01, inside the station map (`STATION` in rules.js) |
+| `{t:'zw', area, peers, now}` | (server) who's in the area I moved to |
+| `{t:'zc', station}` | (server, to everyone) how many are in the station, whenever it changes |
+| `welcome` | now also `area`, `now` (the server clock, ms) and `station` (the count) |
+
 ### Server checks (`server/rules.js`, pure and unit-tested)
 
 - **Origin**: only `https://faiz.pics` and `http://localhost:*`; anything else gets a 403 on upgrade.

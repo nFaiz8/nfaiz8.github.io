@@ -435,15 +435,15 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   for (const t of tubes) fadeable(t.bar, t.x, t.z, Infinity, { opacity: 0.1, dim: 0.2 });
 
   // Everything added in round 2 (station spec, "Life and props"): signs, the ticker, the turnstiles, the vent, the creatures.
-  const updateLife = (time, dt, walker, pass, gates) => {
+  const updateLife = (time, dt, walker, pass, gates, trainT) => {
     // The clock: real local time, its colon ticking each second (steady with reduced motion).
     const now = Date.now(), tick = reducedMotion || Math.floor(now / 500) % 2 === 0;
     const key = `${Math.floor(now / 60000)}${tick}`;
     if (key !== clockKey) { clockKey = key; clock.draw(clockText(new Date(now), tick)); }
     // The departures board, looked at four times a second and redrawn only when its text changes.
-    if (time - boardAt > 0.25 || time < boardAt) {
-      boardAt = time;
-      const d = departures(time, map, !reducedMotion);
+    if (trainT - boardAt > 0.25 || trainT < boardAt) {
+      boardAt = trainT;
+      const d = departures(trainT, map, !reducedMotion);
       const k = d.lines.join('|');
       if (k !== boardKey) { boardKey = k; board.draw(boardLines(d)); }
     }
@@ -495,9 +495,10 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
 
   return {
     tubes, owned, pigeons, rats, sources,
-    update(time, dt, walker, pass, gates = null) {
+    // trainT: the train's (shared) time, for the departures board; time is the station's own.
+    update(time, dt, walker, pass, gates = null, trainT = time) {
       placeWalls(walker);
-      updateLife(time, dt, walker, pass, gates);
+      updateLife(time, dt, walker, pass, gates, trainT);
       stepFaders(walker, dt);
       const passing = !!pass && pass.phase === 'pass';
       // Tubes: steady, but one has a fault, and the ones near a passing train shudder (spec §5; neither with

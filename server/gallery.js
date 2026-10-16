@@ -6,6 +6,9 @@
 // The arena's map (gorge addendum) is the whole site's: one instance, named CONFIG, keeps it in storage and
 // answers /map; an admin's change (am, behind the password) is stored there and announced to every instance
 // of the admin's version, which drops its fight and tells its people (map).
+// Areas (station spec, Multiplayer): each connection is in the gallery (the default, all an old page knows) or
+// the station, and hears p, q, e, r, c, n, join and leave only from its own area; the arena is the gallery's.
+// Everyone hears how many are in the station (zc), for the lobby's sign.
 import { DurableObject } from 'cloudflare:workers';
 import {
   LIMITS, cleanName, cleanText, hasSlur, parseMessage, adminOk, newBuckets, take, takeShot, clampMove, senderClock, sentAt, newFlood, dropped,
@@ -16,7 +19,7 @@ import { GUNS, FIGHT_VERSION } from '../src/fight.js';
 import trainText from '../src/arena.txt';
 import gorgeText from '../src/gorge.txt';
 
-const KIND = { p: 'p', e: 'e', r: 'r', n: 'n', c: 'c' };
+const KIND = { p: 'p', q: 'q', z: 'z', e: 'e', r: 'r', n: 'n', c: 'c' };
 const ARENA = new Set(['ae', 'al', 'a', 'f', 'm', 'pk', 'rs']);
 const TICK_MS = 33;
 const KICK_GAP = 0.5; // s: after a kick, the next strike waits this long (the 0.55 s cooldown less jitter)
@@ -82,7 +85,7 @@ export class Gallery extends DurableObject {
     this.ctx.acceptWebSocket(server, [tag]);
     const now = Date.now();
     const muteUntil = (await this.ctx.storage.get(`mute:${tag}`)) || 0;
-    server.serializeAttachment({ id: randomId(), name: '', x: 0, y: 0, here: false, buckets: newBuckets(now), flood: newFlood(now), muteUntil, tag,
+    server.serializeAttachment({ id: randomId(), name: '', x: 0, y: 0, area: 'gallery', sp: null, here: false, buckets: newBuckets(now), flood: newFlood(now), muteUntil, tag,
       version: room ? decodeURIComponent(room[1]) : '' }); // whose instances an admin's change is announced to
     if (this.ctx.getWebSockets().length > LIMITS.people) {
       server.send(JSON.stringify({ t: 'full' }));
@@ -91,12 +94,57 @@ export class Gallery extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  others(ws) {
-    return this.ctx.getWebSockets().filter((o) => o !== ws && o.deserializeAttachment()?.here);
+  // Everyone else here in an area (an attachment from before areas is in the gallery).
+  others(ws, area) {
+    return this.ctx.getWebSockets().filter((o) => { const a = o !== ws && o.deserializeAttachment(); return a?.here && (a.area || 'gallery') === area; });
   }
-  broadcast(ws, msg) {
+  broadcast(ws, msg, area) {
     const text = JSON.stringify(msg);
-    for (const o of this.others(ws)) { try { o.send(text); } catch {} }
+    for (const o of this.others(ws, area)) { try { o.send(text); } catch {} }
+  }
+  // How someone is seen in an area: gallery cells, or their station position (none until they've sent one).
+  view(a, area) {
+    return area === 'station' ? { id: a.id, name: a.name, ...(a.sp || {}) } : { id: a.id, name: a.name, x: a.x, y: a.y };
+  }
+  peersIn(ws, area) { return this.others(ws, area).map((o) => this.view(o.deserializeAttachment(), area)); }
+  stationCount() {
+    let n = 0;
+    for (const o of this.ctx.getWebSockets()) { const a = o.deserializeAttachment(); if (a?.here && a.area === 'station') n++; }
+    return n;
+  }
+  // The station's count changed: everyone here hears it.
+  counted() {
+    const text = JSON.stringify({ t: 'zc', station: this.stationCount() });
+    for (const o of this.ctx.getWebSockets()) { if (o.deserializeAttachment()?.here) try { o.send(text); } catch {} }
+  }
+  // Out of the fight, as leaving the page would take you out of it (going down the stairs from inside, say).
+  quitArena(ws, me) {
+    if (!me.fx?.arena) return;
+    const pairs = this.arena(ws, me);
+    const out = (this.ref || this.referee(LEVELS[this.map || DEFAULT_MAP])).leave(me.fx, Date.now() / 1000, pairs.map(([, a]) => a.fx));
+    this.tell(pairs, out, ws);
+    this.save(pairs.filter(([o]) => o !== ws));
+  }
+  // z: to another area (or the same one again: its list again). The old area hears you leave, the new one
+  // you join, where you said you are; you get who's there.
+  move(ws, me, m) {
+    const from = me.area || 'gallery', to = m.area;
+    if (from !== to) {
+      if (from === 'gallery') this.quitArena(ws, me);
+      this.broadcast(ws, { t: 'leave', id: me.id }, from);
+      me.area = to;
+      if (to === 'station') me.sp = null;
+    }
+    if (m.x !== undefined) {
+      if (to === 'station') me.sp = { x: m.x, z: m.z, ...(m.y !== undefined && { y: m.y }), ...(m.a !== undefined && { a: m.a }) };
+      else { me.x = m.x; me.y = m.y; }
+    }
+    ws.serializeAttachment(me);
+    ws.send(JSON.stringify({ t: 'zw', area: to, peers: this.peersIn(ws, to), now: Date.now() }));
+    if (from !== to) {
+      this.broadcast(ws, { t: 'join', ...this.view(me, to) }, to);
+      this.counted();
+    }
   }
 
   async webSocketMessage(ws, data) {
@@ -117,27 +165,39 @@ export class Gallery extends DurableObject {
       const name = cleanName(m.name);
       if (name === null) ws.send(JSON.stringify({ t: 'name-rejected' }));
       me.name = name || '';
-      if (m.x !== undefined) { me.x = m.x; me.y = m.y; }
+      me.area = m.area || 'gallery';
+      if (m.x !== undefined) {
+        if (me.area === 'station') me.sp = { x: m.x, z: m.z, ...(m.y !== undefined && { y: m.y }), ...(m.a !== undefined && { a: m.a }) };
+        else { me.x = m.x; me.y = m.y; }
+      }
       me.here = true;
       me.fx = newFighter(me.id, now / 1000);
       me.clk = senderClock();
       ws.serializeAttachment(me);
-      const peers = this.others(ws).map((o) => { const a = o.deserializeAttachment(); return { id: a.id, name: a.name, x: a.x, y: a.y }; });
+      const peers = this.peersIn(ws, me.area);
       const L = await this.arenaLevel();
-      ws.send(JSON.stringify({ t: 'welcome', id: me.id, peers, fight: L.hash, map: L.name }));
-      this.broadcast(ws, { t: 'join', id: me.id, name: me.name, x: me.x, y: me.y });
+      // area and now are new (station spec, Multiplayer): which area the peers are in, and the server's clock
+      // for the station's shared train; station: how many are down there.
+      ws.send(JSON.stringify({ t: 'welcome', id: me.id, peers, fight: L.hash, map: L.name, area: me.area, now: Date.now(), station: this.stationCount() }));
+      this.broadcast(ws, { t: 'join', ...this.view(me, me.area) }, me.area);
+      if (me.area === 'station') this.counted();
       return;
     }
+    if (ARENA.has(m.t) && (me.area || 'gallery') !== 'gallery') return drop(); // the arena is upstairs
     if (ARENA.has(m.t)) return this.fight(ws, me, m, now, drop, await this.arenaLevel());
     if (m.t === 'am') return this.admin(ws, me, m, now, drop);
     if (!me.here || !take(me.buckets, KIND[m.t], now)) return drop();
-    if (m.t === 'p') { me.x = m.x; me.y = m.y; this.broadcast(ws, { t: 'p', id: me.id, x: m.x, y: m.y }); }
-    else if (m.t === 'e') this.broadcast(ws, { t: 'e', id: me.id, e: m.e });
-    else if (m.t === 'r') this.broadcast(ws, { t: 'r', id: me.id, f: m.f });
+    const area = me.area || 'gallery';
+    if (m.t === 'z') return this.move(ws, me, m);
+    if ((m.t === 'p' && area !== 'gallery') || (m.t === 'q' && area !== 'station')) return drop(); // a position for the area you're not in
+    if (m.t === 'p') { me.x = m.x; me.y = m.y; this.broadcast(ws, { t: 'p', id: me.id, x: m.x, y: m.y }, area); }
+    else if (m.t === 'q') { const { t, ...sp } = m; me.sp = sp; this.broadcast(ws, { t: 'q', id: me.id, ...sp }, area); }
+    else if (m.t === 'e') this.broadcast(ws, { t: 'e', id: me.id, e: m.e }, area);
+    else if (m.t === 'r') this.broadcast(ws, { t: 'r', id: me.id, f: m.f }, area);
     else if (m.t === 'n') {
       const name = cleanName(m.name);
       if (name === null) ws.send(JSON.stringify({ t: 'name-rejected' }));
-      else { me.name = name; this.broadcast(ws, { t: 'n', id: me.id, name }); }
+      else { me.name = name; this.broadcast(ws, { t: 'n', id: me.id, name }, area); }
     } else if (m.t === 'c') {
       // A slur mutes the sender's chat (and their IP's) for LIMITS.muteS; swears are sent censored.
       if (hasSlur(m.text)) {
@@ -147,7 +207,7 @@ export class Gallery extends DurableObject {
       const text = cleanText(m.text);
       if ((me.muteUntil || 0) > now) ws.send(JSON.stringify({ t: 'chat-muted', s: Math.ceil((me.muteUntil - now) / 1000) }));
       else if (text === null) ws.send(JSON.stringify({ t: 'chat-rejected' }));
-      else this.broadcast(ws, { t: 'c', id: me.id, text });
+      else this.broadcast(ws, { t: 'c', id: me.id, text }, area);
     }
     ws.serializeAttachment(me);
   }
@@ -338,12 +398,12 @@ export class Gallery extends DurableObject {
   async webSocketError(ws) { this.leave(ws); }
   leave(ws) {
     const me = ws.deserializeAttachment();
-    if (me?.here && me.fx?.arena) {
-      const pairs = this.arena(ws, me);
-      const out = (this.ref || this.referee(LEVELS[this.map || DEFAULT_MAP])).leave(me.fx, Date.now() / 1000, pairs.map(([, a]) => a.fx));
-      this.tell(pairs, out, ws);
-      this.save(pairs.filter(([o]) => o !== ws));
+    if (me?.here) this.quitArena(ws, me);
+    if (me?.here) {
+      me.here = false;
+      try { ws.serializeAttachment(me); } catch {}
+      this.broadcast(ws, { t: 'leave', id: me.id }, me.area || 'gallery');
+      if (me.area === 'station') this.counted();
     }
-    if (me?.here) { me.here = false; try { ws.serializeAttachment(me); } catch {} this.broadcast(ws, { t: 'leave', id: me.id }); }
   }
 }

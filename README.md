@@ -54,13 +54,16 @@ also edit that file by hand; the build applies it every time.
 Other people walking through the gallery at the same time show up as `@` with their name under
 them. Keys: **1–5** emotes (♥ ! ? ★ ~o/, or the `[☺]` button), **H** sends a heart to the photo
 you're standing at (or tap the ♥ in its caption), **N** sets a short name, and tapping someone's `@`
-follows them (Esc or moving stops). There are no accounts, no chat, and nothing is stored.
+follows them (Esc or moving stops). There are no accounts, and nothing is stored. Down in the station,
+other people are stick figures in their colour with their name over them, **T** or **Enter** chats (the
+words float over your head), the train is the same for everyone, and the lobby's `▼ SUBWAY` sign counts
+who's below.
 
 `server/` is a Cloudflare Worker (`faiz-live`, a Durable Object per gallery instance of up to 30
 people). Setting `MULTIPLAYER.enabled = false` in `src/config.js` turns it off completely. Pushes that
 touch `server/**` redeploy it via `.github/workflows/server.yml`, which needs a `CLOUDFLARE_API_TOKEN`
 repo secret (a Cloudflare API token with **Workers Scripts: Edit**); until that exists, deploy by hand
-with `cd server && npx wrangler deploy`. `npm run e2e:live` runs two browsers against `wrangler dev`.
+with `cd server && npx wrangler deploy`. `npm run e2e:live` runs two browsers against `wrangler dev`, and `node e2e/station-mp.mjs` three in the station.
 
 ## Working on it locally
 
