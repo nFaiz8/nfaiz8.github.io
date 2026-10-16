@@ -231,6 +231,11 @@ body.in-station .viewer, body.in-station .grid, body.in-station .map, body.in-st
 .ticket-buy { color: #7dff9a !important; }
 .ticket-topup { color: #8fd0ff !important; }
 .ticket-close { color: #9fb0c8 !important; }
-.ticket-chip { position: fixed; top: 12px; right: 16px; z-index: 30; padding: 3px 8px; font: 12px/1.4 var(--mono); color: #ffd23f;
+.ticket-chip { position: fixed; top: 12px; right: 64px; z-index: 30; padding: 3px 8px; font: 12px/1.4 var(--mono); color: #ffd23f;
   background: #0c1a33e0; border: 1px solid #7d8692; pointer-events: none; }
+/* The station's speaker button (station spec §8): the ticket chip's look, top right; M mutes too. */
+.sound-toggle { position: fixed; top: 12px; right: 16px; z-index: 30; padding: 3px 8px; font: 12px/1.4 var(--mono); color: #ffd23f;
+  background: #0c1a33e0; border: 1px solid #7d8692; cursor: pointer; letter-spacing: 0; min-width: 40px; }
+.sound-toggle[aria-pressed="true"] { color: #9fb0c8; }
+.sound-toggle:hover, .sound-toggle:focus-visible { outline: none; background: #1f3766; }
 @media (max-width: 360px) { .ticket-box { font-size: 13px; padding: 10px; } }

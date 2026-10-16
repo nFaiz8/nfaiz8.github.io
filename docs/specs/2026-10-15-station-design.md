@@ -50,6 +50,8 @@ tested.
 | `gates.js` | The turnstiles: shut or open for you, the ticket, the wallet (§5b). | none |
 | `life.js` | Pigeons, rats and commuters as small seeded state machines, and pushing you out of people (§5b). | none |
 | `ticket.js` | The ticket machine pop-up (DOM) (§5b). | none |
+| `sound.js` | The sound's arithmetic: footfalls, surfaces, the train's loudness and pan, the PA's schedule, the music by the stairs (§8). | none |
+| `audio.js` | The station's Web Audio: the mixer, the synthesized and recorded sounds, the speaker button (§8). | none |
 | `scene.js` | Builds the station's meshes, lights and glyph textures from the map. | yes |
 | `sprites.js` | ASCII art turned into upright billboard sprites: canvas textures on planes. | yes |
 | `post.js` | Bloom and tilt-shift depth of field. | yes |
@@ -305,6 +307,50 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
 
 ## 7. Not in this slice
 
-Dialogue, people other than the commuters, quests, items, saving, fighting, boarding the train, other areas, multiplayer in the
-station, and sound. The station's code is kept in `src/rpg/` so the next areas reuse `map.js`,
+Dialogue, people other than the commuters, quests, items, saving, fighting, boarding the train, other areas, and
+multiplayer in the station. (Sound was here; it's now in, §8.) The station's code is kept in `src/rpg/` so the next areas reuse `map.js`,
 `move.js`, `sprites.js`, `post.js` and the camera.
+
+## 8. Sound
+
+Added on 2026-10-16 ("start on sound"; then "smooth jazz in the museum and u can hear by the entrance of subway").
+
+- **Web Audio**, in `audio.js`, made with the station and closed with it (its `stop()` closes the AudioContext and
+  removes its button and listeners). A small mixer: master (through a gentle compressor) fed by ambience, effects and
+  train buses, and a shared generated reverb for the tiled space. Each sound is placed by its distance from you and a
+  stereo pan by how far east or west of you it is (`spatial` in `sound.js`; the camera looks north from behind you).
+- **What plays.**
+  - The train: a rumble building in its tunnel for 7 s (the last 3 with the glow), a roar (a looped recording under
+    filtered noise), the wheels' screech and the rails' clatter (each axle knocking over a joint every 12 units) as
+    it passes, loud and panned by where it is; wind behind it; the rumble fading into the other tunnel over 4.5 s. In
+    the hall it's quieter and muffled, through the walls.
+  - Ambience: the fluorescent hum by the nearest tube, the faulty tube's buzz and crackle in time with its flicker
+    (`tubeFault`, shared with `scene.js`), drips as each drop lands (`DRIP`, shared), the steam vent's hiss, a low
+    far-off city, and every minute or so (never over a train) a PA chime and a muffled, wordless voice.
+  - You: footsteps as each foot comes down (the walk cycle's phase), by the tile you're on: hard tile in the hall,
+    gritty concrete on the platform, hollow on the stairs (`surfaceAt`; MAPS.md). The fare machine bleeps and
+    chimes; a turnstile double-beeps green as you come up to it with a ticket and buzzes low when you walk into it
+    locked; its rotor clunks as it takes you, ratchets and clunks over; the emergency gate's push bar clanks and its
+    alarm sounds while the light flashes.
+  - Life: pigeons coo and their wings flap as they fly off and land, rats squeak, commuters' footsteps are faint,
+    and the torn poster flaps in a north train's wind.
+- **Unlock:** nothing plays until a key press or tap after you arrive; that gesture resumes the context. Hidden tab:
+  suspended, resumed on return.
+- **Mute:** a speaker button top right in the ticket chip's style (`◀))` / `◀ ×`) and `M` (or `V`). Remembered in
+  localStorage (`faiz.sound`, `on`/`off`, every access wrapped; `sound-pref.js`) and shared with the museum's music.
+- **Reduced motion:** everything plays, but the alarm sounds once briefly instead of for its 3 s, and the train is
+  softer.
+- **The museum's music** (`src/music.js`): a quiet CC0 smooth-jazz loop in the gallery from the visitor's first key
+  press or tap. That gesture is when `music.js` is imported and the track loads, so the gallery's first load carries
+  only `sound-pref.js` and a few lines in `main.js`. A `[♪] sound` HUD button and `V` (M is the map) mute it, the same
+  remembered setting. Paused while the tab is hidden. There's one context and one looping source for the visit: going
+  down, the station doesn't start its own copy, it places this one (`stairsMusic`): heard drifting down the exit
+  stairs, muffled (low-passed), loud at their foot and gone 7 tiles into the hall; coming back up it eases back to full,
+  where it had got to.
+- **Assets** (`src/rpg/assets/sound/`, `CREDITS.md`): synthesized where that sounds good; small re-encoded clips of
+  CC0 recordings (Kenney, Freesound) and of Adobe Audition's free sound effects (royalty-free in a project, not as
+  standalone files) for the footsteps, the rotor and gate, the pigeons, rats, drips, screech, the train's roar and the
+  city. About 160 KB for the station, loaded after it starts (a clip that fails is skipped); the music is 460 KB.
+- **Tests:** `sound.js` and `sound-pref.js` are unit tested; the e2e checks that nothing is made before a gesture,
+  that the context runs after a key press, that M and V mute and persist across a reload, that leaving closes the
+  station's context, and that fifteen trips leave only the music's context and one music source.

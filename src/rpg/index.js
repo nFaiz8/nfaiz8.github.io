@@ -14,6 +14,7 @@ import { createPost } from './post.js';
 import { createGates, gatedMap, trackGates, bumped, blocked, easeArms, turnRotors, swingGates, rotorTurns, refused, ringState, alarmOn } from './gates.js';
 import { createTicketMachine } from './ticket.js';
 import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut } from './life.js';
+import { createStationAudio } from './audio.js';
 
 // A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
 // dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
@@ -35,12 +36,13 @@ function footY(map, w) {
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, raf = 0, resize = null, hook = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null;
   const people = []; // the commuters' figures
   const teardown = () => {
     cancelAnimationFrame(raf);
     if (resize) removeEventListener('resize', resize);
     ticket?.destroy();
+    audio?.stop();
     world?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
@@ -72,9 +74,12 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     // armed: the machine may open on the next bump (not again until you stop pushing); the emergency gate's red
     // light likewise flashes once per push.
     let armed = true, exitArmed = true, lastPass = null;
+    // Sound (spec §8): silent until a key press or tap here; closed with the station.
+    audio = createStationAudio({ map, sources: { ...world.sources, tubes: map.tubes }, reducedMotion });
     ticket = createTicketMachine(gates, {
       onClose: () => { armed = false; walker.vx = walker.vz = 0; },
       onBought: () => { gates.note = null; }, // the ring goes from red to green
+      onSound: (name) => audio.ticket(name),
     });
 
     // Commuters: the same stick figure, muted, without a lantern; one on the phone (its screen lights its face).
@@ -200,6 +205,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       camera.lookAt(cam.x + shake.x, cam.y + shake.y, cam.z);
       figure.update(joints, camera, feet);
       for (const p of people) p.figure.update(p.joints, camera, p.at);
+      audio.update({ t, dt, walker, pose, gates, train, pigeons: world.pigeons, rats: world.rats, people });
       v.set(walker.x, walker.y + 0.8, walker.z).project(camera);
       post.setFocus((v.y + 1) / 2);
       post.render();
@@ -218,6 +224,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       gates: () => ({ wallet: gates.wallet, pass: gates.pass, used: gates.used, open: gates.gates.map((g) => g.open), popup: ticket.isOpen,
         kind: gates.gates.map((g) => g.kind), ring: gates.gates.map((g, i) => ringState(gates, i, walker, time())), rotor: gates.gates.map(rotorTurns),
         swing: gates.gates.map((g) => g.swing), alarm: gates.gates.some((g) => alarmOn(gates, g, time())) }),
+      audio: () => audio.state(),
       life: () => ({ pigeons: world.pigeons.map((p) => p.s.state), rats: world.rats.map((r) => r.s.state), commuters: crowd.map((c) => ({ x: c.x, z: c.z, yaw: c.yaw })) }),
     };
     window.__station = hook;

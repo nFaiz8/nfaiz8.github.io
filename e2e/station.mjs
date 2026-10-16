@@ -20,10 +20,32 @@ const takeStairs = (page) => page.evaluate(() => { const s = window.__ascii.map.
 const consoleLog = [];
 const nFrames = (page, n) => page.evaluate((n) => new Promise((done) => { const f = () => (--n <= 0 ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
 
+// Sound (spec §8): every AudioContext the page makes and closes is counted, so trips that leak one show.
+const countContexts = () => {
+  const A = window.AudioContext;
+  if (!A) return;
+  const n = { created: 0, closed: 0 };
+  window.AudioContext = class extends A {
+    constructor(...args) { super(...args); n.created++; }
+    close() { n.closed++; return super.close(); }
+  };
+  window.__contexts = () => ({ ...n });
+};
+const requested = [];
+
 await withBrowser(async ({ page, url, errors }) => {
   page.on('console', (m) => consoleLog.push(m.text()));
+  page.on('request', (r) => requested.push(r.url()));
+  await page.evaluateOnNewDocument(countContexts);
   await page.goto(url);
   await ready(page);
+
+  await check('the gallery makes no sound and loads no audio before a key press or tap', async () => {
+    await sleep(500);
+    assert.deepEqual(await page.evaluate(() => window.__contexts()), { created: 0, closed: 0 });
+    assert.equal((await page.evaluate(() => window.__ascii.music())).state, 'none');
+    assert.deepEqual(requested.filter((u) => /music|smooth-104|\/rpg\/audio/.test(u)), []);
+  });
 
   await check('walking onto the lobby stairs goes down to the station', async () => {
     await takeStairs(page);
@@ -39,12 +61,35 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(channels.some((c) => c.stdev > 8), 'not a blank screen');
   });
 
+  await check('the station is silent until a key press', async () => {
+    const a = await page.evaluate(() => window.__station.audio());
+    assert.equal(a.unlocked, false);
+    assert.equal((await page.evaluate(() => window.__ascii.music())).state, 'none', 'no gesture yet, so no music either');
+    assert.equal(await page.evaluate(() => !!document.querySelector('.sound-toggle')), true, 'the speaker button');
+  });
+
   await check('you walk', async () => {
     const a = await page.evaluate(() => ({ ...window.__station.walker }));
     await page.keyboard.down('KeyD');
     try { await sleep(600); } finally { await page.keyboard.up('KeyD'); }
     const b = await page.evaluate(() => ({ ...window.__station.walker }));
     assert.ok(b.x > a.x + 1, `moved east ${a.x.toFixed(2)} → ${b.x.toFixed(2)}`);
+  });
+
+  await check('after a key press the station sounds, and the museum music drifts down the stairs', async () => {
+    await page.waitForFunction(() => window.__station.audio().state === 'running' && window.__station.audio().unlocked, { timeout: 5000 });
+    await page.waitForFunction(() => window.__ascii.music().state === 'running' && window.__ascii.music().sources === 1, { timeout: 10000 });
+    const m = await page.evaluate(() => window.__ascii.music());
+    assert.equal(m.scene, 'station');
+    await page.evaluate(() => window.__station.teleport(2.6, 9.5)); // at the foot of the exit stairs
+    await sleep(200);
+    const nearStairs = await page.evaluate(() => window.__ascii.music());
+    await page.evaluate(() => window.__station.teleport(11, 9.5)); // across the hall
+    await sleep(200);
+    const across = await page.evaluate(() => window.__ascii.music());
+    assert.ok(nearStairs.gain > 0.05 && nearStairs.cutoff < 2000, `muffled jazz by the stairs: ${JSON.stringify(nearStairs)}`);
+    assert.equal(across.gain, 0, 'gone across the hall');
+    await page.waitForFunction(() => window.__station.audio().loaded > 10, { timeout: 10000 });
   });
 
   // The turnstiles (station spec, "Life and props (round 2)"): shut from the hall until you buy a ticket.
@@ -287,19 +332,65 @@ await withBrowser(async ({ page, url, errors }) => {
     }
   });
 
-  await check('fifteen trips down and up leave one station at most and no lost WebGL contexts', async () => {
+  await check('V mutes the museum music, and it stays muted after a reload', async () => {
     await page.goto(url);
     await ready(page);
+    await page.evaluate(() => localStorage.removeItem('faiz.sound'));
+    await page.keyboard.press('KeyV');
+    await page.waitForFunction(() => window.__ascii.music().state === 'running', { timeout: 10000 });
+    assert.equal((await page.evaluate(() => window.__ascii.music())).muted, true);
+    assert.equal(await page.evaluate(() => localStorage.getItem('faiz.sound')), 'off');
+    assert.equal(await page.evaluate(() => document.getElementById('sound-btn').getAttribute('aria-pressed')), 'true');
+    await page.reload();
+    await ready(page);
+    assert.equal(await page.evaluate(() => document.getElementById('sound-btn').getAttribute('aria-pressed')), 'true', 'still muted');
+    await page.click('#sound-btn');
+    await page.waitForFunction(() => window.__ascii.music().state === 'running' && !window.__ascii.music().muted, { timeout: 10000 });
+    assert.equal(await page.evaluate(() => localStorage.getItem('faiz.sound')), 'on');
+  });
+
+  await check('M mutes the station, and it stays muted after a reload', async () => {
+    await page.goto('about:blank');
+    await page.goto(`${url}#/station`);
+    await inStation(page);
+    await page.keyboard.press('KeyM');
+    assert.equal((await page.evaluate(() => window.__station.audio())).muted, true);
+    assert.equal(await page.evaluate(() => document.querySelector('.sound-toggle').getAttribute('aria-pressed')), 'true');
+    await page.reload();
+    await inStation(page);
+    assert.equal((await page.evaluate(() => window.__station.audio())).muted, true, 'remembered');
+    await page.keyboard.press('KeyM');
+    assert.equal((await page.evaluate(() => window.__station.audio())).muted, false);
+    assert.equal(await page.evaluate(() => localStorage.getItem('faiz.sound')), 'on');
+  });
+
+  await check('fifteen trips down and up leave one station at most, no lost WebGL contexts, no lingering AudioContexts and one music source', async () => {
+    await page.goto(url);
+    await ready(page);
+    await page.keyboard.press('Shift'); // the music starts
+    await page.waitForFunction(() => window.__ascii.music().sources === 1, { timeout: 10000 });
+    const before = await page.evaluate(() => window.__ascii.music());
     for (let i = 0; i < 15; i++) {
       await takeStairs(page);
       await inStation(page);
       assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 1, `trip ${i + 1}: one station canvas`);
+      await page.keyboard.press('Shift'); // the station's sound starts too
+      await page.waitForFunction(() => window.__station.audio().unlocked, { timeout: 5000 });
+      assert.equal((await page.evaluate(() => window.__ascii.music())).scene, 'station', `trip ${i + 1}: the music hands off`);
       await page.goBack();
       await backInGallery(page);
       assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 0, `trip ${i + 1}: no station canvas`);
+      assert.equal(await page.evaluate(() => document.querySelectorAll('.sound-toggle').length), 0, `trip ${i + 1}: no station speaker button`);
     }
     const lost = consoleLog.filter((m) => m.includes('Too many active WebGL contexts'));
     assert.deepEqual(lost, []);
+    const n = await page.evaluate(() => window.__contexts());
+    assert.equal(n.created - n.closed, 1, `only the music's context is left: ${JSON.stringify(n)}`);
+    assert.equal(n.created, 16);
+    const after = await page.evaluate(() => window.__ascii.music());
+    assert.equal(after.sources, 1, 'one music source, never restarted or doubled');
+    assert.equal(after.scene, 'gallery');
+    assert.ok(after.at > before.at + 5, 'the music kept time all along');
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));

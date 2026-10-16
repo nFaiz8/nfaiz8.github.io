@@ -32,6 +32,10 @@ The player is about 0.5 wide and 1.6 tall.
 | `S` | spawn: where you arrive (exactly one) | as the floor around it | yes |
 | `E` | exit up to the museum (at least one) | as the floor around it | yes |
 
+Footsteps sound by tile (`surfaceAt` in `src/rpg/sound.js`): stairs are hollow, the platform's level (`_`, `!`) is
+gritty concrete, and every other floor you can walk on is the hall's hard tile. The fluorescent hum comes from the
+tubes, the drips from the `~` puddles, and the museum's music drifts down from the `E` exits.
+
 Fluorescent tubes are placed for you: along the middle row of each platform band every 5 columns, and on a
 4-tile grid over the hall. A track row that reaches the map's edge goes into a tunnel there.
 

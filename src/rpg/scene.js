@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { LEVEL } from './map.js';
 import { makeSprite, PROPS, FONT, boxed } from './sprites.js';
 import { TRAIN, departures } from './train.js';
+import { tubeFault, DRIP } from './sound.js';
 import { STATION_LIFE, createPigeon, stepPigeon, createRat, stepRat } from './life.js';
 import { buildTurnstiles } from './turnstiles.js';
 
@@ -382,7 +383,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   const puddles = map.cells.filter((c) => c.ch === '~').map((c, i) => {
     const drop = new THREE.Mesh(dripGeo, waterMat), ring = new THREE.Mesh(ringGeo, own(waterMat.clone()));
     scene.add(drop, ring);
-    return { x: c.c + 0.5, z: c.r + 0.5, y: c.level, drop, ring, period: 1.3 + i * 0.37 };
+    return { x: c.c + 0.5, z: c.r + 0.5, y: c.level, drop, ring, period: DRIP.period(i) };
   });
 
   // A sheet of newspaper on the platform, which the train's wind skitters along.
@@ -485,8 +486,15 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     }
   };
 
+  // Where things that make a sound are, for audio.js: the steam vent, the torn poster's corner, the faulty tube, the
+  // puddles (in DRIP.period order).
+  const sources = {
+    vent, poster: { x: flap.mesh.position.x, y: flap.mesh.position.y, z: flap.mesh.position.z }, fault: tubes[flicker] || null,
+    puddles: puddles.map((p) => ({ x: p.x, y: p.y, z: p.z })),
+  };
+
   return {
-    tubes, owned, pigeons, rats,
+    tubes, owned, pigeons, rats, sources,
     update(time, dt, walker, pass, gates = null) {
       placeWalls(walker);
       updateLife(time, dt, walker, pass, gates);
@@ -498,8 +506,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         const t = tubes[i];
         let k = 1;
         if (i === flicker && !reducedMotion) {
-          const ph = (time + 1.3) % 4.1; // a 0.9 s stutter every 4.1 s, and a flick now and then between
-          k = ph < 0.9 ? (Math.sin(time * 26) > -0.2 ? 0.1 : 1) : Math.sin(time * 31) + Math.sin(time * 7.3) > 1.75 ? 0.1 : 1;
+          k = tubeFault(time); // a 0.9 s stutter every 4.1 s, and a flick now and then between (sound.js: it crackles)
         }
         if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 0.55 + 0.45 * Math.abs(Math.sin(time * 53 + i));
         t.light.intensity = t.base * k;
@@ -551,17 +558,17 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       }
       dustGeo.attributes.color.needsUpdate = true;
       dustGeo.attributes.position.needsUpdate = true;
-      // Drips: 0.6 s falling from the ceiling, then a ripple for 0.8 s.
+      // Drips: DRIP.fall seconds falling from the ceiling, then a ripple for DRIP.ring (audio.js plinks as it lands).
       for (let i = 0; i < puddles.length; i++) {
         const p = puddles[i];
-        const ph = (time % p.period) / p.period, fallEnd = 0.6 / p.period;
+        const ph = (time % p.period) / p.period, fallEnd = DRIP.fall / p.period;
         p.drop.visible = ph < fallEnd;
         p.drop.position.set(p.x, p.y + 3.4 * (1 - ph / fallEnd), p.z);
         const rt = (ph - fallEnd) * p.period;
-        p.ring.visible = rt > 0 && rt < 0.8;
+        p.ring.visible = rt > 0 && rt < DRIP.ring;
         p.ring.position.set(p.x, p.y + 0.02, p.z);
         p.ring.scale.setScalar(1 + rt * 7);
-        p.ring.material.opacity = 0.8 * (1 - rt / 0.8);
+        p.ring.material.opacity = 0.8 * (1 - rt / DRIP.ring);
       }
       // The newspaper skitters in the wind where it lies (a train on the far track barely stirs it), and stops
       // at the platform's ends.

@@ -12,7 +12,8 @@ const W = 27; // the box's inside width, in characters
 const pad = (s) => s.padEnd(W).slice(0, W);
 const centre = (s) => pad(' '.repeat(Math.max(0, Math.floor((W - s.length) / 2))) + s);
 
-export function createTicketMachine(gates, { parent = document.body, onBought = () => {}, onClose = () => {} } = {}) {
+// onSound(name) hears what the machine says: 'open', 'select', 'bought', 'funds', 'topup', 'close' (audio.js bleeps).
+export function createTicketMachine(gates, { parent = document.body, onBought = () => {}, onClose = () => {}, onSound = () => {} } = {}) {
   const root = document.createElement('div');
   root.className = 'ticket';
   root.hidden = true;
@@ -50,7 +51,7 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
     box.append(line(`┌${'─'.repeat(dashes)}${title}${'─'.repeat(W - title.length - dashes)}┐`));
     KINDS.forEach((k, i) => {
       const text = ` ${i === selected ? '▸' : ' '} ${NAMES[k].padEnd(14)}   ${money(PRICES[k])}`;
-      const b = button(pad(text), 'ticket-opt', () => { selected = i; funds = false; status = ''; render(); focusSel(); });
+      const b = button(pad(text), 'ticket-opt', () => { selected = i; funds = false; status = ''; onSound('select'); render(); focusSel(); });
       b.setAttribute('aria-pressed', String(i === selected));
       box.append(line('│', b, '│'));
     });
@@ -67,14 +68,16 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
   function doBuy() {
     if (done) return;
     const r = buy(gates, KINDS[selected]);
-    if (!r.ok) { funds = r.reason === 'funds'; status = 'insufficient funds'; render(); box.querySelector('.ticket-topup')?.focus({ preventScroll: true }); return; }
+    if (!r.ok) { funds = r.reason === 'funds'; status = 'insufficient funds'; onSound('funds'); render(); box.querySelector('.ticket-topup')?.focus({ preventScroll: true }); return; }
     done = true; funds = false; status = '✓ beep';
+    onSound('bought');
     render();
     updateChip();
     timer = setTimeout(() => { close(); onBought(gates.pass); }, 650);
   }
   function doTopUp() {
     topUp(gates);
+    onSound('topup');
     funds = false; status = `+${money(TOP_UP)}`;
     render(); focusSel();
   }
@@ -87,8 +90,8 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
     e.preventDefault();
     if (e.repeat && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowUp' || e.code === 'KeyW') { selected = (selected + KINDS.length - 1) % KINDS.length; status = ''; funds = false; render(); focusSel(); }
-    else if (e.key === 'ArrowDown' || e.code === 'KeyS') { selected = (selected + 1) % KINDS.length; status = ''; funds = false; render(); focusSel(); }
+    else if (e.key === 'ArrowUp' || e.code === 'KeyW') { selected = (selected + KINDS.length - 1) % KINDS.length; status = ''; funds = false; onSound('select'); render(); focusSel(); }
+    else if (e.key === 'ArrowDown' || e.code === 'KeyS') { selected = (selected + 1) % KINDS.length; status = ''; funds = false; onSound('select'); render(); focusSel(); }
     else if (e.code === 'KeyT' && funds) doTopUp();
     else if (e.key === 'Enter' || e.key === ' ') {
       const f = document.activeElement;
@@ -108,6 +111,7 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
     open = true; done = false; funds = false; downOnBackdrop = false;
     status = gates.used > 0 && !gates.pass ? 'ride used · buy another' : '';
     root.hidden = false;
+    onSound('open');
     render();
     focusSel();
     addEventListener('keydown', onKey, true);
@@ -119,6 +123,7 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
     root.hidden = true;
     removeEventListener('keydown', onKey, true);
     document.activeElement?.blur?.();
+    onSound('close');
     onClose();
   }
   function updateChip() {
