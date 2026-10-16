@@ -62,7 +62,7 @@ test('four deagle hits pop: k with kills 1; the dead target holds the deagle', (
   const out = [];
   for (let k = 0; k < 4; k++) { shoot(R, A, 1 + k * 0.5, [A, B]); out.push(...run(R, 1 + k * 0.5, 1.4 + k * 0.5, [A, B])); }
   assert.deepEqual(out.filter((m) => m.t === 'h').map((h) => h.hp), [75, 50, 25, 0]);
-  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1 });
+  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1, streak: 1 });
   assert.equal(B.alive, false);
   assert.equal(B.gun, 'deagle');
 });
@@ -189,7 +189,7 @@ test('respawn: refused before 1.9 s; then sp at the spawn farthest from everyone
 test('leaving within 3 s of a hit gives the hitter the kill (fled); after 3.1 s it does not', () => {
   const R = ref(), A = F('a', 20.5), B = F('b', 30.5);
   Object.assign(B, { hitBy: 'a', hurtAt: 10 });
-  assert.deepEqual(R.leave(B, 12.9, [A, B]), [{ t: 'k', id: 'b', by: 'a', kills: 1, fled: 1 }, { t: 'ax', id: 'b' }]);
+  assert.deepEqual(R.leave(B, 12.9, [A, B]), [{ t: 'k', id: 'b', by: 'a', kills: 1, streak: 1, fled: 1 }, { t: 'ax', id: 'b' }]);
   const C = F('c', 40);
   Object.assign(C, { hitBy: 'a', hurtAt: 10 });
   assert.deepEqual(R.leave(C, 13.1, [A, C]), [{ t: 'ax', id: 'c' }]);
@@ -214,7 +214,7 @@ test('a shooter that pops keeps its bullets flying, and they can still kill', ()
   shoot(R, A, 1, [A, B]);
   Object.assign(A, { alive: false, deadAt: 1.01 });
   const out = run(R, 1, 1.3, [A, B]);
-  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1 });
+  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1, streak: 1 });
 });
 
 test('records survive a JSON round trip (Durable Object attachments)', () => {
@@ -400,7 +400,7 @@ test('a sniper headshot kills from 100 and its k carries hs: 1; a sniper body sh
   const out = run(R, 1, 1.3, [A, B]);
   const h = out.find((m) => m.t === 'h');
   assert.deepEqual([h.d, h.hp, h.hs], [140, 0, 1]);
-  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1, hs: 1 });
+  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'b', by: 'a', kills: 1, streak: 1, hs: 1 });
   const R2 = ref(), A2 = F('a', 20.5), B2 = F('b', 30.5);
   A2.gun = 'sniper'; A2.ammo = 5;
   shoot(R2, A2, 1, [A2, B2]);
@@ -667,7 +667,7 @@ test('parry: a kill by a parried round is the parrier\'s, and its k carries pr: 
   const all = [A, B];
   shoot(R, A, 1, all);
   const out = [...run(R, 1, 1.04, all), ...R.strike(B, { k: 'p' }, 1.05, all).out, ...run(R, 1.05, 1.8, all)];
-  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'a', by: 'b', kills: 1, pr: 1 });
+  assert.deepEqual(out.find((m) => m.t === 'k'), { t: 'k', id: 'a', by: 'b', kills: 1, streak: 1, pr: 1 });
   assert.equal(B.kills, 1);
 });
 
@@ -695,4 +695,25 @@ test('parry: the shooter can parry it back, and then it is theirs again', () => 
   const h = out.find((m) => m.t === 'h');
   assert.equal(h.id, 'b');
   assert.equal(h.by, 'a');
+});
+
+test('streaks: each kill adds one to the killer\'s streak (k carries it); dying or leaving the arena ends it', () => {
+  const R = ref(), A = F('a', 20.5);
+  const pop = (B, t0) => { const out = []; for (let k = 0; k < 4; k++) { shoot(R, A, t0 + k * 0.5, [A, B]); out.push(...run(R, t0 + k * 0.5, t0 + 0.4 + k * 0.5, [A, B])); } return out.find((m) => m.t === 'k'); };
+  assert.equal(pop(F('b', 30.5), 1).streak, 1);
+  assert.equal(pop(F('c', 30.5), 4).streak, 2);
+  assert.equal(A.streak, 2);
+  // A flee kill counts too.
+  const D = F('d', 40);
+  Object.assign(D, { hitBy: 'a', hurtAt: 10 });
+  assert.equal(R.leave(D, 11, [A, D])[0].streak, 3);
+  // A dies: the streak is over.
+  const E = F('e', 30.5, 24.5, -1), out = [];
+  for (let k = 0; k < 4; k++) { shoot(R, E, 20 + k * 0.5, [A, E], Math.PI); out.push(...run(R, 20 + k * 0.5, 20.4 + k * 0.5, [A, E])); }
+  assert.equal(A.alive, false);
+  assert.equal(A.streak, 0);
+  // Leaving the arena ends it too.
+  const G = Object.assign(F('g', 20), { streak: 4 });
+  R.leave(G, 30, [G]);
+  assert.equal(G.streak, 0);
 });

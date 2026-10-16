@@ -32,6 +32,7 @@ const DUMMY_BACK = 2000; // ms after the connection drops before the dummy shows
 const PK_EVERY = 500, RS_EVERY = 1000; // ms
 const SHAKE = { time: 0.15, amp: 0.4 }; // kicked or popped
 const HEAD_SHAKE = { time: 0.1, amp: 0.2 }; // my bullet landed a headshot
+const RECORD_MS = 3000; // NEW RECORD shows this long
 const AIM_WARN = 0.3; // s: a sniper's aim line brightens this long before its next shot is ready
 const MAX_PRESSES = 4; // strike presses handled in one frame
 const IDLE = { x: 0, y: 0, run: false, jump: false, down: false };
@@ -80,6 +81,8 @@ export function createPvp({
   let lastF = null, awaitAw = false; // the facing in my last a
   let act = null; // my last act: { act, at, for } in ms
   let aim = 0, aimed = false, bits = 0, urgent = false, wasRolling = false, kills = 0;
+  // The all-time streak board (ks) and my streak now; recordAt: when my streak last put me in the top three.
+  let best = [], streak = 0, recordAt = -Infinity;
   let lastShot = -Infinity, lastPk = -Infinity, lastRs = -Infinity, deadAt = 0;
   let dummyBackAt = 0, dummyUp = false;
   let cutJumpT = null; // the air jump (my body's airJumpT) whose flip a kick, hurt or roll took over
@@ -271,9 +274,17 @@ export function createPvp({
       const list = Array.isArray(m.fighters) ? m.fighters.filter((q) => q && !isMe(q.id)) : [];
       fighters.apply({ ...m, fighters: list }, now);
       awaitAw = false;
+      streak = 0; // the server starts each entrance's streak afresh
       return;
     }
     if (m.t === 'k' && isMe(m.by) && num(m.kills)) kills = me.kills = m.kills;
+    if (m.t === 'k' && isMe(m.by) && num(m.streak)) streak = m.streak;
+    if (m.t === 'k' && isMe(m.id)) streak = 0;
+    if (m.t === 'ks') {
+      if (Array.isArray(m.top)) best = m.top.filter((r) => r && typeof r.name === 'string' && num(r.n)).slice(0, 3);
+      if (isMe(m.by)) recordAt = now;
+      return;
+    }
     if (isMe(m.id)) {
       mineMsg(m, now);
       if (m.t === 'k') fighters.apply(m, now); // the killer's new count
@@ -513,7 +524,8 @@ export function createPvp({
     const board = rows.slice(0, 5);
     if (!board.some((r) => r.me)) board.push(rows.find((r) => r.me));
     const hp = me.alive ? Math.max(1, Math.round(regenHp(me.hp, me.hurtAt, sec(now)))) : 0;
-    return { hp, gun: me.gun, ammo: me.ammo, alive: me.alive, showBoard: others.length > 0, board };
+    return { hp, gun: me.gun, ammo: me.ammo, alive: me.alive, showBoard: others.length > 0, board,
+      best, streak, record: now - recordAt < RECORD_MS };
   }
 
   // ---------- entering, leaving, the connection ----------

@@ -35,7 +35,7 @@ export function newFighter(id, now) {
   return {
     id, arena: false, x: 0, y: 0, vx: 0, vy: 0, f: 1, g: 1, i: 0, a: 0, at: now,
     hp: MAX_HP, hurtAt: -1e9, alive: true, deadAt: -1e9, safeUntil: 0,
-    kills: 0, combo: 0, strikeAt: -1e9, lastStrike: null, airAt: -1e9, hitBy: null,
+    kills: 0, streak: 0, combo: 0, // streak: kills since you last died (or entered) strikeAt: -1e9, lastStrike: null, airAt: -1e9, hitBy: null,
     gun: 'deagle', ammo: -1, rollAt: null, rollEnd: -1e9,
   };
 }
@@ -89,11 +89,11 @@ export function createReferee({ level, rand }) {
     if (lo) out[0].lo = 1;
     if (pr) out[0].pr = 1;
     if (T.hp <= 0) {
-      T.alive = false; T.deadAt = now; T.hp = 0;
+      T.alive = false; T.deadAt = now; T.hp = 0; T.streak = 0;
       toDeagle(T);
       const K = all.find((o) => o.id === by);
-      if (K) K.kills++;
-      const k = { t: 'k', id: T.id, by, kills: K ? K.kills : 0 };
+      if (K) { K.kills++; K.streak = (K.streak || 0) + 1; }
+      const k = { t: 'k', id: T.id, by, kills: K ? K.kills : 0, streak: K ? K.streak : 0 };
       if (hs) k.hs = 1;
       if (pr) k.pr = 1;
       out.push(k);
@@ -287,12 +287,13 @@ export function createReferee({ level, rand }) {
     const by = F.alive ? fleeKiller(F, now) : null;
     const K = by && all.find((o) => o.id === by);
     if (K) {
-      K.kills++;
-      out.push({ t: 'k', id: F.id, by: K.id, kills: K.kills, fled: 1 });
+      K.kills++; K.streak = (K.streak || 0) + 1;
+      out.push({ t: 'k', id: F.id, by: K.id, kills: K.kills, streak: K.streak, fled: 1 });
       F.hitBy = null;
     }
     out.push({ t: 'ax', id: F.id });
     F.arena = false;
+    F.streak = 0;
     F.rollAt = null;
     return out;
   }

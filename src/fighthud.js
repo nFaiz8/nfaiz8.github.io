@@ -11,15 +11,32 @@ export function hpText({ hp, gun, ammo }) {
   return `hp ${'█'.repeat(full)}${'░'.repeat(10 - full)} ${v}${ammoText}`;
 }
 
+// `best streaks 1 faiz 7 · 2 bo 5 · 3 cy 4 · streak 3`: the all-time top three kill streaks (the server's board),
+// then mine once it's 2 or more, with NEW RECORD while I've just made the top three.
+export function streakText({ best = [], streak = 0, record = false }) {
+  const parts = [];
+  if (best.length) parts.push('best streaks ' + best.slice(0, 3).map((r, i) => `${i + 1} ${r.name} ${r.n}`).join(' · '));
+  if (streak >= 2) parts.push(`streak ${streak}${record ? ' NEW RECORD' : ''}`);
+  return parts.join(' · ');
+}
+
 // rows: how many places the board shows (plus me, if I'm not among them). nameOf(id), colorOf(id) → [r, g, b].
-export function createFightHud({ root, hp, board, feed, rows = 5, nameOf = () => '', colorOf = () => [200, 200, 200] }) {
-  let lastHp = null, lastBoard = null;
+export function createFightHud({ root, hp, board, feed, streaks, rows = 5, nameOf = () => '', colorOf = () => [200, 200, 200] }) {
+  let lastHp = null, lastBoard = null, lastStreaks = null;
 
   function render(hud) {
     root.hidden = !hud;
     if (!hud) return;
     const text = hpText(hud);
     if (text !== lastHp) { hp.textContent = text; lastHp = text; }
+    // The streaks show on their own too: the board is worth seeing before anyone else is fighting.
+    const st = streakText(hud);
+    if (streaks && st !== lastStreaks) {
+      streaks.textContent = st;
+      streaks.hidden = !st;
+      streaks.classList.toggle('record', !!hud.record);
+      lastStreaks = st;
+    }
     board.hidden = feed.hidden = !hud.showBoard;
     if (!hud.showBoard) return;
     const list = hud.board.filter(Boolean).slice(0, rows);

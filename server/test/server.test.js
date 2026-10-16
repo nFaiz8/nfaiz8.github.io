@@ -801,3 +801,10 @@ test('arena messages from the station are dropped', async () => {
   assert.equal(g.inbox.filter((m) => m.t === 'aj').length, 0);
   g.close(); s.close();
 });
+
+test('coming into the fight brings the all-time streak board (ks)', async () => {
+  const a = await fighter(room(), 'Ann');
+  const ks = await a.next('ks');
+  assert.ok(Array.isArray(ks.top) && ks.top.length <= 3, JSON.stringify(ks));
+  a.close();
+});

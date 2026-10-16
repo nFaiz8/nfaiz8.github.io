@@ -964,3 +964,20 @@ test('online: running through a pickup, where I am goes out right before the pk 
     assert.ok(Math.abs(a.x - q.x) <= pickupReach('sniper') && Math.abs(a.y - q.y) <= 2, `from ${d.toFixed(1)} further: the state before it is out of reach: ${a.x}, ${a.y} vs ${q.x}, ${q.y}`);
   }
 });
+
+test('streaks: mine from the server\'s k, gone when I\'m popped; the board from ks, NEW RECORD when I made it', () => {
+  const s = setupNamed();
+  s.pvp.onMessage({ t: 'aw', lv: 'x', you: { hp: 100, kills: 0, w: 'd', ammo: -1 }, pk: [], fighters: [fighter('a', 20.5), fighter('b', 40.5)] }, s.now);
+  s.pvp.onMessage({ t: 'ks', top: [{ name: 'Ann', n: 4 }, { bad: 1 }] }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'b', by: 'me', kills: 1, streak: 1 }, s.now);
+  s.pvp.onMessage({ t: 'k', id: 'a', by: 'me', kills: 2, streak: 2 }, s.now);
+  let h = s.pvp.hud(s.now);
+  assert.deepEqual([h.best, h.streak, h.record], [[{ name: 'Ann', n: 4 }], 2, false]);
+  s.pvp.onMessage({ t: 'ks', top: [{ name: 'Ann', n: 4 }, { name: 'faiz', n: 2 }], by: 'me' }, s.now);
+  h = s.pvp.hud(s.now);
+  assert.equal(h.best.length, 2);
+  assert.ok(h.record);
+  assert.ok(!s.pvp.hud(s.now + 5000).record, 'the flash passes');
+  s.pvp.onMessage({ t: 'k', id: 'me', by: 'a', kills: 1, streak: 1 }, s.now);
+  assert.equal(s.pvp.hud(s.now).streak, 0);
+});

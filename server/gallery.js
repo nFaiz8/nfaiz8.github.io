@@ -6,12 +6,15 @@
 // The arena's map (gorge addendum) is the whole site's: one instance, named CONFIG, keeps it in storage and
 // answers /map; an admin's change (am, behind the password) is stored there and announced to every instance
 // of the admin's version, which drops its fight and tells its people (map).
+// CONFIG keeps the all-time kill-streak board too (/streaks): an instance reports each streak of 2 or more by
+// the killer's name, and tells its fight the top three (ks) when they change, and each person as they come in.
 // Areas (station spec, Multiplayer): each connection is in the gallery (the default, all an old page knows) or
 // the station, and hears p, q, e, r, c, n, join and leave only from its own area; the arena is the gallery's.
 // Everyone hears how many are in the station (zc), for the lobby's sign.
 import { DurableObject } from 'cloudflare:workers';
 import {
   LIMITS, cleanName, cleanText, hasSlur, parseMessage, adminOk, newBuckets, take, takeShot, clampMove, senderClock, sentAt, newFlood, dropped,
+  STREAKS, addStreak,
 } from './rules.js';
 import { createReferee, newFighter } from '../src/referee.js';
 import { parseMap, levelKind, levelHash, mapName, SOLID, DEFAULT_MAP } from '../src/level.js';
@@ -71,6 +74,16 @@ export class Gallery extends DurableObject {
         await this.ctx.storage.put('map', mapName(map));
       }
       return Response.json({ map: mapName(await this.ctx.storage.get('map')) });
+    }
+    // CONFIG: the streak board, and a new streak onto it.
+    if (path === '/streaks') {
+      let board = (await this.ctx.storage.get('streaks')) || [];
+      if (req.method === 'POST') {
+        const { name, n } = await req.json();
+        const next = addStreak(board, name, n);
+        if (next !== board) await this.ctx.storage.put('streaks', (board = next));
+      }
+      return Response.json({ top: board.slice(0, STREAKS.shown) });
     }
     // An instance: the map changed. Out of the fight, everyone; the new map goes to all.
     if (path === '/announce') {
@@ -267,7 +280,23 @@ export class Gallery extends DurableObject {
     for (const msg of msgs) {
       const text = JSON.stringify(msg);
       for (const [o] of pairs) if (o !== skip) { try { o.send(text); } catch {} }
+      if (msg.t === 'k' && msg.streak >= STREAKS.min) this.streak(msg.by, msg.streak).catch(() => {});
     }
+  }
+  // The top three streaks as CONFIG has them; a streak sent with it may change them.
+  async streaks(body) {
+    const res = await this.env.GALLERY.get(this.env.GALLERY.idFromName(CONFIG))
+      .fetch('https://do/streaks', body ? { method: 'POST', body: JSON.stringify(body) } : undefined);
+    return (await res.json()).top;
+  }
+  // A kill made a streak: onto the board under the killer's name, and if the top three changed, the fight hears.
+  async streak(by, n) {
+    const killer = this.ctx.getWebSockets().map((o) => o.deserializeAttachment()).find((a) => a?.fx?.id === by);
+    if (!killer?.name) return;
+    const top = await this.streaks({ name: killer.name, n });
+    if (JSON.stringify(top) === JSON.stringify(this.top)) return;
+    this.top = top;
+    this.tell(this.arena(), [{ t: 'ks', top, by }]); // by: the one who made it, for their NEW RECORD
   }
   save(pairs) {
     for (const [o, a] of pairs) { try { o.serializeAttachment(a); } catch {} }
@@ -323,6 +352,8 @@ export class Gallery extends DurableObject {
         pk: ref.pickups(t), fighters: others.map(([, a]) => ref.view(a.fx, t)),
       }));
       this.tell(others, out);
+      // The streak board, fresh from CONFIG (another instance's fight may have changed it).
+      this.streaks().then((top) => { this.top = top; ws.send(JSON.stringify({ t: 'ks', top })); }).catch(() => {});
       if (popped) {
         // Popped, then back in: respawn at once, past the 2 s wait (it was spent outside).
         Object.assign(F, { alive: false, deadAt: -1e9 });

@@ -910,6 +910,7 @@ async function boot() {
     fightHud = createFightHud({
       root: document.getElementById('fight'), hp: document.getElementById('fight-hp'),
       board: document.getElementById('fight-board'), feed: document.getElementById('fight-feed'),
+      streaks: document.getElementById('fight-streaks'),
       rows: touch ? 3 : 5, // a landscape phone shows the top 3
       nameOf: (id) => (live && live.peers.get(id)?.name) || '',
       colorOf: (id, me) => (me ? C.player : peerColor(id)),

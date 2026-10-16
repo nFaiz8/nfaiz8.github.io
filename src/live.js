@@ -114,7 +114,7 @@ export function stationTicker(send) {
 // Messages about the people in my area (station spec, Multiplayer): between asking to move and the server's
 // answer (zw), any of these still come from the area I've left, and are dropped.
 const AREA_T = new Set(['join', 'leave', 'p', 'q', 'e', 'r', 'c', 'n']);
-const ARENA_T = new Set(['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']);
+const ARENA_T = new Set(['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp', 'ks']);
 
 // Where the multiplayer server is: local dev and tests never join the real gallery (on localhost only
 // ?live=<ws url> connects); null when it's off.

@@ -253,3 +253,16 @@ export function dropped(f, now) {
   f.drops++;
   return f.drops > LIMITS.floodDrops;
 }
+
+// The all-time kill-streak board (Faiz's ask): each name's best streak, the top STREAKS.keep, highest first (an earlier
+// streak keeps its place over an equal later one). A streak needs STREAKS.min kills, and a name.
+export const STREAKS = { keep: 10, min: 2, shown: 3 };
+export function addStreak(board, name, n) {
+  if (!name || !Number.isInteger(n) || n < STREAKS.min) return board;
+  const was = board.find((r) => r.name === name);
+  if (was && was.n >= n) return board;
+  const next = board.filter((r) => r.name !== name);
+  const at = next.findIndex((r) => r.n < n);
+  next.splice(at < 0 ? next.length : at, 0, { name, n });
+  return next.slice(0, STREAKS.keep);
+}

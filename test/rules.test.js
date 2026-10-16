@@ -252,3 +252,20 @@ test('station positions: anywhere on the line, or aboard a local in its frame', 
   assert.equal(parseMessage('{"t":"q","tr":14,"x":30,"z":0,"s":2}'), null);
   assert.deepEqual(parseMessage('{"t":"q","x":10.5,"z":9.5,"y":0,"a":1}'), { t: 'q', x: 10.5, z: 9.5, y: 0, a: 1 }, 'an old page is fine');
 });
+
+test('the streak board: the best streak per name, top 10, highest first; unnamed and short streaks stay off', async () => {
+  const { addStreak, STREAKS } = await import('../server/rules.js');
+  let b = [];
+  b = addStreak(b, 'faiz', 3);
+  b = addStreak(b, 'bo', 5);
+  b = addStreak(b, 'faiz', 2); // not his best
+  assert.deepEqual(b, [{ name: 'bo', n: 5 }, { name: 'faiz', n: 3 }]);
+  b = addStreak(b, 'faiz', 7);
+  assert.deepEqual(b.map((r) => [r.name, r.n]), [['faiz', 7], ['bo', 5]]);
+  assert.deepEqual(addStreak(b, '', 9), b, 'no name, no place');
+  assert.deepEqual(addStreak(b, 'cy', STREAKS.min - 1), b, 'a single kill is no streak');
+  for (let i = 0; i < 20; i++) b = addStreak(b, `p${i}`, 2 + (i % 4));
+  assert.equal(b.length, STREAKS.keep);
+  assert.ok(b.every((r, i) => i === 0 || b[i - 1].n >= r.n));
+  assert.equal(b[0].name, 'faiz');
+});
