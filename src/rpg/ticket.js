@@ -1,12 +1,13 @@
-// The ticket machine (station spec, "Life and props (round 2)"): a small ASCII pop-up over the station when you walk
-// into a shut turnstile. In-game money only: pick a single or a day pass, BUY + TAP, and the gate opens. No real
-// payment fields of any kind. gates.js holds the wallet and the ticket; this is only the DOM.
+// The fare card machine (station spec, "Life and props (round 2)"): a small ASCII pop-up over the station when you
+// walk into a shut turnstile, styled on a New York fare card vending machine (no real names or logos). In-game money
+// only: pick a single ride or an unlimited ride, BUY + TAP, and the gate's reader takes your tap. No real payment
+// fields of any kind. gates.js holds the balance and the ticket; this is only the DOM.
 //
 // While it's open the walker stands still (index.js) and every key goes to it alone: ↑ ↓ (or W S) choose, Enter
 // buys, T tops up, Esc closes. A tap picks an option or presses a button; a tap outside the box closes it.
 import { KINDS, NAMES, PRICES, TOP_UP, money, buy, topUp } from './gates.js';
 
-const W = 25; // the box's inside width, in characters
+const W = 27; // the box's inside width, in characters
 const pad = (s) => s.padEnd(W).slice(0, W);
 const centre = (s) => pad(' '.repeat(Math.max(0, Math.floor((W - s.length) / 2))) + s);
 
@@ -16,7 +17,7 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
   root.hidden = true;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
-  root.setAttribute('aria-label', 'ticket machine');
+  root.setAttribute('aria-label', 'fare card machine');
   const box = document.createElement('div');
   box.className = 'ticket-box';
   root.append(box);
@@ -44,20 +45,20 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
 
   function render() {
     box.textContent = '';
-    const dashes = Math.floor((W - 9) / 2);
-    box.append(line(`┌${'─'.repeat(dashes)} TICKETS ${'─'.repeat(W - 9 - dashes)}┐`));
+    const title = ' FARE CARD ', dashes = Math.floor((W - title.length) / 2);
+    box.append(line(`┌${'─'.repeat(dashes)}${title}${'─'.repeat(W - title.length - dashes)}┐`));
     KINDS.forEach((k, i) => {
-      const text = ` ${i === selected ? '(•)' : '( )'} ${NAMES[k].padEnd(10)} ${money(PRICES[k])}`;
+      const text = ` ${i === selected ? '▸' : ' '} ${NAMES[k].padEnd(14)}   ${money(PRICES[k])}`;
       const b = button(pad(text), 'ticket-opt', () => { selected = i; funds = false; status = ''; render(); focusSel(); });
       b.setAttribute('aria-pressed', String(i === selected));
       box.append(line('│', b, '│'));
     });
-    box.append(line(`│${centre(status)}│`));
+    if (status) box.append(line(`│${centre(status)}│`));
     if (funds && !done) box.append(line('│', button(centre(`[ top up +${money(TOP_UP).replace('.00', '')} ]`), 'ticket-btn ticket-topup', doTopUp), '│'));
     box.append(line('│', button(centre('[ BUY + TAP ]'), 'ticket-btn ticket-buy', doBuy), '│'));
     box.append(line(`└${'─'.repeat(W)}┘`));
-    const foot = line(` wallet ${money(gates.wallet)}`.padEnd(W - 4));
-    foot.append(button('esc ✕', 'ticket-close', close));
+    const foot = line(` balance ${money(gates.wallet)}`.padEnd(W + 2 - 5));
+    foot.append(button('esc ×', 'ticket-close', close));
     box.append(foot);
   }
   const focusSel = () => box.querySelectorAll('.ticket-opt')[selected]?.focus({ preventScroll: true });
@@ -120,7 +121,7 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
   }
   function updateChip() {
     chip.hidden = !gates.pass;
-    chip.textContent = gates.pass === 'day' ? '▣ DAY PASS' : gates.pass === 'single' ? '▣ SINGLE' : '';
+    chip.textContent = gates.pass === 'unlimited' ? '▣ UNLIMITED' : gates.pass === 'single' ? '▣ SINGLE RIDE' : '';
   }
 
   return {

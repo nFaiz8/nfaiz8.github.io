@@ -11,7 +11,7 @@ import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
 import { poseFigure, turnToward, advancePhase } from './rig.js';
 import { createPost } from './post.js';
-import { createGates, gatedMap, trackGates, bumped, easeArms } from './gates.js';
+import { createGates, gatedMap, trackGates, bumped, easeArms, turnRotors, rotorTurns, tapped, refused, readerText } from './gates.js';
 import { createTicketMachine } from './ticket.js';
 import { STATION_LIFE, createCommuter, stepCommuter, pushOut } from './life.js';
 
@@ -67,10 +67,14 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
     world = buildScene(scene, map, { reducedMotion });
     const walker = createWalker(map);
-    // The turnstiles: shut from the hall without a ticket (gates.js); the walker collides with the map as gated.
-    const gates = createGates(map), gated = gatedMap(map, gates, walker);
-    let armed = true, lastPass = null; // armed: the machine may open on the next bump (not again until you stop pushing)
-    ticket = createTicketMachine(gates, { onClose: () => { armed = false; walker.vx = walker.vz = 0; } });
+    // The turnstiles: shut from the hall without a ticket (gates.js); the walker collides with the map as gated. The
+    // seed picks which taps the reader asks you to swipe again.
+    const gates = createGates(map, (Math.random() * 2 ** 31) | 0), gated = gatedMap(map, gates, walker);
+    let armed = true, lastPass = null, at = null; // armed: the machine may open on the next bump (not again until you stop pushing); at: the gate it opened for
+    ticket = createTicketMachine(gates, {
+      onClose: () => { armed = false; walker.vx = walker.vz = 0; },
+      onBought: () => { if (at) tapped(gates, at, time()); },
+    });
 
     // Commuters: the same stick figure, muted, without a lantern; one on the phone (its screen lights its face).
     const phoneLight = new THREE.PointLight('#9fd0ff', 0, 1.4, 2);
@@ -145,9 +149,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       stepWalker(walker, dt, input, gated);
       pushOut(walker, crowd, gated);
       trackGates(gates, walker);
+      turnRotors(gates, walker);
       if (!ticket.isOpen) {
         const bump = bumped(gates, walker, input);
-        if (bump && armed) { armed = false; walker.vx = walker.vz = 0; ticket.open(); } else if (!bump) armed = true;
+        if (bump && armed) { armed = false; walker.vx = walker.vz = 0; at = bump; refused(gates, bump, t); ticket.open(); } else if (!bump) armed = true;
       }
       easeArms(gates, walker, dt);
       if (gates.pass !== lastPass) { lastPass = gates.pass; ticket.update(); }
@@ -206,7 +211,9 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       setTime(s) { t0 = performance.now() - s * 1000; },
       teleport(x, z) { walker.x = x; walker.z = z; walker.vx = walker.vz = 0; walker.y = map.levelAt(x, z) ?? walker.y; },
       setWallet(cents) { gates.wallet = cents; },
-      gates: () => ({ wallet: gates.wallet, pass: gates.pass, used: gates.used, open: gates.gates.map((g) => g.open), popup: ticket.isOpen }),
+      gates: () => ({ wallet: gates.wallet, pass: gates.pass, used: gates.used, open: gates.gates.map((g) => g.open), popup: ticket.isOpen,
+        reader: gates.gates.map((g, i) => readerText(gates, i, walker, time())), rotor: gates.gates.map(rotorTurns) }),
+      setSeed(n) { gates.seed = n; gates.taps = 0; },
       life: () => ({ pigeons: world.pigeons.map((p) => p.s.state), rats: world.rats.map((r) => r.s.state), commuters: crowd.map((c) => ({ x: c.x, z: c.z, yaw: c.yaw })) }),
     };
     window.__station = hook;

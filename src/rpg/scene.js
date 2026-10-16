@@ -1,11 +1,12 @@
 // The station in 3D (station spec §5): lit shapes with faint ASCII painted on them, built from the map.
-// Walls, floors, stairs, pillars, benches, turnstiles and the kiosk are instanced unit boxes, one per tile (walls
-// stacked a box per unit of height), so the texture repeats once per world unit.
+// Walls, floors, stairs, pillars, benches and the kiosk are instanced unit boxes, one per tile (walls stacked a box
+// per unit of height), so the texture repeats once per world unit. The turnstiles are turnstiles.js's.
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
 import { makeSprite, PROPS, FONT, boxed } from './sprites.js';
 import { TRAIN, departures } from './train.js';
 import { STATION_LIFE, createPigeon, stepPigeon, createRat, stepRat } from './life.js';
+import { buildTurnstiles, emergencyTile, LINTEL } from './turnstiles.js';
 
 export const WALL_HEIGHT = 4; // over the highest floor beside a wall
 // Walls this close on the camera's side fade (spec §4). The eye sits cos 35° × 10 ≈ 8.2 south of the focus, plus
@@ -70,13 +71,17 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // and a wall only 4 over the track would let it see over into the void.
   const roof = Math.max(...map.cells.filter((cell) => cell.level != null).map((cell) => cell.level)) + WALL_HEIGHT;
   const edge = (c, r) => c === 0 || r === 0 || c === map.cols - 1 || r === map.rows - 1;
+  const exitTile = emergencyTile(map); // a wall tile opened into a recess for the emergency gate (turnstiles.js)
   for (const cell of map.cells) {
     const { c, r, ch } = cell, x = c + 0.5, z = r + 0.5;
     if (ch === '#' || ch === 'n') {
       const ls = levels(c, r);
       if (!ls.length) continue; // buried in other walls
       const lo = Math.min(...ls) - 0.4, top = edge(c, r) ? roof : Math.max(...ls) + WALL_HEIGHT;
-      wallColumn(c, r, lo, top);
+      if (exitTile && exitTile.c === c && exitTile.r === r) {
+        box('hall', x, LEVEL.hall - 0.1, z, 1, 0.2, 1);
+        wallColumn(c, r, LEVEL.hall + LINTEL, top, true);
+      } else wallColumn(c, r, lo, top);
       continue;
     }
     if (ch === '=') {
@@ -103,7 +108,6 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     box(ch === '!' ? 'edge' : y === LEVEL.hall ? 'hall' : 'platform', x, y - 0.1, z, 1, 0.2, 1);
     if (ch === '|') for (let k = 0; k < WALL_HEIGHT; k++) fadeBox('pillar', c, r, y + k, 0.6);
     if (ch === 'b') box('bench', x, y + 0.25, z, 0.9, 0.5, 0.5);
-    if (ch === 't') box('pillar', x, y + 0.5, z, 0.25, 1, 0.6);
     if (ch === 'k') box('kiosk', x, y + 1.1, z, 1, 2.2, 1);
     if (ch === 'E') { // steps rising toward the wall beside the exit, toward the museum
       const wall = [[-1, 0], [1, 0], [0, -1], [0, 1]].find(([dc, dr]) => map.solidAt(c + dc + 0.5, r + dr + 0.5) && !map.solidAt(c - dc + 0.5, r - dr + 0.5)) || [-1, 0];
@@ -250,13 +254,13 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   const clockText = (d, tick) => boxed([` ${String(d.getHours()).padStart(2, '0')}${tick ? ':' : ' '}${String(d.getMinutes()).padStart(2, '0')} `], 7);
   let clockKey = '';
   const clock = makeSprite(clockText(new Date(), true), ['#5a2a24', '#ff6a4a', '#5a2a24'], 0.56, { glow: true, bright: 1.35, bg: '#0b0605' });
-  clock.mesh.position.set(12.55, 2.35, wallFace);
+  clock.mesh.position.set(12.5, 2.5, wallFace); // over the emergency gate's sign
   const boardLines = (d) => [' DEPARTURES', ...d.lines.map((l) => ` ${l} `)];
   const board = makeSprite(boardLines(departures(0, map)), ['#ffd27a', '#ffb340', '#ffb340'], 0.85, { glow: true, bright: 1.6, bg: '#050402', gap: 0.25, frame: '#6a4a18' });
   board.mesh.position.set(15.7, 2.0, wallFace);
   let boardKey = '', boardAt = -1;
   owned.push(clock, board);
-  fadeable(clock.mesh, 12.55, wallFace, clock.mesh.geometry.parameters.width / 2 + 0.6);
+  fadeable(clock.mesh, 12.5, wallFace, clock.mesh.geometry.parameters.width / 2 + 0.6);
   fadeable(board.mesh, 15.7, wallFace, board.mesh.geometry.parameters.width / 2 + 0.6);
   scene.add(clock.mesh, board.mesh);
   // Across the north track, facing the platform: an exhibition poster, a warning, and one torn poster whose corner
@@ -287,22 +291,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   scene.add(tickerBox, tickerFace);
   fadeable([tickerBox, tickerFace], ticker.x, ticker.z, ticker.w / 2 + 0.6);
 
-  // The turnstile arms: a bar across each gate, hinged at its north post, that swings open toward the way you go;
-  // a lamp on the hinge shows red (shut) or green (open).
-  const armGeo = own(new THREE.BoxGeometry(0.07, 0.07, 0.86).translate(0, 0, 0.43));
-  const armMat = own(new THREE.MeshStandardMaterial({ map: own(stripeTexture()), roughness: 0.5, metalness: 0.2, emissive: '#3a1210' }));
-  const lampGeo2 = own(new THREE.BoxGeometry(0.12, 0.08, 0.12));
-  const RED = new THREE.Color(2.2, 0.25, 0.18), GREEN = new THREE.Color(0.3, 2.2, 0.6);
-  const arms = map.cells.filter((cell) => cell.ch === ':').map((cell) => {
-    const pivot = new THREE.Group();
-    pivot.position.set(cell.c + 0.5, LEVEL.hall + 0.82, cell.r + 0.06);
-    const arm = new THREE.Mesh(armGeo, armMat);
-    pivot.add(arm);
-    const lamp = new THREE.Mesh(lampGeo2, own(new THREE.MeshBasicMaterial({ color: RED.clone(), toneMapped: false })));
-    lamp.position.set(cell.c + 0.5, LEVEL.hall + 1.02, cell.r + 0.08);
-    scene.add(pivot, lamp);
-    return { c: cell.c, r: cell.r, pivot, lamp, side: 1 };
-  });
+  // The turnstiles: steel cabinets, rotors and readers, and the emergency gate (turnstiles.js).
+  const turnstiles = buildTurnstiles(scene, map, own, { reducedMotion });
+  for (const g of turnstiles.signs) fadeable(g.mesh, g.x, g.z, g.side);
 
   // The buzzing lamp over the kiosk: a short tube on the shutter's lintel that never quite settles.
   const kioskBar = new THREE.Mesh(own(new THREE.BoxGeometry(1.1, 0.05, 0.1)), own(new THREE.MeshBasicMaterial({ color: '#fff1d6', toneMapped: false })));
@@ -444,7 +435,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // float mid-screen as solid slabs, so they fade.
   for (const t of tubes) fadeable(t.bar, t.x, t.z, Infinity);
 
-  // Everything added in round 2 (station spec, "Life and props"): signs, the ticker, the arms, the vent, the creatures.
+  // Everything added in round 2 (station spec, "Life and props"): signs, the ticker, the turnstiles, the vent, the creatures.
   const updateLife = (time, dt, walker, pass, gates) => {
     // The clock: real local time, its colon ticking each second (steady with reduced motion).
     const now = Date.now(), tick = reducedMotion || Math.floor(now / 500) % 2 === 0;
@@ -460,15 +451,8 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     // The ticker: a character every 0.18 s (slower with reduced motion); dimmed when it hangs between the camera and you.
     const step = Math.floor(time / (reducedMotion ? 0.4 : 0.18));
     tickerTex.offset.x = (step % TICKER.length) / TICKER.length;
-    // Turnstile arms.
-    if (gates) {
-      for (let i = 0; i < arms.length; i++) {
-        const a = arms[i], g = gates.gates[i];
-        if (g.open < 0.02) a.side = walker.x > a.c + 0.5 ? -1 : 1; // it swings the way you're going
-        a.pivot.rotation.y = a.side * g.open * (Math.PI / 2) * 0.95;
-        a.lamp.material.color.copy(g.open > 0.5 ? GREEN : RED);
-      }
-    }
+    // The turnstiles' rotors and readers.
+    turnstiles.update(time, walker, gates);
     // The kiosk lamp buzzes: mostly on, with a quick dip now and then (steady with reduced motion).
     let kk = 1;
     if (!reducedMotion) {
@@ -646,17 +630,6 @@ function tickerTexture(text) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
-  return t;
-}
-
-// A turnstile arm's red and white bands.
-function stripeTexture() {
-  const c = document.createElement('canvas');
-  c.width = 64; c.height = 8;
-  const g = c.getContext('2d');
-  for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? '#e8e6e0' : '#c8322a'; g.fillRect(i * 16, 0, 16, 8); }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 

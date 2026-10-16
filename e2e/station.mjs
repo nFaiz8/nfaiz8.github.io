@@ -54,17 +54,18 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.keyboard.down(key);
     try { await page.waitForFunction(until, { timeout: ms }); } finally { await page.keyboard.up(key); }
   };
-  await check('walking into a turnstile from the hall opens the ticket machine, and you stay in the hall', async () => {
+  await check('walking into a turnstile from the hall opens the fare card machine, and you stay in the hall', async () => {
     await page.evaluate(() => window.__station.teleport(10.5, 8.5));
     await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
     await sleep(300);
     const w = await page.evaluate(() => ({ ...window.__station.walker }));
     assert.ok(w.x < 12, `stopped at the gate: x ${w.x.toFixed(2)}`);
-    assert.match(await page.evaluate(() => document.querySelector('.ticket').innerText), /TICKETS[\s\S]*single[\s\S]*day pass[\s\S]*BUY \+ TAP[\s\S]*wallet \$20\.00/);
+    assert.match(await page.evaluate(() => document.querySelector('.ticket').innerText), /FARE CARD[\s\S]*single ride[\s\S]*\$2\.90[\s\S]*unlimited ride[\s\S]*\$7\.00[\s\S]*BUY \+ TAP[\s\S]*balance \$20\.00/);
+    assert.equal((await gates()).reader[1], 'INSUFFICIENT FARE', 'the reader of the gate you walked into');
     await page.screenshot({ path: `${SHOTS}/station-ticket.png` });
   });
 
-  await check('Esc closes the ticket machine', async () => {
+  await check('Esc closes the fare card machine', async () => {
     await page.keyboard.press('Escape');
     assert.equal(await popup(), false);
     assert.equal((await gates()).pass, null);
@@ -73,41 +74,61 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await popup(), false);
   });
 
-  await check('a single lets you through once; the next time from the hall it asks again', async () => {
+  await check('a single ride lets you through once, turning the rotor a third; the next time from the hall it asks again', async () => {
     await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
     const x0 = await page.evaluate(() => window.__station.walker.x);
+    const r0 = (await gates()).rotor[1];
     await page.keyboard.press('Enter'); // single is chosen first
     await page.waitForFunction(() => document.querySelector('.ticket').hidden, { timeout: 3000 });
     let g = await gates();
     assert.equal(g.pass, 'single');
     assert.equal(g.wallet, 2000 - 290);
     assert.ok(Math.abs((await page.evaluate(() => window.__station.walker.x)) - x0) < 0.05, 'you stood still while it was open');
+    // The reader takes your tap: GO, though now and then it asks you to swipe again first.
+    assert.match(g.reader[1], /^(GO|SWIPE AGAIN AT THIS TURNSTILE)$/);
+    await page.waitForFunction(() => window.__station.gates().reader[1] === 'GO', { timeout: 3000 });
+    // Mid-push: the rotor follows where you are, so stand there (a held key overshoots) and look.
+    await hold('KeyD', () => window.__station.walker.x > 11.9);
+    await page.evaluate(() => window.__station.teleport(12.2, 8.5));
+    await nFrames(page, 3);
+    const mid = (await gates()).rotor[1] - r0;
+    assert.ok(mid > 0.1 && mid < 1, `the rotor turns as you push: ${mid.toFixed(2)}`);
+    await page.screenshot({ path: `${SHOTS}/station-turnstile-push.png` });
     await hold('KeyD', () => window.__station.walker.x > 13.6);
     g = await gates();
     assert.equal(g.pass, null, 'the single is used up');
     assert.equal(g.used, 1);
+    assert.ok(Math.abs(g.rotor[1] - r0 - 1) < 1e-9, `a third of a turn on: ${(g.rotor[1] - r0).toFixed(2)}`);
     // Back to the hall is free...
     await hold('KeyA', () => window.__station.walker.x < 11);
     assert.equal(await popup(), false, 'no ticket needed going out');
     // ...and going in again asks again.
     await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
     assert.ok((await page.evaluate(() => window.__station.walker.x)) < 12);
+    assert.equal((await gates()).reader[1], 'JUST USED');
   });
 
-  await check('a day pass lets you through again and again', async () => {
+  await check('an unlimited ride lets you through again and again', async () => {
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.querySelector('.ticket').hidden, { timeout: 3000 });
-    assert.equal((await gates()).pass, 'day');
+    assert.equal((await gates()).pass, 'unlimited');
     for (let i = 0; i < 2; i++) {
       await hold('KeyD', () => window.__station.walker.x > 13.6);
       await hold('KeyA', () => window.__station.walker.x < 11);
     }
     const g = await gates();
-    assert.equal(g.pass, 'day');
+    assert.equal(g.pass, 'unlimited');
     assert.equal(g.wallet, 2000 - 290 - 700);
     assert.equal(await popup(), false);
-    assert.match(await page.evaluate(() => document.querySelector('.ticket-chip').innerText), /DAY PASS/);
+    assert.match(await page.evaluate(() => document.querySelector('.ticket-chip').innerText), /UNLIMITED/);
+  });
+
+  await check('the turnstile line from the hall: steel cabinets, rotors and readers', async () => {
+    await page.evaluate(() => window.__station.teleport(10.6, 9.5)); // in line with a cabinet, so no gate is yours
+    await sleep(700);
+    assert.deepEqual((await gates()).reader, ['TAP HERE', 'SWIPE CARD', 'TAP HERE', 'SWIPE CARD']);
+    await page.screenshot({ path: `${SHOTS}/station-turnstiles.png` });
   });
 
   await check('the platform has its commuters, pigeons and rats', async () => {
@@ -157,7 +178,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(800);
     assert.equal(await page.evaluate(() => window.__ascii.station()), 'off', 'still in the gallery');
     assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 0, 'the station canvas is gone');
-    assert.equal(await page.evaluate(() => document.querySelectorAll('.ticket, .ticket-chip').length), 0, 'the ticket machine is gone');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.ticket, .ticket-chip').length), 0, 'the fare card machine is gone');
   });
 
   await check('the back button brings you up', async () => {

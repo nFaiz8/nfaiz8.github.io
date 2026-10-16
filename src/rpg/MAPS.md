@@ -37,11 +37,17 @@ Fluorescent tubes are placed for you: along the middle row of each platform band
 
 ## Turnstiles
 
-A column of `:` gates (with `t` posts between them) is a ticket line. The game treats **west as outside**:
-walking east into a gate without a ticket stops you there and opens the ticket machine; walking west through
-one is always free. So put the gates with the way in on their west side and the paid area to the east, and
-leave a tile of floor on both sides of each gate. A single is used up once you come out of a gate on its east
-side; a day pass lasts the visit (`src/rpg/gates.js`).
+A column of `:` gates (with `t` posts between them) is a ticket line, drawn New York style: each `t` is a steel
+cabinet, each gate has a three-armed rotor and a reader on the cabinet north of it, and the wall tile at each end of
+the column gets a cabinet half in it. The game treats **west as outside**: walking east into a gate without a ticket
+stops you there and opens the fare card machine; walking west through one is always free. So put the gates with the
+way in on their west side and the paid area to the east, and leave a tile of floor on both sides of each gate. A
+single ride is used up once you come out of a gate on its east side; an unlimited ride lasts the visit
+(`src/rpg/gates.js`).
+
+If the column's north end is a wall tile with hall floor west of it, that tile is drawn as a recess holding an
+emergency exit gate (`src/rpg/turnstiles.js`, `emergencyTile`); it's still a wall to walk into. So a gate on the
+column's first row wants a wall, not a post, north of it.
 
 ## What the checker wants
 
