@@ -869,7 +869,8 @@ async function boot() {
     const mapAsked = ARENA.enabled ? chooseMap() : null;
     data = await loadData(undefined, ARENA.enabled ? Object.values(ARENA.photos) : []); // both maps' photos live in the arena
     if (mapAsked) arenaMap = await mapAsked;
-    adPhotos = [...data.byId.values()].filter((p) => !p.hidden && !p.variantOf && p.src?.low).slice(0, 6).map((p) => p.src.low);
+    // The panoramas: about the ad cards' own shape, so they aren't squashed (Faiz's ask).
+    adPhotos = [...data.byId.values()].filter((p) => !p.hidden && !p.variantOf && p.src?.low && p.width / p.height > 2.4).slice(0, 8).map((p) => p.src.low);
   } catch (err) {
     fatal(err);
     return;
