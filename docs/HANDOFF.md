@@ -23,6 +23,18 @@ Where the work stands, for a Claude session picking it up in the cloud. Rules an
   - Life (`life.js`): pigeons, rats, commuters that walk, steam, and drips every 2–3 minutes.
   - Map and authoring notes: `src/rpg/station.txt` and `src/rpg/MAPS.md`.
   - Test hooks: `window.__station.{map, walker, frames, time, train, setTime, teleport, gates, setWallet, life}`.
+- **Subway ride** (spec `docs/specs/2026-10-16-subway-ride-design.md`, plan `docs/plans/2026-10-16-subway-ride-plan.md`):
+  locals stop at MUSEUM every minute, you walk on, ride ~57 s through a tunnel and over a golden-hour bridge (Manhattan
+  and Brooklyn either side of the river), and get off at CANAL ST (a placeholder: its street exit is taped off).
+  - The line, west tunnel to east tunnel: `src/rpg/line.js`. Every train from the shared clock: `schedule.js`
+    (locals, expresses every 30 s, doors, the departures board, the turnaround past the last stop).
+  - The car's floor plan, seats, lurch, boarding: `car.js`; which frame you walk in (a station's map or your train's):
+    `rider.js`. Maps: `station.txt` (platform now 80 tiles), `canalst.txt`; `node src/rpg/check.js --line`.
+  - Drawing: `trainmesh.js` (NYC cars), `tunnel.js`, `bridge.js`; a station's props come from `decor.js`. Riders
+    aboard: `life.js` `ridersFor`. E sits.
+  - Multiplayer: positions are line coordinates, or `{ tr, x, z, a, s }` aboard a local (`server/rules.js`).
+  - Test hooks: `window.__station.{trains, shownTrains, frame, aboard, board, world, sit, stand, env, perf, ridersShown, tunnelShown}`;
+    `teleport(x, z, stop)`.
 - **Sound** (`src/rpg/audio.js`, `src/rpg/sound.js`, `src/music.js`, `src/sound-pref.js`).
   - Mute with M in the station, V in the gallery, or the `[♪] sound` button.
   - Gallery music is Faiz's own track `src/rpg/assets/music/tuffjazz.mp3`. It streams, and you hear it from the
@@ -46,6 +58,10 @@ Where the work stands, for a Claude session picking it up in the cloud. Rules an
 ## Known failures (they fail on main too; not regressions)
 
 - **Server:** ~10 tests in `server/test/server.test.js` (arena and chat).
+- **In a Linux cloud container (SwiftShader):** the station e2e's "walking onto the lobby stairs", "you walk", "walking
+  into a turnstile", "resizing", "fifteen trips", "after a key press the station sounds" and "the emergency gate swings
+  open" time out, on main too; `e2e/station-mp.mjs` can't get three SwiftShader browsers down the stairs. Run
+  `npm run photos` first (e2e needs `public/photos`).
 - **Gallery e2e** (`e2e/run.mjs`):
   - the 0×0 Hook check;
   - the phone outline over the train;
@@ -59,6 +75,11 @@ Where the work stands, for a Claude session picking it up in the cloud. Rules an
 - **Unit:** `test/figures.test.js` "thirty bodies cost well under 2 ms" can fail when the machine is busy.
 
 ## Open items and ideas
+
+- Subway ride, to check on a Mac: a steady 60 fps on the platform, in the tunnel and on the bridge (the container only
+  measured the script: ~1.5 ms a frame); `node e2e/station-mp.mjs` (someone riding away seen from the platform) never
+  ran here. The bridge is golden hour; Faiz's reference photo was daytime.
+- CANAL ST's street (the next place), and story beats.
 
 - The station's portrait-layout hall shows black at the bottom.
 - Walking into a locked gate stops you at the tile edge, which leaves a gap before the arm at mid-cabinet.

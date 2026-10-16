@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { parseStation, LEVEL } from '../src/rpg/map.js';
-import { trainAt, startOf, TRAIN } from '../src/rpg/train.js';
+import { trainAt, startOf, TRAIN } from './fixtures/passing-train.js';
 import { STATION_LIFE, PIGEON, createPigeon, stepPigeon, createRat, stepRat, createCommuter, stepCommuter, pushOut, COMMUTER } from '../src/rpg/life.js';
 import { RADIUS, blocked } from '../src/rpg/move.js';
 

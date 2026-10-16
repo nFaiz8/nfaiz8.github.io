@@ -1,6 +1,6 @@
 # The subway ride: stopping trains, a walkable car, the bridge, and a second station
 
-**Status:** design approved in conversation on 2026-10-16. Faiz wants the trains to work: one stops at the
+**Status:** built on 2026-10-16 (branch `claude/elegant-edison-cgvclt`; plan `docs/plans/2026-10-16-subway-ride-plan.md`). Changed while building, at Faiz's asks: no ad cards; the camera comes in closer inside a car and tips up on the bridge; the bridge crosses open water between a tall Manhattan and a low Brooklyn. Design approved in conversation on 2026-10-16. Faiz wants the trains to work: one stops at the
 station, you walk on, it runs for about a minute, and it pulls into a new station. They also want the trains
 to look like New York trains (the current ones are ugly), people to be seen leaving on the train from the
 platform, and a bridge on the way with a crazy city skyline and sunlight raking into the cabin. This is a

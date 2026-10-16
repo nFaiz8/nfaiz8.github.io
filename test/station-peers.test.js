@@ -3,11 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPeers3d, sampleTrack, stepRemote, wirePos, REMOTE } from '../src/rpg/peers3d.js';
-import { sharedTime, clockOffset, PERIOD, trainAt, startOf } from '../src/rpg/train.js';
+import { sharedTime, clockOffset, PERIOD } from '../src/rpg/train.js';
 import { parseStation } from '../src/rpg/map.js';
 import { STATION } from '../server/rules.js';
 import { LINE } from '../src/rpg/line.js';
-import { LENGTH } from '../src/rpg/schedule.js';
+import { LENGTH, trainsAt, arrivalAt, LOCAL } from '../src/rpg/schedule.js';
 import fs from 'node:fs';
 
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -74,18 +74,17 @@ test('wirePos: to 0.01, the yaw wrapped into ±π', () => {
 });
 
 test('the shared clock: the same epoch gives everyone the same train; it wraps every PERIOD seconds', () => {
-  const map = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
   const epoch = 1_790_000_000_000;
   const t = sharedTime(epoch);
   assert.ok(t >= 0 && t < PERIOD);
   assert.equal(sharedTime(epoch + PERIOD * 1000), t);
   assert.ok(near(sharedTime(epoch + 1500) - t, 1.5, 1e-6));
-  // Two players whose clocks agree see the same run at the same place.
-  const s = startOf(Math.floor(t / 35) + 2) + 1;
+  // Two players whose clocks agree see the same trains at the same places: a local pulling out, 20 ms apart.
+  const s = arrivalAt(Math.floor((t - LOCAL.first) / LOCAL.every) + 2) + LOCAL.dwell + 3;
   const ms = epoch + (s - t) * 1000;
-  const a = trainAt(sharedTime(ms), map), b = trainAt(sharedTime(ms + 20), map);
-  assert.equal(a.n, b.n);
-  assert.ok(Math.abs(a.head - b.head) < 1, 'within a frame or so');
+  const a = trainsAt(sharedTime(ms)), b = trainsAt(sharedTime(ms + 20));
+  assert.deepEqual(a.map((x) => x.id), b.map((x) => x.id));
+  for (let i = 0; i < a.length; i++) assert.ok(Math.abs(a[i].head - b[i].head) < 1, 'within a frame or so');
 });
 
 test('clockOffset: the server clock less mine, counting half the round trip', () => {
