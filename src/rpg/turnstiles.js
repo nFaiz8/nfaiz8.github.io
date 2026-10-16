@@ -17,6 +17,9 @@ import { ARM_X, rotorTurns, ringState, alarmOn, gateKinds, HINGE_X, HINGE_IN, SW
 // and reaches LANE_IN into each gate tile beside it, so a lane is 1 − 2·LANE_IN wide, cabinet to cabinet: room for
 // you, and no gap a person could squeeze through. There are none at the line's ends: the wall is the lane's side.
 const CAB = { len: 0.9, h: 0.95 };
+// Each cabinet's column, at its platform end, as tall as the emergency door; and the tube arch over the lane between two
+// columns (its rise above them, and the tube's thickness).
+const COL = { h: 1.75, d: 0.22, w: 0.42 }, ARCH = 0.32, TUBE = 0.075, WALL_COL = 0.12;
 // The rotor: its hub stands HUB_OUT off the cabinet's face and its level arm reaches across the lane to a hand's width
 // (HAND) short of the next cabinet, as a real tripod turnstile's does.
 const HAND = 0.08, HUB_OUT = 0.11;
@@ -70,12 +73,32 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
     // face: the north side of the lane (the cabinet's face, or the wall's).
     return { i, cell, face: post ? cell.r + LANE_IN : cell.r, kind: kinds[i] };
   });
-  const c0 = gates[0].c, cx = c0 + 0.04 + CAB.len / 2;
+  const c0 = gates[0].c, cx = c0 + 0.04 + CAB.len / 2, colX = cx + CAB.len / 2 - COL.d / 2;
   for (const { z0, z1 } of cabs.values()) {
     const z = (z0 + z1) / 2, w = z1 - z0;
     put('dark', cx, y0 + 0.05, z, CAB.len + 0.02, 0.1, w + 0.02); // kick plate
     put('steel', cx, y0 + 0.1 + (CAB.h - 0.1) / 2, z, CAB.len, CAB.h - 0.1, w);
     put('top', cx, y0 + CAB.h + 0.03, z, CAB.len + 0.03, 0.06, w + 0.03); // the top slab, a little proud
+    // The column at the cabinet's platform end, up to the door's height, as New York's are.
+    put('top', colX, y0 + COL.h / 2, z, COL.d, COL.h, Math.min(w, COL.w));
+    put('top', colX, y0 + COL.h + 0.02, z, COL.d + 0.02, 0.04, Math.min(w, COL.w) + 0.02);
+  }
+  // Over each lane between two columns, a steel tube arch: up out of each column's top and across.
+  const colZs = [...cabs.values()].map(({ z0, z1 }) => (z0 + z1) / 2);
+  // A paid lane with a wall for a side gets a slim column against that wall, so its arch has somewhere to land.
+  for (const { cell, kind } of lanes) {
+    if (kind === 'emergency') continue;
+    for (const [dr, z] of [[-1, cell.r + WALL_COL / 2], [1, cell.r + 1 - WALL_COL / 2]]) {
+      if (map.at(cell.c, cell.r + dr)?.ch === 't') continue;
+      put('top', colX, y0 + COL.h / 2, z, COL.d, COL.h, WALL_COL);
+      colZs.push(z);
+    }
+  }
+  colZs.sort((a, b) => a - b);
+  for (let j = 1; j < colZs.length; j++) {
+    const a = colZs[j - 1], b = colZs[j];
+    for (const z of [a, b]) put('top', colX, y0 + COL.h + ARCH / 2, z, TUBE, ARCH, TUBE);
+    put('top', colX, y0 + COL.h + ARCH, (a + b) / 2, TUBE, TUBE, b - a + TUBE);
   }
 
   // The emergency gates: a hinge post at the north wall, and on it a swing panel of bars reaching south across the lane
