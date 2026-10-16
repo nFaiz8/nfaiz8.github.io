@@ -262,12 +262,12 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // Across the north track, facing the platform: an exhibition poster, a warning, and one torn poster whose corner
   // flaps in a train's wind.
   const far = 1.03;
-  prop('nowShowing', 25.5, far, 1.15);
-  prop('torn', 34.6, far, 1.45);
-  prop('gap', 37.6, far, 1.75);
+  prop('nowShowing', 24.6, far, 1.15);
+  prop('torn', 28.4, far, 1.45);
+  prop('gap', 38.5, far, 1.75);
   const flap = makeSprite(PROPS.flap.lines, PROPS.flap.colors, PROPS.flap.h, { depth: false });
   flap.mesh.geometry.translate(-0.13, 0, 0); // hinged on its left edge, at the tear
-  flap.mesh.position.set(35.05, LEVEL.track + 1.45 + 0.62, far + 0.01);
+  flap.mesh.position.set(28.85, LEVEL.track + 1.45 + 0.62, far + 0.01);
   owned.push(flap);
   scene.add(flap.mesh);
 
