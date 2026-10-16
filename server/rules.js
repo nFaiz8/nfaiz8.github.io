@@ -9,7 +9,7 @@ export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
 export const AREAS = ['gallery', 'station'];
 // The station's map (src/rpg/station.txt) in tiles, and how far its floors go up and down (the hall at 0, the
 // tracks at -4.2): a station position outside it is dropped. test/rules.test.js checks these against the map.
-export const STATION = { cols: 48, rows: 19, yMin: -5, yMax: 1 };
+export const STATION = { cols: 101, rows: 19, yMin: -5, yMax: 1 };
 
 export function allowedOrigin(origin) {
   return origin === 'https://faiz.pics' || /^http:\/\/localhost(:\d{1,5})?$/.test(origin || '');

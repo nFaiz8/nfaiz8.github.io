@@ -71,14 +71,34 @@ test('tracks are bands of = rows', () => {
 test('the shipped station', () => {
   const m = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
   assert.equal(m.name, 'MUSEUM');
-  assert.equal(m.cols, 48);
+  assert.equal(m.cols, 101);
   assert.equal(m.rows, 19);
   assert.deepEqual(m.spawn, { x: 2.5, z: 9.5 });
   assert.equal(m.exits.length, 3);
-  assert.equal(m.signs.length, 4);
+  assert.equal(m.signs.length, 8);
   assert.deepEqual(m.tracks.map((t) => [t.z0, t.z1]), [[1, 4], [15, 18]]);
-  assert.equal(m.tubes.length, 11, 'five over the platform, six over the hall');
+  assert.equal(m.tubes.length, 22, 'sixteen over the platform, six over the hall');
   assert.equal(m.levelAt(14.0, 9.5), 0, 'top of the stairs');
   assert.equal(m.levelAt(20.0, 9.5), -3, 'foot of the stairs');
   for (const t of m.tubes) assert.ok(!m.solidAt(t.x, t.z) || m.at(Math.floor(t.x), Math.floor(t.z)).ch === '|', 'tubes hang over floor');
+});
+
+test('the lengthened platform: 80 tiles from col 20 to 99, its middle at the line\'s MUSEUM centre', async () => {
+  const { STOPS } = await import('../src/rpg/line.js');
+  const map = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
+  assert.equal(map.cols, STOPS[0].cols);
+  const row = [...Array(map.cols)].map((_, c) => map.at(c, 6).ch).join('');
+  assert.equal(row.indexOf('_'), 20);
+  assert.equal(row.lastIndexOf('_'), 99);
+  assert.equal((20 + 100) / 2, STOPS[0].centre);
+});
+
+test('CANAL ST parses: no spawn, no exits, two tracks at MUSEUM\'s z, the tape solid', () => {
+  const map = parseStation(fs.readFileSync(new URL('../src/rpg/canalst.txt', import.meta.url), 'utf8'));
+  assert.equal(map.name, 'CANAL ST');
+  assert.equal(map.spawn, null);
+  assert.deepEqual(map.exits, []);
+  assert.deepEqual(map.tracks.map((t) => t.z), [2.5, 16.5]);
+  const tape = map.cells.find((c) => c.ch === 'x');
+  assert.ok(map.solidAt(tape.c + 0.5, tape.r + 0.5));
 });

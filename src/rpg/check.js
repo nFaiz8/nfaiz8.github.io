@@ -1,6 +1,7 @@
 // Checks a station map (station spec §3) and says what's wrong, by row and column, so whoever drew it
 // (a person or a model) can fix it. `node src/rpg/check.js [file]` checks a file from the command line.
 import { parseStation, readLines, KNOWN, STAIRS, N4 } from './map.js';
+import { STOPS, TRACKS } from './line.js';
 
 export function checkStation(text) {
   const errors = [];
@@ -15,12 +16,14 @@ export function checkStation(text) {
   });
 
   const spawns = map.cells.filter((cell) => cell.ch === 'S');
-  if (spawns.length !== 1) err(spawns[1]?.r ?? 0, spawns[1]?.c ?? 0, `there must be exactly one S (found ${spawns.length})`);
-  if (!map.exits.length) err(0, 0, 'there is no E: no way back up to the museum');
+  if (spawns.length > 1) err(spawns[1].r, spawns[1].c, `there can be at most one S (found ${spawns.length})`);
+  if (spawns.length && !map.exits.length) err(0, 0, 'there is an S but no E: no way back up to the museum');
 
-  if (spawns.length) {
-    const seen = new Set([key(spawns[0])]);
-    const queue = [spawns[0]];
+  // Everything walkable must be reachable from S, or (a station you only reach by train) from its platform.
+  const root = spawns[0] || map.cells.find((cell) => cell.ch === '!');
+  if (root) {
+    const seen = new Set([key(root)]);
+    const queue = [root];
     while (queue.length) {
       const cell = queue.pop();
       for (const [dc, dr] of N4) {
@@ -28,7 +31,7 @@ export function checkStation(text) {
         if (n && n.walk && !seen.has(key(n))) { seen.add(key(n)); queue.push(n); }
       }
     }
-    for (const cell of map.cells) if (cell.walk && !seen.has(key(cell))) err(cell.r, cell.c, `'${cell.ch}' cannot be reached from S`);
+    for (const cell of map.cells) if (cell.walk && !seen.has(key(cell))) err(cell.r, cell.c, `'${cell.ch}' cannot be reached from ${spawns.length ? 'S' : 'the platform'}`);
   }
 
   const runs = new Set();
@@ -75,11 +78,27 @@ export function checkStation(text) {
   return errors.sort((a, b) => a.row - b.row || a.col - b.col);
 }
 
+// The line (subway ride spec §6): each station checks clean, is as wide as line.js says, and has its track bands where
+// the trains run (TRACKS), so a train leaving one station's tunnel lines up with the next. texts: in STOPS order.
+export function checkLine(texts) {
+  const errors = [];
+  texts.forEach((text, stop) => {
+    for (const e of checkStation(text)) errors.push({ stop, ...e });
+    const map = parseStation(text), want = STOPS[stop];
+    if (map.cols !== want.cols) errors.push({ stop, row: 0, col: map.cols, msg: `${map.name} is ${map.cols} wide; line.js says ${want.cols}` });
+    const zs = map.tracks.map((t) => t.z).join(', '), wz = TRACKS.map((t) => t.z).join(', ');
+    if (zs !== wz) errors.push({ stop, row: 0, col: 0, msg: `${map.name}'s tracks are at z ${zs}; trains run at ${wz}` });
+  });
+  return errors;
+}
+
 if (typeof process !== 'undefined' && process.argv?.[1]?.endsWith('check.js')) {
   const { readFileSync } = await import('node:fs');
-  const file = process.argv[2] || new URL('./station.txt', import.meta.url);
-  const errors = checkStation(readFileSync(file, 'utf8'));
-  for (const e of errors) console.log(`row ${e.row}, col ${e.col}: ${e.msg}`);
+  const files = ['./station.txt', './canalst.txt'].map((f) => new URL(f, import.meta.url));
+  const errors = process.argv[2] === '--line'
+    ? checkLine(files.map((f) => readFileSync(f, 'utf8')))
+    : checkStation(readFileSync(process.argv[2] || files[0], 'utf8'));
+  for (const e of errors) console.log(`${e.stop !== undefined ? `${STOPS[e.stop].name}: ` : ''}row ${e.row}, col ${e.col}: ${e.msg}`);
   console.log(errors.length ? `${errors.length} problem${errors.length === 1 ? '' : 's'}` : 'ok');
   process.exitCode = errors.length ? 1 : 0;
 }

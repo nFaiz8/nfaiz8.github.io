@@ -29,8 +29,9 @@ The player is about 0.5 wide and 1.6 tall.
 | `k` | kiosk (closed) | 0 | no |
 | `n` | wall with the station's name sign on its face | – | no |
 | `~` | puddle, with drips | as the floor around it | yes |
-| `S` | spawn: where you arrive (exactly one) | as the floor around it | yes |
-| `E` | exit up to the museum (at least one) | as the floor around it | yes |
+| `S` | spawn: where you arrive (at most one; only the station you come down to has one) | as the floor around it | yes |
+| `E` | exit up to the museum (at least one where there's an `S`) | as the floor around it | yes |
+| `x` | tape across a closed exit | – | no |
 
 Footsteps sound by tile (`surfaceAt` in `src/rpg/sound.js`): stairs are hollow, the platform's level (`_`, `!`) is
 gritty concrete, and every other floor you can walk on is the hall's hard tile. The fluorescent hum comes from the
@@ -62,13 +63,22 @@ Run `node src/rpg/check.js <file>` (no file: the shipped station). It prints `ro
 (0-based, header lines not counted) and `ok` when there are none. It reports:
 
 - rows of different widths, and characters not in the table;
-- not exactly one `S`, or no `E`;
-- a walkable tile, or an `E`, that can't be reached from `S`;
+- more than one `S`, or an `S` with no `E`;
+- a walkable tile, or an `E`, that can't be reached from `S` (or, with no `S`, from the platform);
 - stairs without floor at both ends of the run, or that go up in their arrow's direction;
 - floor beside a stair run (wall the sides off);
 - a walkable tile (an `S`, `E` or `~`) with no floor beside it to take a level from: put floor beside it;
 - two different floor levels side by side (a drop: put stairs or a wall between);
 - a track row that isn't `=` from edge to edge, a track with no `!` row beside it, or a `!` not next to `=`.
+
+## The line
+
+The stations are pieces of one line (`src/rpg/line.js`): west tunnel, MUSEUM (`station.txt`), tunnel, bridge,
+tunnel, CANAL ST (`canalst.txt`), east tunnel. Each station's map is as wide as `STOPS` says, starts at its `x` on
+the line, and has its two track bands on rows 1–3 and 15–17 (the trains' z, `TRACKS`), from edge to edge. Trains
+stop with their middle at the platform's middle (`STOPS[].centre`), so a platform is 80 tiles long for the
+78-tile train. Both platforms are islands: the north track opens its south doors, the south track its north ones.
+Check the whole line with `node src/rpg/check.js --line`.
 
 ## Tips
 

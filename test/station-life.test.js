@@ -52,7 +52,7 @@ test('pigeons take off when a train comes', () => {
 });
 
 test('a rat runs into the nearest tunnel about 3 s before a train, and comes out after it has gone', () => {
-  const rat = createRat({ x: 34, track: 1 }, MAP, 0);
+  const rat = createRat({ x: 87, track: 1 }, MAP, 0);
   let t = 0, hidden = null, out = null;
   for (; t < startOf(1) + 20; t += DT) {
     const train = trainAt(t, MAP);

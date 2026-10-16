@@ -5,7 +5,7 @@ const FIXED = { '.': LEVEL.hall, t: LEVEL.hall, ':': LEVEL.hall, k: LEVEL.hall, 
 const NEUTRAL = new Set(['b', '~', 'S', 'E', '|']); // they take the level of the floor around them
 export const STAIRS = { v: [0, 1], '^': [0, -1], '>': [1, 0], '<': [-1, 0] }; // the way the floor goes down
 const WALK = new Set(['.', '_', '!', ':', '~', 'S', 'E', ...Object.keys(STAIRS)]);
-export const KNOWN = new Set(['#', 'n', '=', '|', 'b', 't', 'k', ...WALK]);
+export const KNOWN = new Set(['#', 'n', '=', '|', 'b', 't', 'k', 'x', ...WALK]); // x: tape across a closed exit (solid)
 export const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const TUBE = 3.4; // fluorescent tubes hang this far over the floor
 
