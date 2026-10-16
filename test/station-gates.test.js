@@ -156,7 +156,7 @@ test('locked, the rotor does not move; going back to the hall it turns the other
   assert.ok(p.x < GATE_C - RADIUS);
   assert.equal(rotorTurns(k), -1, 'a third of a turn back');
   buy(g, 'single');
-  const b = at(11.6, 10.5);
+  const b = at(12, 10.5);
   walk(g, b, { x: 1, y: 0 }, 0.13); // part way
   assert.ok(k.push > 0 && k.push < 1, `pushed part way: ${k.push}`);
   walk(g, b, { x: -1, y: 0 }, 0.6);

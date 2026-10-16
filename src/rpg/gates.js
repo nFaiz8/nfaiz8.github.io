@@ -125,12 +125,12 @@ export function easeArms(g, w, dt, reach = 1) {
   }
 }
 
-// The rotor. Its level arm sits ARM_X into the gate tile (scene.js draws it there). You push it a third of a turn
+// The rotor. Its level arm sits ARM_X into the gate tile, halfway along the cabinet (scene.js draws it there). You push it a third of a turn
 // over SWEEP of walking once your front reaches it, and the last bit it clicks over by itself (CLICK). Locked, your
 // front stops at the tile's edge, short of the arm, so it doesn't move. Going back to the hall you push it from the
 // other side and it turns the other way. When you leave the gate, a full push becomes its new rest; a part push
 // (you backed out) springs back.
-export const ARM_X = 0.1, SWEEP = 0.7, CLICK = 0.85;
+export const ARM_X = 0.5, SWEEP = 0.7, CLICK = 0.85;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 // How far a walker at x has pushed the arm going east (dir 1) or west (dir −1): 0 … 1.
 export function pushFrom(k, x, dir) {
