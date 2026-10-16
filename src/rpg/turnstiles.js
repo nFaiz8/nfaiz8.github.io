@@ -3,8 +3,9 @@
 // between the lanes; on each lane's north cabinet a three-armed rotor of square bars that you turn a third of a turn
 // by walking through, and on its top a flat round tap target, the ◎ puck, whose light ring is dim white idle, green
 // while a paid gate is open for you and red a moment when you walk into it locked. No screens, no text. The line's
-// southernmost lane is the emergency exit (gates.js): a barred steel swing gate hinged at the wall, the red
-// EMERGENCY EXIT / ALARM WILL SOUND sign on the wall over it and the alarm light above that. gates.js holds the
+// southernmost lane is the emergency exit (gates.js): a barred steel swing gate hinged at the wall, its hinge post
+// carrying on up as a sign post with the red EMERGENCY EXIT / ALARM WILL SOUND sign bolted to it and the alarm light
+// on top (on the see-through south wall they seemed to float). gates.js holds the
 // state; this only draws it.
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
@@ -41,7 +42,8 @@ function glyphTexture(base, ink, glyph, alpha = 0.35) {
 const RING = { idle: new THREE.Color(0.62, 0.64, 0.68), go: new THREE.Color(0.35, 2.1, 0.6), refused: new THREE.Color(2.4, 0.3, 0.22) };
 const ALARM_ON = new THREE.Color(2.8, 0.1, 0.05), ALARM_OFF = new THREE.Color(0.22, 0.04, 0.03);
 const BLINK = 3; // the alarm light's flashes a second (steady with reduced motion)
-const SIGN_Y = 1.62, LAMP_Y = 2.0; // the sign's centre and the alarm light's, over the hall floor
+const SIGN_Y = 1.72, LAMP_Y = 2.2; // the sign's centre and the alarm light's, over the hall floor
+const POST_TOP = LAMP_Y - 0.1; // the sign post, rising out of the hinge post, ends under the alarm light
 
 export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {}) {
   const gates = map.cells.filter((cell) => cell.ch === ':');
@@ -86,6 +88,9 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
     const { c, r } = lane.cell, hx = c + HINGE_X, hz = r + 1 - HINGE_IN, len = SWING_LEN;
     put('steel', hx, y0 + (H + 0.12) / 2, hz, 0.08, H + 0.12, 2 * HINGE_IN); // hinge post, against the wall
     put('dark', hx, y0 + 0.02, hz, 0.14, 0.04, 0.14); // its foot plate
+    put('top', hx, y0 + (H + 0.12 + POST_TOP) / 2, hz - 0.01, 0.06, POST_TOP - H - 0.12, 0.06); // the sign post above it
+    put('dark', hx, y0 + SIGN_Y + 0.12, hz + 0.035, 0.12, 0.04, 0.03); // the sign's clamps
+    put('dark', hx, y0 + SIGN_Y - 0.12, hz + 0.035, 0.12, 0.04, 0.03);
     const panel = new THREE.Group();
     const bar = (x, y, z, sx, sy, sz, mat = topMat) => {
       const m = new THREE.Mesh(unit, mat);
@@ -102,20 +107,22 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
     bar(0.06, 0.95, -len / 2, 0.035, 0.05, len - 0.2, darkMat); // the push bar, on the platform side
     panel.position.set(hx, y0, hz);
     scene.add(panel);
-    // The sign over the gate, on the wall's face, and the alarm light above it: a red lamp in a dark housing.
-    const sign = makeSprite(['EMERGENCY EXIT', 'ALARM WILL SOUND'], ['#ffffff', '#ffe7e3'], 0.34, { glow: true, bright: 1.15, bg: '#b3221b', frame: '#ffffff' });
-    sign.mesh.position.set(c + 0.5, y0 + SIGN_Y, r + 1 - 0.015);
+    // The sign on the post, facing the camera (held by two clamps), and the alarm light on the post's top: a red
+    // lamp in a dark housing.
+    const sign = makeSprite(['EMERGENCY EXIT', 'ALARM WILL SOUND'], ['#ffffff', '#ffe7e3'], 0.28, { glow: true, bright: 1.15, bg: '#b3221b', frame: '#ffffff' });
+    sign.mesh.geometry.translate(0, -0.14, 0); // centred on SIGN_Y
+    sign.mesh.position.set(hx, y0 + SIGN_Y, hz + 0.025);
     scene.add(sign.mesh);
     own(sign);
-    signs.push({ mesh: sign.mesh, x: c + 0.5, z: r + 1, side: 1.2 });
+    signs.push({ mesh: sign.mesh, x: hx, z: hz, side: 1.2 });
     const housing = new THREE.Mesh(unit, darkMat);
-    housing.scale.set(0.38, 0.2, 0.1);
-    housing.position.set(c + 0.5, y0 + LAMP_Y, r + 1 - 0.08);
+    housing.scale.set(0.3, 0.2, 0.12);
+    housing.position.set(hx, y0 + LAMP_Y, hz - 0.01);
     const lampMat = own(new THREE.MeshBasicMaterial({ color: ALARM_OFF.clone(), toneMapped: false }));
-    const lamp = new THREE.Mesh(own(new THREE.BoxGeometry(0.3, 0.13, 0.06)), lampMat);
-    lamp.position.set(c + 0.5, y0 + LAMP_Y, r + 1 - 0.01); // on the housing's face toward the camera
+    const lamp = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.13, 0.04)), lampMat);
+    lamp.position.set(hx, y0 + LAMP_Y, hz + 0.05); // on the housing's face toward the camera
     const glow = new THREE.PointLight('#ff3a26', 0, 4, 1.4);
-    glow.position.set(c + 0.3, y0 + LAMP_Y - 0.2, r + 0.4);
+    glow.position.set(hx - 0.2, y0 + LAMP_Y - 0.2, r + 0.4);
     scene.add(housing, lamp, glow);
     exits.push({ i: lane.i, panel, lampMat, glow });
   }

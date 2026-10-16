@@ -249,9 +249,10 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
   - **Emergency exit gate** (`gateKinds`: the southernmost gate of each column of two or more is kind
     `'emergency'`; on the shipped map row 12, beside the south wall). Replaces the first try, a decorative gate in a
     recess north of the line that "is blocked" (it led into a wall). A barred steel swing gate, 1.2 high, hinged on
-    a post against the wall and, shut, reaching across its lane to the cabinet; a push bar on the platform side. On
-    the wall over it, facing the camera, the red `EMERGENCY EXIT / ALARM WILL SOUND` sign and above that the alarm
-    light in a dark housing. Exit only, free: from the hall it's locked, ticket or not, and walking into it doesn't
+    a post against the wall and, shut, reaching across its lane to the cabinet; a push bar on the platform side. The
+    hinge post carries on up as a lighter steel sign post: the red `EMERGENCY EXIT / ALARM WILL SOUND` sign, facing
+    the camera, is clamped to it, and the alarm light in a dark housing sits on its top (hung on the see-through south
+    wall, they looked as if they floated). Exit only, free: from the hall it's locked, ticket or not, and walking into it doesn't
     open the fare card machine (`blocked`, not `bumped`), just a 0.5 s steady red of the light. From the platform
     your front pushes it and it swings toward the hall following you (`swingFrom`: the angle at which the panel
     touches you, held right open once your middle passes the hinge line, so it's clear of you), and once you're out
