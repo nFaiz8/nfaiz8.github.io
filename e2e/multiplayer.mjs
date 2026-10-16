@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { withBrowser, launchBrowser, ready, sleep, SHOTS } from './lib.mjs';
 
-const PORT = 8796;
+const PORT = Number(process.env.LIVE_PORT) || 8796;
 const dev = spawn('npx', ['wrangler', 'dev', '--port', String(PORT), '--ip', '127.0.0.1'], { cwd: fileURLToPath(new URL('../server', import.meta.url)) });
 await new Promise((resolve, reject) => {
   const t = setTimeout(() => reject(new Error('wrangler dev did not start')), 60000);

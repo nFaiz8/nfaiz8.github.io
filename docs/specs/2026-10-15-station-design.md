@@ -30,9 +30,9 @@ train.
   - The browser's back button while in the station takes you up.
   - Loading the page with `#/station` builds the gallery as usual, then goes straight down without the
     fade.
-- **Multiplayer.** There is none in the station for now. While you're down there, the gallery treats you
-  as gone: the same message as leaving the page. When you come up you rejoin with your name. Chat,
-  emotes and the HUD's gallery buttons are hidden in the station.
+- **Multiplayer.** The station has its own multiplayer (see "Multiplayer" below). Going down doesn't
+  disconnect: the gallery sees you leave and the station sees you arrive. The HUD's gallery buttons are
+  hidden in the station; its own chat-and-emotes bar shows instead.
 
 ## 2. Code
 
@@ -282,6 +282,63 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
   solid (a 0.25 circle you're pushed out of) and never leave the platform. Their figures are disposed with
   the station.
 
+## 5c. Multiplayer
+
+Approved in conversation on 2026-10-16. Other people in the station are drawn as people, the train is the
+same for everyone, and the lobby shows how many are below.
+
+- **One connection, with areas.** Each connection carries an `area`: `'gallery'` (the default) or
+  `'station'`.
+  - `{t:'z', area}` moves you, optionally with where you are in the new area. The server checks the area
+    is a known one and gives `z` its own bucket: 3 in hand, then 1 a second. The page sends at most one a
+    second, and if you change your mind within that second only the latest is sent.
+  - The server sends `p`, `q`, `e`, `r`, `c`, `n`, `join` and `leave` only to people in the same area.
+    Arena messages work only in the gallery.
+  - On a move, your old area gets `leave` and your new one gets `join`, with your name and position. You
+    get `{t:'zw', area, peers, now}`: who's already there. Until `zw` arrives the page drops anything from
+    the area it has left. A `z` to the area you're already in just gets the list again.
+  - `hi` may carry `area` (for a direct `#/station` load, and a reconnect while you're below).
+  - Hiding the tab still pauses the connection after 30 s. When the tab comes back, `hi` rejoins the area
+    you're in.
+  - A page that never sends `z` (an old one) is in the gallery. A new page on an old server (its `welcome`
+    has no `area`) falls back to the old behaviour: off the net while it's below.
+- **Positions.** `{t:'q', x, z, y?, a?}`: world x and z, the floor under your feet (`y`, on stairs) and
+  your yaw (`a`), each to 0.01. They go through the same throttle as the gallery's `p` (at most 5 a second),
+  and only when they change by 0.01, or the yaw by 0.05. The server drops any that aren't finite or fall
+  outside the map (`STATION` in `server/rules.js`, 48 × 19, y in −5…1; a unit test checks it against
+  `station.txt`), and any yaw outside ±π. The gallery's `p` is unchanged.
+- **Seeing each other** (`src/rpg/peers3d.js` pure, `src/rpg/others.js` draws):
+  - Each person is the stick figure in their `peerColor(id)`, bright as you are and with no lantern. Their
+    name is in that colour over their head.
+  - Positions are drawn 300 ms behind, between the two received around that moment. A jump of more than 3
+    tiles (a teleport) is a jump.
+  - The walk comes from the drawn motion, as the commuters' does. Each figure faces where it goes (or the
+    yaw it sent while standing), turns with `turnToward`, and `stepGait` runs the stride by the ground it
+    covers.
+  - Other people aren't solid, so a laggy one can't trap you. Their figures go when they leave, and all of
+    them go with the station.
+- **Chat and emotes.** While you're below, **T** or **Enter** opens the gallery's chat line. A bar at the
+  bottom right holds `[T] chat` and the five emotes; keys **1–5** emote too. What anyone says floats over
+  their head for 5 s (wrapped, at most three lines), with an emote over it for 2.5 s. These labels draw over
+  pillars, so they stay readable. Your own words show over your head at once. The server filters chat as
+  in the gallery.
+- **The same train.** The train's clock is shared: `sharedTime(epoch ms)` in seconds, modulo `PERIOD`
+  (2400 runs, about 23 h), where the epoch is the server's clock. `welcome` carries the server's `now`, and
+  the page counts half the round trip. Without a server it's this machine's clock. Trains, the departures
+  board, the tunnel glow and the commuters' reaction all follow it. The station's own time (lights,
+  pigeons, turnstiles) stays local. `__station.setTime(s)` pins the train to the station's own clock, as
+  before, for tests, and `__station.clock()` reads the train's time.
+- **Kept local:** tickets, wallet, gates and the turnstile you're pushing; pigeons, rats and commuters.
+- **The lobby.** `welcome` carries `station`, the number of people below. Everyone gets `{t:'zc', station}`
+  whenever it changes (a move, or someone below leaving). The lobby's sign then reads `▼ SUBWAY · 2`. The
+  count is drawn as glyphs after the sign's label, in the sign's colour, whenever it's at least one.
+- **Tests:** server (`server/test/server.test.js`): filtering by area, leave and join on a move, `z`
+  validated and rate-limited, an old page in the gallery, bad station positions dropped, and the counts.
+  Unit tests (`test/station-peers.test.js`, `live`, `net`, `rules`): smoothing and the walk, the shared
+  clock, and the wire's messages. End to end (`e2e/station-mp.mjs`, three browsers against `wrangler dev`):
+  two go down and see each other walk and talk under the same train; the third, in the gallery, sees the
+  count and who comes back up.
+
 ## 6. Testing
 
 - **Unit** (`node --test`, as for the rest of the site):
@@ -305,6 +362,6 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
 
 ## 7. Not in this slice
 
-Dialogue, people other than the commuters, quests, items, saving, fighting, boarding the train, other areas, multiplayer in the
-station, and sound. The station's code is kept in `src/rpg/` so the next areas reuse `map.js`,
+Dialogue, people other than the commuters and other players, quests, items, saving, fighting, boarding the
+train, other areas, and sound. The station's code is kept in `src/rpg/` so the next areas reuse `map.js`,
 `move.js`, `sprites.js`, `post.js` and the camera.

@@ -14,7 +14,7 @@ export function launchBrowser() {
   return puppeteer.launch({ headless: true, args: [`--use-angle=${angle}`, '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])] });
 }
 
-export async function withBrowser(fn, { port = 5199 } = {}) {
+export async function withBrowser(fn, { port = Number(process.env.E2E_PORT) || 5199 } = {}) {
   fs.mkdirSync(SHOTS, { recursive: true });
   const server = await createServer({ root, configFile: path.join(root, 'vite.config.js'), server: { port, strictPort: true }, logLevel: 'error' });
   await server.listen();
