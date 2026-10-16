@@ -7,7 +7,7 @@ import { rng } from './life.js';
 import { LEVEL } from './map.js';
 
 const B = PIECES.find((p) => p.kind === 'bridge');
-const RIVER = [B.x0 + 40, B.x1 - 40]; // the water's banks along x
+const RIVER = [B.x0 + 20, B.x1 - 20]; // the water's banks along x
 const GROUND = -24, WATER = -32;
 const TOWERS = 320;
 const DARK = new THREE.Color('#05060a'), SKY = new THREE.Color('#d7935e'), HAZE = new THREE.Color('#c98a5e');
@@ -65,37 +65,55 @@ export function createBridge(scene, { reducedMotion = false } = {}) {
     for (let i = 0; i <= 40; i++) { const x = B.x0 + ((B.x1 - B.x0) * i) / 40, k = (x - (RIVER[0] + RIVER[1]) / 2) / ((RIVER[1] - RIVER[0]) / 2); pts.push(new THREE.Vector3(x, 8 + 38 * Math.min(1, k * k), z)); }
     group.add(new THREE.Line(own(new THREE.BufferGeometry().setFromPoints(pts)), own(new THREE.LineBasicMaterial({ color: '#2a2f38' }))));
   }
-  // The river and the banks.
-  const water = own(new THREE.MeshStandardMaterial({ map: own(canvasTex(64, 64, (g) => { g.fillStyle = '#1b2a3a'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#e0a060'; g.globalAlpha = 0.4; g.font = '24px monospace'; g.fillText('~', 8, 30); g.fillText('~', 36, 58); }, [80, 200])), roughness: 0.3, metalness: 0.2 }));
-  // The river runs north to downtown: it ends at the far bank there.
+  // The river runs north out of sight, between the two halves of the city (Faiz's reference: the Manhattan Bridge):
+  // Manhattan on the west bank, tall and dense; Brooklyn on the east, lower; another bridge across the water upriver.
+  const water = own(new THREE.MeshStandardMaterial({ map: own(canvasTex(64, 64, (g) => { g.fillStyle = '#3a6688'; g.fillRect(0, 0, 64, 64); g.fillStyle = '#ffd9a0'; g.globalAlpha = 0.55; g.font = '24px monospace'; g.fillText('~', 8, 30); g.fillText('~', 36, 58); }, [80, 400])), emissive: '#1a3048', roughness: 0.25, metalness: 0.35 })); // blue, with the sky's warmth in its ripples
   const plane = (mat, x0, x1, z0, z1, y) => { const m = new THREE.Mesh(own(new THREE.PlaneGeometry(x1 - x0, z1 - z0).rotateX(-Math.PI / 2)), mat); m.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); group.add(m); };
-  plane(water, RIVER[0] - 50, RIVER[1] + 50, -300, 300, WATER);
+  plane(water, RIVER[0] - 5, RIVER[1] + 5, -1800, 300, WATER);
   const bank = own(new THREE.MeshStandardMaterial({ color: '#3a3430', roughness: 1 }));
-  plane(bank, B.x0 - 900, RIVER[0], -900, 300, GROUND);
-  plane(bank, RIVER[1], B.x1 + 900, -900, 300, GROUND);
-  plane(bank, RIVER[0] - 50, RIVER[1] + 50, -900, -300, GROUND); // downtown's shore
-  // The skyline: towers on both banks, mostly north (where the camera looks), taller and denser further off, with lit
-  // windows painted into one texture (instance colours vary the stone). One draw.
+  plane(bank, B.x0 - 900, RIVER[0], -1800, 300, GROUND);
+  plane(bank, RIVER[1], B.x1 + 900, -1800, 300, GROUND);
+  // The skyline, lit windows painted into one texture (instance colours vary the stone). One draw for every tower.
   const windowsTex = own(canvasTex(64, 128, (g, w, h) => {
     const r = rng(7);
     g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
     for (let y = 4; y < h; y += 8) for (let x = 3; x < w; x += 7) { g.fillStyle = r() < 0.38 ? (r() < 0.7 ? '#ffcf7a' : '#fff0d0') : '#0a0a0a'; g.fillRect(x, y, 4, 5); }
   }, [3, 6]));
-  const facade = own(new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveMap: windowsTex, emissiveIntensity: 0.9, roughness: 0.8, metalness: 0.1 }));
-  const towers = own(new THREE.InstancedMesh(own(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0)), facade, TOWERS));
+  const facade = own(new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveMap: windowsTex, emissiveIntensity: 0.75, roughness: 0.8, metalness: 0.1 }));
+  const SPIRES = 5, towers = own(new THREE.InstancedMesh(own(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0)), facade, TOWERS + SPIRES * 2));
   const r = rng(42), col = new THREE.Color();
+  let n = 0;
+  const tower = (x, z, wd, hgt, dp, light) => {
+    m4.compose(v.set(x, GROUND, z), q.identity(), s.set(wd, hgt, dp));
+    towers.setMatrixAt(n, m4);
+    towers.setColorAt(n++, col.setHSL(0.07 + r() * 0.05, 0.12 + r() * 0.2, light));
+  };
   for (let i = 0; i < TOWERS; i++) {
-    // A third are downtown, across the river's far end, where the camera looks up the water; the rest line the banks.
-    const downtown = i % 3 === 0, west = r() < 0.5, north = r() < 0.85;
-    const x = downtown ? (RIVER[0] + RIVER[1]) / 2 + (r() - 0.5) * 900 : west ? RIVER[0] - 10 - r() * 700 : RIVER[1] + 10 + r() * 700;
-    const z = downtown ? -320 - r() * 260 : north ? -30 - r() * 650 : 40 + r() * 250;
-    const far = Math.min(1, -z / 650), hgt = (downtown ? 40 : 12) + r() * (40 + 110 * far) * (r() < 0.08 ? 2.2 : 1);
-    const wd = 8 + r() * 16;
-    m4.compose(v.set(x, GROUND, z), q.identity(), s.set(wd, hgt, 8 + r() * 16));
-    towers.setMatrixAt(i, m4);
-    towers.setColorAt(i, col.setHSL(0.07 + r() * 0.05, 0.15 + r() * 0.2, 0.25 + r() * 0.3));
+    // Two of three in Manhattan: tall, crowded along the shore. The rest in Brooklyn: mostly low, a few towers.
+    const manhattan = i % 3 !== 2, north = r() < 0.88;
+    const off = manhattan ? 8 + r() ** 1.6 * 380 : 8 + r() * 500; // Manhattan's towers bunch near the water
+    const x = manhattan ? RIVER[0] - off : RIVER[1] + off;
+    const z = north ? -20 - r() * 900 : 30 + r() * 200;
+    const hgt = manhattan ? 30 + r() * 110 * (r() < 0.15 ? 1.8 : 1) : 10 + r() * (r() < 0.1 ? 70 : 28);
+    tower(x, z, 8 + r() * 16, hgt, 8 + r() * 16, manhattan ? 0.3 + r() * 0.3 : 0.25 + r() * 0.2);
   }
+  // Manhattan's supertalls: a slim shaft each, and a needle on top.
+  for (let i = 0; i < SPIRES; i++) {
+    const x = RIVER[0] - 30 - r() * 220, z = -120 - r() * 500, hgt = 230 + r() * 130;
+    tower(x, z, 14 + r() * 6, hgt, 14 + r() * 6, 0.55);
+    tower(x, z, 1.2, hgt + 60, 1.2, 0.7);
+  }
+  towers.count = n;
   group.add(towers);
+  // Upriver, another bridge across the water: two stone towers with arches' worth of bulk, a deck, its cables.
+  const UP = -320, stoneB = own(new THREE.MeshStandardMaterial({ color: '#8a7a68', roughness: 0.9 }));
+  for (const x of [RIVER[0] + 50, RIVER[1] - 50]) box(stoneB, x, WATER + 40, UP, 12, 80, 9);
+  box(steel, (RIVER[0] + RIVER[1]) / 2, WATER + 22, UP, RIVER[1] - RIVER[0] + 60, 2.5, 8);
+  for (const dz of [-3, 3]) {
+    const pts = [];
+    for (let i = 0; i <= 40; i++) { const x = RIVER[0] - 30 + ((RIVER[1] - RIVER[0] + 60) * i) / 40, k = (x - (RIVER[0] + RIVER[1]) / 2) / ((RIVER[1] - RIVER[0]) / 2 - 50); pts.push(new THREE.Vector3(x, WATER + 24 + 54 * Math.min(1.4, k * k), UP + dz)); }
+    group.add(new THREE.Line(own(new THREE.BufferGeometry().setFromPoints(pts)), own(new THREE.LineBasicMaterial({ color: '#3a3530' }))));
+  }
   // The sky: a gradient on a far plane that follows the camera along x.
   const skyTex = own(canvasTex(4, 256, (g, w, h) => {
     const grd = g.createLinearGradient(0, 0, 0, h);
