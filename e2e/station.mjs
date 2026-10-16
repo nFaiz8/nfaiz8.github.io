@@ -267,6 +267,17 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.screenshot({ path: 'e2e/shots/station-canal.png' });
   });
 
+  await check('riding through the tunnel: lamps stream past, the car lit warm inside', async () => {
+    await page.evaluate(() => { window.__station.setTime(20 + 18 + 8); window.__station.board(0, 30, 0); }); // L0, 8 s out of MUSEUM
+    await nFrames(page, 30);
+    await page.evaluate(() => window.__station.setTime(20 + 18 + 8));
+    await nFrames(page, 3);
+    const a = await page.evaluate(() => window.__station.aboard());
+    assert.equal(a.k, 0);
+    assert.ok(await page.evaluate(() => window.__station.tunnelShown() > 10), 'tunnel segments drawn around you');
+    await page.screenshot({ path: 'e2e/shots/station-tunnel.png' });
+  });
+
   await check('staying on past the last stop brings you back on the next train the other way', async () => {
     // L1 (westbound) ends at MUSEUM at 80 and leaves at 98; still aboard at 106, you're on L2 (eastbound), ~30 s out.
     await page.evaluate(() => { window.__station.setTime(80 + 18 + 7); window.__station.board(1, 30, 0); });

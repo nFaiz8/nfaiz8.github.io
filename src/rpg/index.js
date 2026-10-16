@@ -18,6 +18,7 @@ import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut } from '.
 import { createStationAudio } from './audio.js';
 import { createOthers, createTalkBar } from './others.js';
 import { createTrains } from './trainmesh.js';
+import { createTunnel } from './tunnel.js';
 import canalText from './canalst.txt?raw';
 import { STOPS, pieceAt } from './line.js';
 import { local, localsAt } from './schedule.js';
@@ -48,7 +49,7 @@ function footY(map, w) {
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null, ads = [] }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, hint = null, fader = null, onKey = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, hint = null, fader = null, onKey = null;
   const stations = [null, null], groups = [null, null]; // the line's two stations (MUSEUM's is built at once)
   const people = []; // the commuters' figures
   const teardown = () => {
@@ -65,6 +66,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     hint?.remove();
     fader?.remove();
     trainView?.dispose();
+    tunnel?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
     blobGeo?.dispose();
@@ -95,6 +97,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
     world = buildScene(museum, map, { reducedMotion });
     trainView = createTrains(scene, { reducedMotion, ads });
+    tunnel = createTunnel(scene, { reducedMotion });
     const walker = createWalker(map);
     // The line's two stations (subway ride spec §5): MUSEUM built now, CANAL ST the first time the camera comes near it.
     // A station is hidden while the camera is away from it.
@@ -292,6 +295,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
         stations[i].update(t, dt, here, pass, i === 0 ? gates : null, tt);
         if (i === 0) museumPass = pass;
       }
+      tunnel.update(camX, t, wz, o.z + eyeFor(cam).z);
       for (const p of people) {
         const c = stepCommuter(p.c, dt, { train: museumPass, walker: atMuseum ? walker : { x: -1e4, z: -1e4 } }, map);
         p.pose.yaw = c.yaw; p.pose.shift = c.shift; p.pose.t = t + c.home.x; // desynchronised breathing
@@ -337,6 +341,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       train: () => passFor(trainsAt(clock()), 0, map),
       trains: () => trainsAt(clock()),
       shownTrains: () => trainView.shown(),
+      tunnelShown: () => tunnel.shown(),
       clock,
       setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
       others: () => (others ? others.shown() : []),
