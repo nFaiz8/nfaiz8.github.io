@@ -78,8 +78,10 @@ export function createOthers(scene, map, { reducedMotion = false } = {}) {
           shown.set(p.id, o);
         }
         stepRemote(o.r, p, dt);
-        poseFigure({ yaw: o.r.yaw, phase: o.r.phase, gait: o.r.gait, t: t + (p.id.charCodeAt(0) % 7), reducedMotion }, o.joints);
-        o.at.x = o.r.x; o.at.z = o.r.z; o.at.y = p.y ?? map.levelAt(o.r.x, o.r.z) ?? 0;
+        // stepRemote walks the figure in its frame (a train's, aboard), so its stride follows its steps, not the train;
+        // ox, oz place that frame on the line.
+        poseFigure({ yaw: o.r.yaw, phase: o.r.phase, gait: p.s ? 0 : o.r.gait, sit: p.s ? 1 : 0, t: t + (p.id.charCodeAt(0) % 7), reducedMotion }, o.joints);
+        o.at.x = o.r.x + (p.ox || 0); o.at.z = o.r.z + (p.oz || 0); o.at.y = p.y ?? map.levelAt(o.at.x, o.at.z) ?? 0;
         o.figure.update(o.joints, camera, o.at);
         o.stack.update(p, o.at, camera, reducedMotion);
       }

@@ -235,9 +235,20 @@ test('areas: hi may say the area; z moves between known areas; q is a station po
   assert.equal(parseMessage('{"t":"z","area":"arena"}'), null);
   assert.equal(parseMessage('{"t":"z"}'), null);
   assert.deepEqual(parseMessage('{"t":"q","x":1.234,"z":2,"y":-3,"a":-1.5}'), { t: 'q', x: 1.23, z: 2, y: -3, a: -1.5 });
-  for (const bad of ['{"t":"q","x":1}', '{"t":"q","x":-1,"z":1}', '{"t":"q","x":1,"z":99}', '{"t":"q","x":1,"z":1,"y":-8}', '{"t":"q","x":1,"z":1,"a":4}', '{"t":"q","x":null,"z":1}', '{"t":"q","x":"1","z":1}', '{"t":"q","x":1e999,"z":1}'])
+  for (const bad of ['{"t":"q","x":1}', '{"t":"q","x":-700,"z":1}', '{"t":"q","x":1,"z":99}', '{"t":"q","x":1,"z":1,"y":-8}', '{"t":"q","x":1,"z":1,"a":4}', '{"t":"q","x":null,"z":1}', '{"t":"q","x":"1","z":1}', '{"t":"q","x":1e999,"z":1}'])
     assert.equal(parseMessage(bad), null, bad);
   const b = newBuckets(0);
   assert.deepEqual([take(b, 'z', 0), take(b, 'z', 0), take(b, 'z', 0), take(b, 'z', 0)], [true, true, true, false]);
   assert.equal(take(b, 'z', 1000), true, 'one more a second later');
+});
+
+test('station positions: anywhere on the line, or aboard a local in its frame', () => {
+  assert.deepEqual(parseMessage('{"t":"q","x":850.5,"z":9.5}'), { t: 'q', x: 850.5, z: 9.5 }, 'CANAL ST is on the line');
+  assert.equal(parseMessage('{"t":"q","x":2000,"z":9.5}'), null);
+  assert.deepEqual(parseMessage('{"t":"q","tr":14,"x":30.123,"z":-0.5,"a":1,"s":1}'), { t: 'q', tr: 14, x: 30.12, z: -0.5, a: 1, s: 1 });
+  assert.equal(parseMessage('{"t":"q","tr":14,"x":90,"z":0}'), null, 'off the end of the train');
+  assert.equal(parseMessage('{"t":"q","tr":14,"x":30,"z":2}'), null, 'outside its width');
+  assert.equal(parseMessage('{"t":"q","tr":1.5,"x":30,"z":0}'), null, 'a local is a whole number');
+  assert.equal(parseMessage('{"t":"q","tr":14,"x":30,"z":0,"s":2}'), null);
+  assert.deepEqual(parseMessage('{"t":"q","x":10.5,"z":9.5,"y":0,"a":1}'), { t: 'q', x: 10.5, z: 9.5, y: 0, a: 1 }, 'an old page is fine');
 });

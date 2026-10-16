@@ -7,9 +7,10 @@ export const EMOTES = ['heart', 'bang', 'ask', 'star', 'wave'];
 // Where a connection can be (station spec, Multiplayer): the gallery (the default, and all an old page knows)
 // or the station below it. Each hears only its own area's people.
 export const AREAS = ['gallery', 'station'];
-// The station's map (src/rpg/station.txt) in tiles, and how far its floors go up and down (the hall at 0, the
-// tracks at -4.2): a station position outside it is dropped. test/rules.test.js checks these against the map.
-export const STATION = { cols: 101, rows: 19, yMin: -5, yMax: 1 };
+// The line below the museum (subway ride spec §7; src/rpg/line.js): x from the west tunnel to the east one, z across the
+// stations' maps, how far floors go up and down; and a local's floor plan, for someone aboard one (src/rpg/car.js). A
+// position outside them is dropped. test/station-peers.test.js checks these against the line.
+export const STATION = { x0: -600, x1: 1486, rows: 19, yMin: -5, yMax: 1, length: 78, half: 1.5, k: [-10, 3000] };
 
 export function allowedOrigin(origin) {
   return origin === 'https://faiz.pics' || /^http:\/\/localhost(:\d{1,5})?$/.test(origin || '');
@@ -122,13 +123,20 @@ const within = (n, max) => num(n) && Math.abs(n) <= max;
 // (the room's own level is the Worker's to check: a body in its walls is dropped).
 const COLS = Math.max(...Object.values(MAPS).map((m) => m.cols)), ROWS = Math.max(...Object.values(MAPS).map((m) => m.rows));
 const inArena = (x, y) => num(x) && num(y) && x >= -1 && x <= COLS + 3 && y >= -1 && y <= ROWS + 1;
-// A station position: x and z on the map, y (the floor under you, on stairs) and yaw a, each to 0.01. y and a are
-// optional; null if anything is off.
+// A station position, each number to 0.01: on the ground, x and z on the line, y (the floor under you) and yaw a, y
+// and a optional; or aboard local tr, x and z in its frame, a, and s (1 seated). null if anything is off.
 function stationPos(m) {
-  if (!num(m.x) || !num(m.z) || m.x < 0 || m.x > STATION.cols || m.z < 0 || m.z > STATION.rows) return null;
-  const p = { x: round(m.x, 100), z: round(m.z, 100) };
-  if (m.y !== undefined) { if (!num(m.y) || m.y < STATION.yMin || m.y > STATION.yMax) return null; p.y = round(m.y, 100); }
+  const p = {};
+  if (m.tr !== undefined) {
+    if (!Number.isInteger(m.tr) || m.tr < STATION.k[0] || m.tr > STATION.k[1]) return null;
+    if (!num(m.x) || !num(m.z) || m.x < 0 || m.x > STATION.length || Math.abs(m.z) > STATION.half) return null;
+    p.tr = m.tr;
+    if (m.s !== undefined) { if (m.s !== 0 && m.s !== 1) return null; }
+  } else if (!num(m.x) || !num(m.z) || m.x < STATION.x0 || m.x > STATION.x1 || m.z < 0 || m.z > STATION.rows) return null;
+  p.x = round(m.x, 100); p.z = round(m.z, 100);
+  if (m.y !== undefined && m.tr === undefined) { if (!num(m.y) || m.y < STATION.yMin || m.y > STATION.yMax) return null; p.y = round(m.y, 100); }
   if (m.a !== undefined) { if (!within(m.a, Math.PI + 1e-9)) return null; p.a = round(m.a, 100); }
+  if (m.tr !== undefined && m.s !== undefined) p.s = m.s;
   return p;
 }
 const stamp = (n) => Number.isInteger(n) && n >= 0 && n <= 1e9;

@@ -6,6 +6,8 @@ import { createPeers3d, sampleTrack, stepRemote, wirePos, REMOTE } from '../src/
 import { sharedTime, clockOffset, PERIOD, trainAt, startOf } from '../src/rpg/train.js';
 import { parseStation } from '../src/rpg/map.js';
 import { STATION } from '../server/rules.js';
+import { LINE } from '../src/rpg/line.js';
+import { LENGTH } from '../src/rpg/schedule.js';
 import fs from 'node:fs';
 
 const near = (a, b, e = 1e-6) => Math.abs(a - b) < e;
@@ -93,7 +95,7 @@ test('clockOffset: the server clock less mine, counting half the round trip', ()
 
 test('the server\'s station bounds are the station map\'s', () => {
   const map = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
-  assert.deepEqual([STATION.cols, STATION.rows], [map.cols, map.rows]);
+  assert.deepEqual([STATION.x0, STATION.x1, STATION.rows, STATION.length], [LINE.x0, LINE.x1, map.rows, LENGTH]);
   const ys = map.cells.map((c) => c.level).filter((l) => l != null);
   assert.ok(Math.min(...ys) >= STATION.yMin && Math.max(...ys) <= STATION.yMax);
 });
@@ -106,4 +108,17 @@ test('speech over a head wraps at spaces into at most three lines', async () => 
   const long = wrapSpeech('a '.repeat(60).trim(), 10, 3);
   assert.equal(long.length, 3);
   assert.ok(long[2].endsWith('…'));
+});
+
+test('aboard: a track keeps the train number; changing frame starts a new track; the wire carries tr and s', () => {
+  const p = createPeers3d({ delay: 0 });
+  p.reset([{ id: 'a', name: 'A', x: 28.5, z: 6 }], 0);
+  p.apply({ t: 'q', id: 'a', tr: 4, x: 7.5, z: 0.5, a: 1, s: 0 }, 100);
+  const l = p.list(100)[0];
+  assert.equal(l.tr, 4);
+  assert.equal(p.get('a').track.length, 1, 'a new frame is a new track');
+  p.apply({ t: 'q', id: 'a', tr: 4, x: 8.5, z: 0.5, a: 1, s: 1 }, 200);
+  assert.equal(p.list(150)[0].x, 8, 'smoothed within the frame');
+  assert.equal(p.list(200)[0].s, 1);
+  assert.deepEqual(wirePos({ tr: 4, x: 7.512, z: 0.5, a: 1, s: 1 }), { tr: 4, x: 7.51, z: 0.5, a: 1, s: 1 });
 });

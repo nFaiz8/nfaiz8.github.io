@@ -37,7 +37,7 @@ export function createPeers3d({ delay = REMOTE.delay, sayFor = REMOTE.say, emote
         if (!p.track.length) continue;
         const s = sampleTrack(p.track, now - delay);
         const emoting = p.emote && now - p.emoteAt < emoteFor;
-        out.push({ id: p.id, name: p.name, x: s.x, z: s.z, y: s.y, a: s.a,
+        out.push({ id: p.id, name: p.name, x: s.x, z: s.z, y: s.y, a: s.a, tr: s.tr ?? null, s: s.s ?? 0,
           say: p.say && now - p.sayAt < sayFor ? p.say : null,
           emote: emoting ? p.emote : null, emoteAge: emoting ? (now - p.emoteAt) / emoteFor : 0 });
       }
@@ -49,9 +49,9 @@ export function createPeers3d({ delay = REMOTE.delay, sayFor = REMOTE.say, emote
 }
 
 function push(p, m, now) {
-  const pt = { t: now, x: m.x, z: m.z, y: Number.isFinite(m.y) ? m.y : null, a: Number.isFinite(m.a) ? m.a : null };
+  const pt = { t: now, x: m.x, z: m.z, y: Number.isFinite(m.y) ? m.y : null, a: Number.isFinite(m.a) ? m.a : null, tr: Number.isInteger(m.tr) ? m.tr : null, s: m.s ? 1 : 0 };
   const last = p.track.at(-1);
-  if (!last || Math.hypot(pt.x - last.x, pt.z - last.z) > REMOTE.jump) { p.track = [pt]; return; }
+  if (!last || last.tr !== pt.tr || Math.hypot(pt.x - last.x, pt.z - last.z) > REMOTE.jump) { p.track = [pt]; return; }
   p.track.push(pt);
   if (p.track.length > REMOTE.keep) p.track.shift();
 }
@@ -65,7 +65,7 @@ export function sampleTrack(track, t) {
     if (t <= b.t) {
       const k = (t - a.t) / (b.t - a.t || 1);
       const y = a.y != null && b.y != null ? a.y + (b.y - a.y) * k : b.y ?? a.y;
-      return { t, x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, y, a: a.a ?? b.a };
+      return { t, x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, y, a: a.a ?? b.a, tr: b.tr, s: b.s };
     }
   }
   return { ...track.at(-1) };
@@ -91,10 +91,12 @@ export function stepRemote(r, s, dt) {
 }
 
 // A station position for the wire: to 0.01, the yaw wrapped into [-π, π].
+// Aboard a train: its number tr and seated s, x and z in its frame (subway ride spec §7).
 const q = (v) => Math.round(v * 100) / 100;
-export function wirePos({ x, z, y, a }) {
-  const o = { x: q(x), z: q(z) };
-  if (Number.isFinite(y)) o.y = q(y);
+export function wirePos({ x, z, y, a, tr, s }) {
+  const o = Number.isInteger(tr) ? { tr, x: q(x), z: q(z) } : { x: q(x), z: q(z) };
+  if (Number.isFinite(y) && !Number.isInteger(tr)) o.y = q(y);
   if (Number.isFinite(a)) { const w = a - 2 * Math.PI * Math.floor((a + Math.PI) / (2 * Math.PI)); o.a = Math.max(-3.14, Math.min(3.14, q(w))); }
+  if (Number.isInteger(tr) && s !== undefined) o.s = s ? 1 : 0;
   return o;
 }

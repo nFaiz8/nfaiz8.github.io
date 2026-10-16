@@ -104,7 +104,7 @@ export function stationTicker(send) {
   let sent = null;
   const tick = (pos) => {
     const w = wirePos(pos);
-    if (sent && sent.x === w.x && sent.z === w.z && sent.y === w.y && Math.abs((sent.a ?? 0) - (w.a ?? 0)) < 0.05) return;
+    if (sent && sent.tr === w.tr && sent.s === w.s && sent.x === w.x && sent.z === w.z && sent.y === w.y && Math.abs((sent.a ?? 0) - (w.a ?? 0)) < 0.05) return;
     if (send({ t: 'q', ...w })) sent = w;
   };
   tick.reset = () => { sent = null; };

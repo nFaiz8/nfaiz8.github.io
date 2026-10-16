@@ -136,7 +136,7 @@ export class Gallery extends DurableObject {
       if (to === 'station') me.sp = null;
     }
     if (m.x !== undefined) {
-      if (to === 'station') me.sp = { x: m.x, z: m.z, ...(m.y !== undefined && { y: m.y }), ...(m.a !== undefined && { a: m.a }) };
+      if (to === 'station') me.sp = { ...(m.tr !== undefined && { tr: m.tr }), x: m.x, z: m.z, ...(m.y !== undefined && { y: m.y }), ...(m.a !== undefined && { a: m.a }), ...(m.s !== undefined && { s: m.s }) };
       else { me.x = m.x; me.y = m.y; }
     }
     ws.serializeAttachment(me);
@@ -167,7 +167,7 @@ export class Gallery extends DurableObject {
       me.name = name || '';
       me.area = m.area || 'gallery';
       if (m.x !== undefined) {
-        if (me.area === 'station') me.sp = { x: m.x, z: m.z, ...(m.y !== undefined && { y: m.y }), ...(m.a !== undefined && { a: m.a }) };
+        if (me.area === 'station') me.sp = { ...(m.tr !== undefined && { tr: m.tr }), x: m.x, z: m.z, ...(m.y !== undefined && { y: m.y }), ...(m.a !== undefined && { a: m.a }), ...(m.s !== undefined && { s: m.s }) };
         else { me.x = m.x; me.y = m.y; }
       }
       me.here = true;

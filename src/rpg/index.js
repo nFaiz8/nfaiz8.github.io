@@ -225,6 +225,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       talk = createTalkBar(document.body, { onChat: () => mp.chat(), onEmote: (k) => mp.emote(k) });
     }
 
+    // What multiplayer hears of you: on the ground in line coordinates, or aboard in your train's frame (§7).
+    const where = () => (rider.frame.kind === 'train'
+      ? { tr: rider.frame.k, x: walker.x, z: walker.z, a: pose.yaw, s: rider.seat ? 1 : 0 }
+      : { x: feet.x, z: feet.z, y: feet.y, a: pose.yaw });
     let last = performance.now(), t0 = last, leaving = false, frames = 0, pinned = false;
     const time = () => (performance.now() - t0) / 1000;
     // The train's clock: shared by everyone (Multiplayer), or this station's own once setTime pins it (tests).
@@ -367,8 +371,14 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
         pigeons: world.pigeons, rats: world.rats, people,
       });
       if (others) {
-        others.update(mp.list(now), now, dt, t, camera, feet);
-        mp.tick({ x: feet.x, z: feet.z, y: feet.y, a: pose.yaw });
+        // Riders are drawn in their train, wherever the schedule has it now.
+        const list = mp.list(now).map((p) => {
+          if (p.tr == null) return p;
+          const o2 = trainOrigin(local(p.tr, tt));
+          return { ...p, ox: o2.x, oz: o2.z, y: LEVEL.platform };
+        });
+        others.update(list, now, dt, t, camera, feet);
+        mp.tick(where());
       }
       v.set(feet.x, feet.y + 0.8, feet.z).project(camera);
       post.setFocus((v.y + 1) / 2);
@@ -410,7 +420,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     return {
       // What I said or emoted, over my head at once.
       say(text) { others?.say(text, performance.now()); },
-      pos: () => ({ x: feet.x, z: feet.z, y: feet.y, a: pose.yaw }),
+      pos: () => where(),
       emote(kind) { others?.emote(kind, performance.now()); },
       stop() {
         canvas.removeEventListener('pointerdown', onDown);

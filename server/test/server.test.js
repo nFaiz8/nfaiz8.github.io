@@ -655,6 +655,14 @@ test('an old page that never sends z is in the gallery, and welcome says so, wit
   a.close(); b.close();
 });
 
+test('station: a rider\'s position aboard is relayed with its train', async () => {
+  const r = room();
+  const s1 = await joined(r, 'Sta', { area: 'station', x: 10, z: 9.5 });
+  const s2 = await joined(r, 'Tia', { area: 'station' });
+  s1.send2({ t: 'q', tr: 7, x: 30.004, z: -0.25, a: 0.5, s: 1 });
+  assert.deepEqual(await s2.next('q'), { t: 'q', id: s1.id, tr: 7, x: 30, z: -0.25, a: 0.5, s: 1 });
+});
+
 test('messages are filtered by area: the gallery and the station hear only their own', async () => {
   const r = room();
   const g = await joined(r, 'Gal');
@@ -736,21 +744,21 @@ test('z is validated: only known areas; and rate-limited by its own bucket', asy
   a.close();
 });
 
-test('station positions out of the map, NaN or with a bad yaw are dropped', async () => {
+test('station positions off the line, NaN or with a bad yaw are dropped', async () => {
   const r = room();
   const s1 = await joined(r, 'One', { area: 'station' });
   const s2 = await joined(r, 'Two', { area: 'station' });
   await s1.next('join');
-  const bad = ['{"t":"q","x":NaN,"z":1}', { t: 'q', x: 1 }, { t: 'q', x: -0.5, z: 5 }, { t: 'q', x: 49, z: 5 }, { t: 'q', x: 5, z: 20 },
+  const bad = ['{"t":"q","x":NaN,"z":1}', { t: 'q', x: 1 }, { t: 'q', x: -700, z: 5 }, { t: 'q', x: 1500, z: 5 }, { t: 'q', x: 5, z: 20 }, { t: 'q', tr: 3, x: 80, z: 0 }, { t: 'q', tr: 3, x: 5, z: 2 },
     { t: 'q', x: 5, z: 5, y: -9 }, { t: 'q', x: 5, z: 5, y: 'up' }, { t: 'q', x: 5, z: 5, a: 7 }, { t: 'q', x: '5', z: 5 }];
   for (const m of bad) s2.send2(m);
   await sleepFor(300);
   assert.equal(s1.inbox.filter((m) => m.t === 'q').length, 0);
-  s2.send2({ t: 'q', x: 48, z: 19, y: -4.2 });
-  assert.deepEqual(await s1.next('q'), { t: 'q', id: s2.id, x: 48, z: 19, y: -4.2 });
+  s2.send2({ t: 'q', x: 840, z: 19, y: -4.2 }); // CANAL ST is on the line
+  assert.deepEqual(await s1.next('q'), { t: 'q', id: s2.id, x: 840, z: 19, y: -4.2 });
   // A hi into the station from outside it doesn't get in.
   const c = client({ room: r }); await c.opened;
-  c.send2({ t: 'hi', name: 'X', area: 'station', x: 100, z: 1 });
+  c.send2({ t: 'hi', name: 'X', area: 'station', x: 2000, z: 1 });
   await sleepFor(300);
   assert.equal(c.inbox.filter((m) => m.t === 'welcome').length, 0);
   s1.close(); s2.close(); c.close();
