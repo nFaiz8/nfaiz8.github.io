@@ -133,7 +133,7 @@ human or model, in `src/rpg/MAPS.md`: this table, the checker's rules, and the c
   - It follows a point 1 unit above you with a 0.15 s spring, and is clamped so it never shows past the
     map's outer walls.
   - It never rotates.
-  - When you stand near a wall on the camera's side, that wall fades to 25% so you stay visible.
+  - When you stand near a wall on the camera's side, that wall fades to 20% so you stay visible (20% since the look pass).
 
 ## 5. The look and the life
 
@@ -176,8 +176,8 @@ The look is the chosen mockup ("Octopath, ASCII world"), rebuilt in three.js:
   The train still passes.
 
 **Performance:**
-- **Device-pixel-ratio cap:** 2 on desktop, 1.5 on phones. The post-processing runs at half
-  resolution.
+- **Device-pixel-ratio cap:** 2 on desktop, 1.5 on phones. Bloom runs at half resolution; the
+  tilt-shift runs at full.
 - **Frame rate:** the target is 60 fps on a laptop and 30 or more on a recent phone.
 - **When hidden:** the loop pauses while the tab is hidden.
 

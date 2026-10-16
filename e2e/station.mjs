@@ -1,6 +1,8 @@
 // The station (station spec §6): down the lobby's stairs, walking, a passing train, back up, the back button, a direct link,
-// a resize, and staying in the gallery when the station can't load. Usage: node e2e/station.mjs
+// a resize, a portrait phone, many trips, and staying in the gallery when the station can't load.
+// Usage: node e2e/station.mjs
 import { withBrowser, ready, sleep, SHOTS } from './lib.mjs';
+import { startOf } from '../src/rpg/train.js';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 
@@ -14,7 +16,12 @@ const inStation = (page) => page.waitForFunction(() => window.__station && windo
 const backInGallery = (page) => page.waitForFunction(() => !window.__station && window.__ascii.station() === 'off' && !window.__ascii.world.frozen, { timeout: 15000 });
 const takeStairs = (page) => page.evaluate(() => { const s = window.__ascii.map.stairs.inside; window.__ascii.walkTo(s.x + 2, s.y); });
 
+// Every console message's text, for the WebGL-context warning Chrome gives when contexts pile up.
+const consoleLog = [];
+const nFrames = (page, n) => page.evaluate((n) => new Promise((done) => { const f = () => (--n <= 0 ? done() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+
 await withBrowser(async ({ page, url, errors }) => {
+  page.on('console', (m) => consoleLog.push(m.text()));
   await page.goto(url);
   await ready(page);
 
@@ -41,10 +48,14 @@ await withBrowser(async ({ page, url, errors }) => {
   });
 
   await check('a train comes out of the tunnel and passes', async () => {
-    await page.evaluate(() => { window.__station.teleport(30.5, 9.5); window.__station.setTime(4); });
+    await page.evaluate((s) => { window.__station.teleport(30.5, 9.5); window.__station.setTime(s); }, startOf(0) - 2);
     await page.waitForFunction(() => window.__station.train()?.phase === 'warn', { timeout: 10000 });
-    await page.waitForFunction(() => window.__station.train()?.phase === 'pass', { timeout: 10000 });
-    await page.waitForFunction(() => { const t = window.__station.train(); return t && Math.abs(t.head - 30) < 6; }, { timeout: 5000 });
+    // 1.3 s out of its tunnel the train's nose is mid-platform (x ≈ 30.5); set and read in one go, so a slow
+    // frame can't skip past it.
+    const t = await page.evaluate((s) => { window.__station.setTime(s); const t = window.__station.train(); return t && { phase: t.phase, head: t.head }; }, startOf(0) + 1.3);
+    assert.equal(t?.phase, 'pass');
+    assert.ok(Math.abs(t.head - 30) < 6, `head at ${t.head}`);
+    await nFrames(page, 2);
     await page.screenshot({ path: `${SHOTS}/station-train.png` });
     await page.waitForFunction(() => !window.__station.train(), { timeout: 10000 });
   });
@@ -98,6 +109,45 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.goto('about:blank');
     await page.goto(`${url}#/station`);
     await inStation(page);
+  });
+
+  await check('on a portrait phone the station starts and draws the station, not the dark', async () => {
+    try {
+      await page.goto('about:blank');
+      await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+      await page.goto(`${url}#/station`);
+      await inStation(page);
+      await sleep(500);
+      const c = await page.evaluate(() => { const c = document.querySelector('canvas.station'); return { w: c.clientWidth, h: c.clientHeight }; });
+      assert.deepEqual(c, { w: 390, h: 844 });
+      const shot = await page.screenshot({ path: `${SHOTS}/station-phone.png` });
+      // The middle third, top to bottom: mostly lit, not mostly black.
+      const { width, height } = await sharp(shot).metadata();
+      const third = Math.floor(height / 3);
+      const { data, info } = await sharp(shot).extract({ left: 0, top: third, width, height: third }).greyscale().raw().toBuffer({ resolveWithObject: true });
+      let dark = 0;
+      for (const v of data) if (v < 12) dark++;
+      const share = dark / (info.width * info.height);
+      assert.ok(share < 0.5, `${(share * 100).toFixed(0)}% of the middle third is black`);
+    } finally {
+      await page.goto('about:blank');
+      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    }
+  });
+
+  await check('fifteen trips down and up leave one station at most and no lost WebGL contexts', async () => {
+    await page.goto(url);
+    await ready(page);
+    for (let i = 0; i < 15; i++) {
+      await takeStairs(page);
+      await inStation(page);
+      assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 1, `trip ${i + 1}: one station canvas`);
+      await page.goBack();
+      await backInGallery(page);
+      assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 0, `trip ${i + 1}: no station canvas`);
+    }
+    const lost = consoleLog.filter((m) => m.includes('Too many active WebGL contexts'));
+    assert.deepEqual(lost, []);
   });
 
   await check('no page errors', async () => assert.deepEqual(errors, []));

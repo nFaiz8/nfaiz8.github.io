@@ -3,10 +3,9 @@
 // stacked a box per unit of height), so the texture repeats once per world unit.
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
-import { makeSprite, PROPS } from './sprites.js';
+import { makeSprite, PROPS, FONT } from './sprites.js';
 import { TRAIN } from './train.js';
 
-const FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 export const WALL_HEIGHT = 4; // over the highest floor beside a wall
 // Walls this close on the camera's side fade (spec §4). The eye sits cos 35° × 10 ≈ 8.2 south of the focus, plus
 // up to ~1 of spring lag, and is lower than the outer walls' tops; a reach shorter than that left the south wall
@@ -257,7 +256,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // one that falls outside a box around you wraps to the box's far side (x ±7, z −6…+4 with more room to the
   // north, where the camera looks, y from your floor to 3.2 over it), out at the dim, blurred edges of the view.
   const DUST_X = 7, DUST_N = 6, DUST_S = 4, DUST_H = 3.2;
-  const wrap = (v, lo, size) => lo + ((((v - lo) % size) + size) % size);
+  const wrapInto = (v, lo, size) => lo + ((((v - lo) % size) + size) % size);
   // A light haze of specks in the light, not a field of dots. Additive, so a mote's colour is its brightness: it
   // fades over DUST_LIT from the nearest tube or your lantern, to a dim DUST_FLOOR away from both.
   const DUST = reducedMotion ? 45 : 90, DUST_LIT = 5, DUST_FLOOR = 0.25, DUST_LANTERN = 2.5;
@@ -314,8 +313,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         }
         if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 0.55 + 0.45 * Math.abs(Math.sin(time * 53 + i));
         t.light.intensity = t.base * k;
-        // A tube between the camera and you would sit right over your head, so its bar goes (its light stays).
-        t.bar.visible = k > 0.3 && !nearCamera(t.x, t.z, walker, 1.6);
+        // A tube between the camera and you (south of you, at any x: the camera is kept inside the map, so it isn't
+        // always straight behind you) would float mid-screen, so its bar goes (its light stays).
+        t.bar.visible = k > 0.3 && !nearCamera(t.x, t.z, walker, Infinity);
       }
       // The tunnel the train comes out of glows for the warning, and stays lit while it passes.
       let glow = 0;
@@ -345,9 +345,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       const slow = reducedMotion ? 0.4 : 1;
       for (let i = 0; i < DUST; i++) {
         const j = i * 3;
-        dustPos[j] = wrap(dustPos[j] + (wind + Math.sin(time * 0.3 + i) * 0.05) * dt * slow, walker.x - DUST_X, 2 * DUST_X);
-        dustPos[j + 1] = wrap(dustPos[j + 1] + dustVel[i] * Math.sin(time * 0.5 + i * 1.7) * dt * slow, walker.y, DUST_H);
-        dustPos[j + 2] = wrap(dustPos[j + 2], walker.z - DUST_N, DUST_N + DUST_S);
+        dustPos[j] = wrapInto(dustPos[j] + (wind + Math.sin(time * 0.3 + i) * 0.05) * dt * slow, walker.x - DUST_X, 2 * DUST_X);
+        dustPos[j + 1] = wrapInto(dustPos[j + 1] + dustVel[i] * Math.sin(time * 0.5 + i * 1.7) * dt * slow, walker.y, DUST_H);
+        dustPos[j + 2] = wrapInto(dustPos[j + 2], walker.z - DUST_N, DUST_N + DUST_S);
         let near = Infinity;
         for (let k = 0; k < tubes.length; k++) {
           const t = tubes[k], dx = t.x - dustPos[j], dy = t.y - dustPos[j + 1], dz = t.z - dustPos[j + 2];

@@ -583,13 +583,15 @@ let following = null, followAt = 0;
 // The station (station spec §1): 'off' (the gallery runs), 'down' (fading out, loading), 'in', 'up' (leaving).
 let stationState = 'off', station = null;
 const fadeEl = document.getElementById('fade');
+let fadeGen = 0; // each fade (or instant cover) takes a number; an older fade's timer then leaves the overlay alone
 function fade(on, text = '') {
+  const gen = ++fadeGen;
   fadeEl.firstElementChild.textContent = text;
   fadeEl.hidden = false;
   if (reducedMotion) { fadeEl.classList.toggle('on', on); fadeEl.hidden = !on; return Promise.resolve(); }
   void fadeEl.offsetWidth; // start the transition from where it is
   fadeEl.classList.toggle('on', on);
-  return new Promise((done) => setTimeout(() => { if (!on) fadeEl.hidden = true; done(); }, 320));
+  return new Promise((done) => setTimeout(() => { if (!on && gen === fadeGen) fadeEl.hidden = true; done(); }, 320));
 }
 const onStairs = () => {
   const s = map.stairs && map.stairs.inside;
@@ -618,7 +620,8 @@ async function goDown({ instant = false } = {}) {
   world.path = null;
   world.onArrive = null;
   stopFollowing();
-  if (instant) { fadeEl.hidden = false; fadeEl.firstElementChild.textContent = '▼ going down…'; fadeEl.classList.add('on'); }
+  input.clear(); // a key held on the way down doesn't walk you, on arrival, onto the exit beside the spawn
+  if (instant) { fadeGen++; fadeEl.hidden = false; fadeEl.firstElementChild.textContent = '▼ going down…'; fadeEl.classList.add('on'); }
   else await fade(true, '▼ going down…');
   try {
     await closePanels(() => stationState !== 'down' || gen !== downGen);
@@ -654,16 +657,20 @@ async function goUp({ fromHistory = false } = {}) {
   if (stationState !== 'in') return;
   stationState = 'up';
   await fade(true);
-  station.stop();
-  station = null;
-  document.body.classList.remove('in-station');
-  if (live) live.away(false);
-  input.clear(); // a key or pad direction held on the way up doesn't carry into the lobby
-  standAtStairs();
-  if (!fromHistory && location.hash === STATION_HASH) replaceHash('');
-  world.frozen = false;
-  stationState = 'off';
-  await fade(false);
+  try {
+    station.stop();
+  } finally {
+    // Even if stopping the station threw, the gallery comes back.
+    station = null;
+    document.body.classList.remove('in-station');
+    if (live) live.away(false);
+    input.clear(); // a key or pad direction held on the way up doesn't carry into the lobby
+    standAtStairs();
+    if (!fromHistory && location.hash === STATION_HASH) replaceHash('');
+    world.frozen = false;
+    stationState = 'off';
+    await fade(false);
+  }
   stage.focus({ preventScroll: true });
   // Back to a route (a photo, a room): the hashchange that brought you up is applied now you're here.
   if (fromHistory && location.hash && location.hash !== STATION_HASH) applyRoute(parseRoute(location.hash));

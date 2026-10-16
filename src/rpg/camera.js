@@ -26,6 +26,7 @@ export function followCamera(cam, t, dt, map, aspect) {
   return cam;
 }
 
-const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
+// v kept within [lo, hi]; an empty range (lo > hi) gives its middle. Shared with rig.js.
+export const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
 
 export const eyeFor = (cam) => ({ x: cam.x, y: cam.y + Math.sin(CAM.pitch) * CAM.dist, z: cam.z + Math.cos(CAM.pitch) * CAM.dist });

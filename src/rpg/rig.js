@@ -8,6 +8,7 @@
 // mirrored; facing comes from yaw alone.
 import { RIG } from '../stick.js';
 import { SPRINT } from './move.js';
+import { clamp } from './camera.js';
 
 const TAU = 2 * Math.PI;
 // The arena's figure in u (stick.js): the hip 1 below the body's centre, the feet 2.9, the head's centre
@@ -41,16 +42,15 @@ const TURN = 0.08; // the facing spring, seconds
 
 const fin = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const mod = (v, m) => v - m * Math.floor(v / m);
-const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const lerp = (a, b, k) => a + (b - a) * k;
 const runK = (gait) => clamp((fin(gait, 0) - 1) / (SPRINT - 1), 0, 1);
-const wrap = (a) => a - TAU * Math.floor((a + Math.PI) / TAU);
+const wrapAngle = (a) => a - TAU * Math.floor((a + Math.PI) / TAU);
 
 // Turn the short way round toward targetYaw, on a spring: quick, never instant, never past it.
 export function turnToward(yaw, targetYaw, dt) {
-  yaw = wrap(fin(yaw, 0));
-  const d = wrap(fin(targetYaw, yaw) - yaw), k = dt > 0 ? 1 - Math.exp(-dt / TURN) : 0;
-  return wrap(yaw + d * k);
+  yaw = wrapAngle(fin(yaw, 0));
+  const d = wrapAngle(fin(targetYaw, yaw) - yaw), k = dt > 0 ? 1 - Math.exp(-dt / TURN) : 0;
+  return wrapAngle(yaw + d * k);
 }
 
 // A foot's place along the stride: swinging forward on a sine (eased at both ends), planted and sliding back
