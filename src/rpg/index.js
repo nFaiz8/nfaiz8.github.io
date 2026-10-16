@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import stationText from './station.txt?raw';
 import { parseStation } from './map.js';
 import { createWalker, stepWalker, SPEED } from './move.js';
-import { trainAt, sharedTime } from './train.js';
+import { sharedTime } from './train.js';
+import { trainsAt, passFor } from './schedule.js';
 import { createCamera, followCamera, eyeFor, fovFor } from './camera.js';
 import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
@@ -71,8 +72,14 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     renderer.toneMappingExposure = 1.0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const scene = new THREE.Scene();
+    // The dark below ground, and its sky light (bridge.js warms them out on the bridge).
+    scene.background = new THREE.Color('#05060a');
+    scene.fog = new THREE.Fog('#05060a', 16, 34);
+    scene.add(new THREE.HemisphereLight('#8090b8', '#1a1612', 0.6));
+    const museum = new THREE.Group();
+    scene.add(museum);
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
-    world = buildScene(scene, map, { reducedMotion });
+    world = buildScene(museum, map, { reducedMotion });
     const walker = createWalker(map);
     // The turnstiles: shut from the hall without a ticket, the emergency gate shut from the hall always (gates.js);
     // the walker collides with the map as gated.
@@ -197,7 +204,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       lantern.position.set(feet.x + joints.lantern.x, feet.y + joints.lantern.y, feet.z + joints.lantern.z);
       lantern.intensity = 9 * (reducedMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 13) * Math.sin(t * 5.1));
 
-      const tt = clock(), train = trainAt(tt, map);
+      const tt = clock(), trains = trainsAt(tt), train = passFor(trains, 0, map);
       world.update(t, dt, walker, train, gates, tt);
       for (const p of people) {
         const c = stepCommuter(p.c, dt, { train, walker }, map);
@@ -236,7 +243,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       map, walker,
       frames: () => frames,
       time,
-      train: () => trainAt(clock(), map),
+      train: () => passFor(trainsAt(clock()), 0, map),
+      trains: () => trainsAt(clock()),
       clock,
       setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
       others: () => (others ? others.shown() : []),

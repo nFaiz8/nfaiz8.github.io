@@ -4,9 +4,10 @@
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
 import { makeSprite, PROPS, FONT, boxed } from './sprites.js';
-import { TRAIN, departures } from './train.js';
+import { departures } from './schedule.js';
+import { DECOR } from './decor.js';
 import { tubeFault, DRIP } from './sound.js';
-import { STATION_LIFE, createPigeon, stepPigeon, createRat, stepRat } from './life.js';
+import { createPigeon, stepPigeon, createRat, stepRat } from './life.js';
 import { buildTurnstiles } from './turnstiles.js';
 
 export const WALL_HEIGHT = 4; // over the highest floor beside a wall
@@ -35,15 +36,15 @@ const SURF = {
   wall: ['#3a3f4f', '#8d96ad', '┼'], hall: ['#4a4640', '#a49b8a', '·'], platform: ['#3f4148', '#9aa0ad', '·'],
   edge: ['#c9a227', '#3a2f10', '▀'], track: ['#26231f', '#7a6a55', '═'], stair: ['#4b4a50', '#b0b0bc', '─'],
   kiosk: ['#5a2e2a', '#d9a090', '▤'], pillar: ['#55596a', '#a9afc2', '│'], bench: ['#5b4632', '#c49a6c', '═'],
+  tape: ['#2a2410', '#f2c230', '╱'],
 };
 
-export function buildScene(scene, map, { reducedMotion = false } = {}) {
+// scene: a THREE.Group the caller places at the station's x on the line; the scene's background, fog and sky light are
+// the caller's too (index.js), since the line has more than one station.
+export function buildScene(scene, map, { reducedMotion = false, decor = DECOR[map.name] } = {}) {
   const SHAKE = { x: 0, y: 0 }; // reused each frame
   const owned = []; // everything to dispose
   const own = (x) => { owned.push(x); return x; };
-  scene.background = new THREE.Color('#05060a');
-  scene.fog = new THREE.Fog('#05060a', 16, 34);
-  scene.add(new THREE.HemisphereLight('#8090b8', '#1a1612', 0.6));
 
   const unit = own(new THREE.BoxGeometry(1, 1, 1));
   const mats = {};
@@ -98,6 +99,12 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         const top = map.levelAt(front - (s.dx > 0 ? 0.001 : s.dx < 0 ? -0.001 : 0), frontZ - (s.dz > 0 ? 0.001 : s.dz < 0 ? -0.001 : 0));
         box('stair', ax, (lo + top) / 2, az, s.dx ? 0.5 : 1, top - lo, s.dz ? 0.5 : 1);
       }
+      continue;
+    }
+    if (ch === 'x') { // tape across a closed exit, at the floor beside it
+      const y = map.levelAt(x - 1, z) ?? 0;
+      box('hall', x, y - 0.1, z, 1, 0.2, 1);
+      box('tape', x, y + 0.55, z, 0.12, 1.1, 1);
       continue;
     }
     if (cell.level == null) continue;
@@ -206,22 +213,28 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // Tubes: a bright bar each (it blooms) and a cool point light under it.
   const tubeGeo = own(new THREE.BoxGeometry(1.4, 0.06, 0.16));
   const tubeMat = own(new THREE.MeshBasicMaterial({ color: '#e8f4ff', toneMapped: false }));
+  // Their light comes from a pool of TUBE_LIGHTS point lights, moved each frame to the tubes nearest you: every point
+  // light costs every lit pixel, and the lengthened platform has twice the tubes.
+  const TUBE_LIGHTS = 12;
   const tubes = map.tubes.map((t) => {
     const bar = new THREE.Mesh(tubeGeo, own(tubeMat.clone()));
     bar.position.set(t.x, t.y, t.z);
-    const light = new THREE.PointLight('#cfe3ff', 7, 8, 1.6);
-    light.position.set(t.x, t.y - 0.25, t.z);
-    scene.add(bar, light);
-    return { ...t, bar, light, base: 7 };
+    scene.add(bar);
+    return { ...t, bar, base: 7, k: 1 };
+  });
+  const tubeLights = Array.from({ length: Math.min(TUBE_LIGHTS, tubes.length) }, () => {
+    const light = new THREE.PointLight('#cfe3ff', 0, 8, 1.6);
+    scene.add(light);
+    return light;
   });
 
   // The way back up: warm light over the exit, and a sign.
-  if (map.exits.length) {
+  if (map.exits.length && decor.exitSign) {
     const mid = map.exits[Math.floor(map.exits.length / 2)];
     const y = map.levelAt(mid.x, mid.z) ?? 0;
     const warm = new THREE.PointLight('#ffb35c', 10, 6, 1.8);
     warm.position.set(mid.x, y + 2.4, mid.z);
-    const up = makeSprite(['▲ MUSEUM'], '#ffce6e', 0.5, { glow: true });
+    const up = makeSprite([decor.exitSign], '#ffce6e', 0.5, { glow: true });
     up.mesh.position.set(mid.x + 0.6, y + 2.3, mid.z);
     owned.push(up);
     fadeable(up.mesh, mid.x + 0.6, mid.z, 1.4);
@@ -241,45 +254,42 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   };
   // The hall's north wall: the kiosk (closed, its sign on the shutter), a bin, the line map, the drinks machine by
   // the turnstiles.
-  prop('bin', 11.35, 13.72); // by the turnstiles, against the south wall
-  prop('closed', 4.5, 7.03, 1.25);
-  prop('map', 8.1, 5.06, 1.15);
-  prop('vending', 11.05, 5.15);
-  for (const c of [23, 35]) prop('bin', c + 0.5, 10.1);
+  for (const [name, x, z, lift = 0] of decor.props) prop(name, x, z, lift);
   // Over the turnstiles and the stair head, on the stair wall's south face: the clock and the departures board.
-  const wallFace = 6.02;
   const clockText = (d, tick) => boxed([` ${String(d.getHours()).padStart(2, '0')}${tick ? ':' : ' '}${String(d.getMinutes()).padStart(2, '0')} `], 7);
   let clockKey = '';
-  const clock = makeSprite(clockText(new Date(), true), ['#5a2a24', '#ff6a4a', '#5a2a24'], 0.56, { glow: true, bright: 1.35, bg: '#0b0605' });
-  clock.mesh.position.set(12.5, 2.5, wallFace); // over the turnstile line
+  const clock = decor.clock && makeSprite(clockText(new Date(), true), ['#5a2a24', '#ff6a4a', '#5a2a24'], 0.56, { glow: true, bright: 1.35, bg: '#0b0605' });
+  if (clock) clock.mesh.position.set(decor.clock.x, decor.clock.y, decor.clock.z); // over the turnstile line
   const boardLines = (d) => [' DEPARTURES', ...d.lines.map((l) => ` ${l} `)];
-  const board = makeSprite(boardLines(departures(0, map)), ['#ffd27a', '#ffb340', '#ffb340'], 0.85, { glow: true, bright: 1.6, bg: '#050402', gap: 0.25, frame: '#6a4a18' });
-  board.mesh.position.set(15.7, 2.0, wallFace);
+  const board = makeSprite(boardLines(departures(0, decor.stop)), ['#ffd27a', '#ffb340', '#ffb340'], 0.85, { glow: true, bright: 1.6, bg: '#050402', gap: 0.25, frame: '#6a4a18' });
+  board.mesh.position.set(decor.board.x, decor.board.y, decor.board.z);
   let boardKey = '', boardAt = -1;
-  owned.push(clock, board);
-  fadeable(clock.mesh, 12.5, wallFace, clock.mesh.geometry.parameters.width / 2 + 0.6);
-  fadeable(board.mesh, 15.7, wallFace, board.mesh.geometry.parameters.width / 2 + 0.6);
-  scene.add(clock.mesh, board.mesh);
+  owned.push(board);
+  if (clock) { owned.push(clock); fadeable(clock.mesh, decor.clock.x, decor.clock.z, clock.mesh.geometry.parameters.width / 2 + 0.6); scene.add(clock.mesh); }
+  fadeable(board.mesh, decor.board.x, decor.board.z, board.mesh.geometry.parameters.width / 2 + 0.6);
+  scene.add(board.mesh);
   // Across the north track, facing the platform: an exhibition poster, a warning, and one torn poster whose corner
   // flaps in a train's wind.
-  const far = 1.03;
-  prop('nowShowing', 24.6, far, 1.15);
-  prop('torn', 28.4, far, 1.45);
-  prop('gap', 38.5, far, 1.75);
-  const flap = makeSprite(PROPS.flap.lines, PROPS.flap.colors, PROPS.flap.h, { depth: false });
-  flap.mesh.geometry.translate(-0.13, 0, 0); // hinged on its left edge, at the tear
-  flap.mesh.position.set(28.85, LEVEL.track + 1.45 + 0.62, far + 0.01);
-  owned.push(flap);
-  scene.add(flap.mesh);
+  let flap = null;
+  if (decor.torn) {
+    const { x, z, lift } = decor.torn;
+    prop('torn', x, z, lift);
+    flap = makeSprite(PROPS.flap.lines, PROPS.flap.colors, PROPS.flap.h, { depth: false });
+    flap.mesh.geometry.translate(-0.13, 0, 0); // hinged on its left edge, at the tear
+    flap.mesh.position.set(x + 0.45, LEVEL.track + lift + 0.62, z + 0.01);
+    owned.push(flap);
+    scene.add(flap.mesh);
+  }
+  if (decor.tape) prop('tape', decor.tape.x - 0.4, decor.tape.z, 0.15);
 
   // The LED ticker hung between two pillars: one long line of text drawn once, scrolled a whole character at a time.
-  const TICKER = '   THE NEXT TRAIN DOES NOT STOP AT THIS STATION  ·  PLEASE STAND BEHIND THE YELLOW LINE  ·  MIND THE GAP  ·  faiz.pics: NOW SHOWING UPSTAIRS  ·  KEEP YOUR BELONGINGS WITH YOU  ·';
+  const TICKER = decor.ticker.text;
   const TICK_SHOW = 30, tickerTex = own(tickerTexture(TICKER));
   tickerTex.wrapS = THREE.RepeatWrapping;
   tickerTex.repeat.set(TICK_SHOW / TICKER.length, 1);
   const tickerMat = own(new THREE.MeshBasicMaterial({ map: tickerTex, color: new THREE.Color(1.7, 1.7, 1.7), toneMapped: false }));
   const tickerBoxMat = own(new THREE.MeshStandardMaterial({ color: '#15171c', roughness: 0.6, metalness: 0.4 }));
-  const ticker = { x: 26.5, z: 9.5, y: LEVEL.platform + 2.55, w: 4.6 };
+  const ticker = { x: decor.ticker.x, z: decor.ticker.z, y: LEVEL.platform + 2.55, w: decor.ticker.w };
   const tickerBox = new THREE.Mesh(unit, tickerBoxMat);
   tickerBox.scale.set(ticker.w + 0.12, 0.36, 0.14);
   tickerBox.position.set(ticker.x, ticker.y, ticker.z);
@@ -294,67 +304,31 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
 
   // The buzzing lamp over the kiosk: a short tube on the shutter's lintel that never quite settles.
   const kioskBar = new THREE.Mesh(own(new THREE.BoxGeometry(1.1, 0.05, 0.1)), own(new THREE.MeshBasicMaterial({ color: '#fff1d6', toneMapped: false })));
-  kioskBar.position.set(4.5, 2.0, 7.1);
   const kioskLight = new THREE.PointLight('#ffe2b0', 3, 4, 1.6);
-  kioskLight.position.set(4.5, 1.9, 7.5);
-  scene.add(kioskBar, kioskLight);
+  if (decor.kiosk) {
+    kioskBar.position.set(decor.kiosk.x, 2.0, 7.1);
+    kioskLight.position.set(decor.kiosk.x, 1.9, 7.5);
+    scene.add(kioskBar, kioskLight);
+  }
 
   // A steam vent in the hall floor: a grate, and soft puffs rising out of it.
-  const vent = { x: 6.5, z: 12.2 };
+  const vent = decor.vent;
   const grate = new THREE.Mesh(own(new THREE.PlaneGeometry(1, 0.7).rotateX(-Math.PI / 2)), own(new THREE.MeshStandardMaterial({ map: own(grateTexture()), roughness: 0.6, metalness: 0.5 })));
-  grate.position.set(vent.x, LEVEL.hall + 0.012, vent.z);
-  scene.add(grate);
+  if (vent) { grate.position.set(vent.x, LEVEL.hall + 0.012, vent.z); scene.add(grate); }
   const puffTex = own(puffTexture()), puffGeo = own(new THREE.PlaneGeometry(1, 1));
   const PUFFS = reducedMotion ? 4 : 8, PUFF_LIFE = reducedMotion ? 5 : 3.2;
   const puffs = Array.from({ length: PUFFS }, (_, i) => {
     const m = new THREE.Mesh(puffGeo, own(new THREE.MeshBasicMaterial({ map: puffTex, color: '#c9d2df', transparent: true, depthWrite: false, opacity: 0 })));
     m.renderOrder = 3;
-    scene.add(m);
+    if (vent) scene.add(m);
     return { m, phase: i / PUFFS, dx: Math.sin(i * 2.3) * 0.18 };
   });
 
-  // The passing train (spec §5): 4 cars with ASCII panels and lit windows, headlights that bloom, and a light
-  // that sweeps the platform edge ahead of it.
-  const carTex = own(trainTexture(false)), carGlow = own(trainTexture(true));
-  const carMat = own(new THREE.MeshStandardMaterial({ map: carTex, emissiveMap: carGlow, emissive: '#ffffff', emissiveIntensity: 1, roughness: 0.6, metalness: 0.3 }));
-  // The panels go on the long sides only; the camera looks down on the roofs, and the ends meet the next car.
-  // A train on the south track shows you mostly its roof, so the roof is a lighter grey with its ▤ panels
-  // plain, and faintly lit, to read as a train from above.
-  const roofTex = own(glyphTexture(['#7d8592', '#dfe4ee', '▤'], 0.5));
-  roofTex.wrapS = roofTex.wrapT = THREE.RepeatWrapping;
-  roofTex.repeat.set(TRAIN.car / 1.5, 2);
-  const roofMat = own(new THREE.MeshStandardMaterial({ map: roofTex, emissive: '#2c323e', roughness: 0.7, metalness: 0.3 })); // a faint shape in the dark
-  const carGeo = own(new THREE.BoxGeometry(TRAIN.car, 2.6, 2.3));
-  const carMats = [roofMat, roofMat, roofMat, roofMat, carMat, carMat]; // +x, -x, +y, -y, +z, -z
-  const train = new THREE.Group();
-  const cars = [];
-  for (let i = 0; i < TRAIN.cars; i++) { const m = new THREE.Mesh(carGeo, carMats); cars.push(m); train.add(m); }
-  const lampGeo = own(new THREE.SphereGeometry(0.12, 12, 8));
-  const lampMat = own(new THREE.MeshBasicMaterial({ color: '#fff3d0', toneMapped: false }));
-  const lamps = [new THREE.Mesh(lampGeo, lampMat), new THREE.Mesh(lampGeo, lampMat)];
-  train.add(...lamps);
-  train.visible = false;
-  // The headlight and the tunnel glow are single lights that stay in the scene at intensity 0 between trains:
-  // adding or hiding a light changes the light count, which recompiles every material (a hitch).
-  const headlight = new THREE.PointLight('#fff1cc', 0, 10, 1.4);
-  // Only one train runs at a time, so one light serves every tunnel mouth: it moves to the one a train is coming
-  // out of, and glows for the 3 s of warning.
+  // One light serves every tunnel mouth: it moves to the one a train is about to come out of, and glows for the 3 s of
+  // warning. It stays in the scene at intensity 0 between trains: adding or hiding a light changes the light count,
+  // which recompiles every material (a hitch).
   const mouthLight = new THREE.PointLight('#ffd9a0', 0, 12, 1.5);
-  scene.add(train, headlight, mouthLight);
-  // Each mouth is closed by a dark plane, so a train out past the map's ends (in the void) is hidden and comes out
-  // of the dark. It warms a little with the glow.
-  const mouthGeo = own(new THREE.PlaneGeometry(1, 1));
-  const mouths = map.tracks.flatMap((t) => [-1, 1].map((side) => {
-    const mat = own(new THREE.MeshBasicMaterial({ color: '#05060a' }));
-    const plane = new THREE.Mesh(mouthGeo, mat);
-    plane.scale.set(t.z1 - t.z0, TUNNEL + 0.4, 1);
-    plane.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
-    plane.position.set(side < 0 ? 0 : map.cols, t.y - 0.2 + (TUNNEL + 0.4) / 2, t.z);
-    scene.add(plane);
-    return { track: t, side, mat, x: side < 0 ? 0.3 : map.cols - 0.3 };
-  }));
-  const MOUTH_DARK = new THREE.Color('#05060a'), MOUTH_LIT = new THREE.Color('#2e2212');
-
+  scene.add(mouthLight);
   // Dust in the light, blown along when a train passes. The motes hang in world space and you walk through them;
   // one that falls outside a box around you wraps to the box's far side (x ±7, z −6…+4 with more room to the
   // north, where the camera looks, y from your floor to 3.2 over it), out at the dim, blurred edges of the view.
@@ -387,10 +361,12 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   });
 
   // A sheet of newspaper on the platform, which the train's wind skitters along.
-  const news = makeSprite(PROPS.news.lines, PROPS.news.colors, PROPS.news.h);
-  owned.push(news);
-  news.mesh.position.set(30.5, LEVEL.platform, 12.4);
-  scene.add(news.mesh);
+  const news = decor.news && makeSprite(PROPS.news.lines, PROPS.news.colors, PROPS.news.h);
+  if (news) {
+    owned.push(news);
+    news.mesh.position.set(decor.news.x, LEVEL.platform, decor.news.z);
+    scene.add(news.mesh);
+  }
   // Pigeons on the platform and rats on the track bed (life.js steps them; these draw them). One sprite per frame of
   // art, shared, and a mesh per creature per frame with its own material, so each fades on its own.
   const frameSet = (art) => Object.fromEntries(Object.entries(art.frames).map(([k, lines]) => {
@@ -406,8 +382,8 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     return [k, m];
   }));
   const pigeonFrames = frameSet(PROPS.pigeon), ratFrames = frameSet(PROPS.rat);
-  const pigeons = STATION_LIFE.pigeons.map((p, i) => ({ s: createPigeon(p, i), m: creatureMeshes(pigeonFrames) }));
-  const rats = STATION_LIFE.rats.map((r, i) => ({ s: createRat(r, map, i), m: creatureMeshes(ratFrames) }));
+  const pigeons = decor.life.pigeons.map((p, i) => ({ s: createPigeon(p, i), m: creatureMeshes(pigeonFrames) }));
+  const rats = decor.life.rats.map((r, i) => ({ s: createRat(r, map, i), m: creatureMeshes(ratFrames) }));
   const showFrame = (meshes, key, x, y, z, face, alpha = 1) => {
     for (const k in meshes) {
       const m = meshes[k];
@@ -439,11 +415,11 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     // The clock: real local time, its colon ticking each second (steady with reduced motion).
     const now = Date.now(), tick = reducedMotion || Math.floor(now / 500) % 2 === 0;
     const key = `${Math.floor(now / 60000)}${tick}`;
-    if (key !== clockKey) { clockKey = key; clock.draw(clockText(new Date(now), tick)); }
+    if (clock && key !== clockKey) { clockKey = key; clock.draw(clockText(new Date(now), tick)); }
     // The departures board, looked at four times a second and redrawn only when its text changes.
     if (trainT - boardAt > 0.25 || trainT < boardAt) {
       boardAt = trainT;
-      const d = departures(trainT, map, !reducedMotion);
+      const d = departures(trainT, decor.stop, !reducedMotion);
       const k = d.lines.join('|');
       if (k !== boardKey) { boardKey = k; board.draw(boardLines(d)); }
     }
@@ -458,10 +434,10 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       const b = Math.sin(time * 37) * Math.sin(time * 2.9 + 1) + Math.sin(time * 11.3) * 0.4;
       kk = b > 0.85 ? 0.15 : 0.9 + 0.1 * Math.sin(time * 120);
     }
-    kioskLight.intensity = 3 * kk;
-    kioskBar.visible = kk > 0.3;
+    kioskLight.intensity = decor.kiosk ? 3 * kk : 0;
+    kioskBar.visible = !!decor.kiosk && kk > 0.3;
     // Steam from the vent: puffs rise, swell and fade, some breaths stronger than others.
-    for (let i = 0; i < puffs.length; i++) {
+    for (let i = 0; vent && i < puffs.length; i++) {
       const p = puffs[i], k = ((time / PUFF_LIFE + p.phase) % 1 + 1) % 1;
       const breath = 0.65 + 0.35 * Math.sin(time * 0.6 + i);
       p.m.position.set(vent.x + p.dx + Math.sin(time * 0.8 + i) * 0.12 * k, LEVEL.hall + 0.1 + 2.2 * k, vent.z - 0.3 * k);
@@ -469,10 +445,12 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       p.m.material.opacity = 0.42 * breath * Math.sin(Math.PI * Math.min(1, k * 1.4)) * (1 - k);
     }
     // The torn corner flaps in the wind of a train on the north track.
-    const fl = flap.mesh;
-    const gust = pass && pass.phase === 'pass' && pass.track === map.tracks[0] ? Math.max(0, 1 - Math.abs(pass.head - fl.position.x) / 14) : 0;
-    const want = reducedMotion ? gust * 0.6 : gust * (0.7 + 0.5 * Math.sin(time * 23)) ;
-    fl.rotation.y += ((want * 1.1) - fl.rotation.y) * (1 - Math.exp(-dt * 12));
+    if (flap) {
+      const fl = flap.mesh;
+      const gust = pass && pass.phase === 'pass' && pass.track === map.tracks[0] ? Math.max(0, 1 - Math.abs(pass.head - fl.position.x) / 14) * Math.min(1, pass.speed / 20) : 0;
+      const want = reducedMotion ? gust * 0.6 : gust * (0.7 + 0.5 * Math.sin(time * 23)) ;
+      fl.rotation.y += ((want * 1.1) - fl.rotation.y) * (1 - Math.exp(-dt * 12));
+    }
     // Pigeons and rats.
     for (const { s, m } of pigeons) {
       stepPigeon(s, dt, { walker, train: pass, reducedMotion });
@@ -489,7 +467,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // Where things that make a sound are, for audio.js: the steam vent, the torn poster's corner, the faulty tube, the
   // puddles (in DRIP.period order).
   const sources = {
-    vent, poster: { x: flap.mesh.position.x, y: flap.mesh.position.y, z: flap.mesh.position.z }, fault: tubes[flicker] || null,
+    vent, poster: flap && { x: flap.mesh.position.x, y: flap.mesh.position.y, z: flap.mesh.position.z }, fault: tubes[flicker] || null,
     puddles: puddles.map((p) => ({ x: p.x, y: p.y, z: p.z })),
   };
 
@@ -500,7 +478,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       placeWalls(walker);
       updateLife(time, dt, walker, pass, gates, trainT);
       stepFaders(walker, dt);
-      const passing = !!pass && pass.phase === 'pass';
+      const passing = !!pass && pass.phase === 'pass' && pass.speed > 0.5, gustK = passing ? Math.min(1, pass.speed / 20) : 0;
       // Tubes: steady, but one has a fault, and the ones near a passing train shudder (spec §5; neither with
       // reduced motion).
       for (let i = 0; i < tubes.length; i++) {
@@ -509,37 +487,26 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         if (i === flicker && !reducedMotion) {
           k = tubeFault(time); // a 0.9 s stutter every 4.1 s, and a flick now and then between (sound.js: it crackles)
         }
-        if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 0.55 + 0.45 * Math.abs(Math.sin(time * 53 + i));
-        t.light.intensity = t.base * k;
+        if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 1 - gustK * (0.45 - 0.45 * Math.abs(Math.sin(time * 53 + i)));
+        t.k = k;
         // A tube between the camera and you (south of you, at any x: the camera is kept inside the map, so it isn't
         // always straight behind you) would float mid-screen, so its bar goes (its light stays).
         t.bar.visible = k > 0.3; // in front of you it fades (stepFaders) rather than going
       }
-      // The tunnel the train comes out of glows for the warning, and stays lit while it passes.
-      let glow = 0;
-      for (let i = 0; i < mouths.length; i++) {
-        const m = mouths[i];
-        const coming = !!pass && pass.track === m.track && (pass.dir > 0 ? m.side < 0 : m.side > 0);
-        const g = coming ? (pass.phase === 'warn' ? pass.warn : 1) : 0;
-        m.mat.color.lerpColors(MOUTH_DARK, MOUTH_LIT, g);
-        if (coming) { glow = g; mouthLight.position.set(m.x, m.track.y + 1.6, m.track.z); }
+      // The pool's lights go to the nearest tubes, each at its tube's flicker.
+      const near = tubes.map((t, i) => [Math.abs(t.x - walker.x) + Math.abs(t.z - walker.z), i]).sort((a, b) => a[0] - b[0]);
+      for (let j = 0; j < tubeLights.length; j++) {
+        const t = tubes[near[j][1]];
+        tubeLights[j].position.set(t.x, t.y - 0.25, t.z);
+        tubeLights[j].intensity = t.base * t.k;
       }
-      mouthLight.intensity = 25 * glow;
-      train.visible = passing;
-      headlight.intensity = 0;
-      if (passing) {
-        const t = pass.track, y = t.y + 1.45;
-        for (let i = 0; i < cars.length; i++) cars[i].position.set(pass.head - pass.dir * (TRAIN.car / 2 + i * (TRAIN.car + TRAIN.gap)), y, t.z);
-        lamps[0].position.set(pass.head + pass.dir * 0.02, y - 0.6, t.z - 0.7);
-        lamps[1].position.set(pass.head + pass.dir * 0.02, y - 0.6, t.z + 0.7);
-        // Ahead of the nose and over the platform's edge, away from the outer wall, which it would wash out.
-        headlight.position.set(pass.head + pass.dir * 3, y - 0.4, t.z + (t.z < map.rows / 2 ? 1.6 : -1.6));
-        // Off while the nose is still inside the tunnel, so it doesn't light the walls from the void.
-        headlight.intensity = pass.head > 0 && pass.head < map.cols ? 10 : 0;
-      }
+      // The tunnel a train is about to come out of glows for the warning (passFor's 'warn'), and stays lit as it comes.
+      const warm = pass && (pass.phase === 'warn' ? pass.warn : pass.phase === 'pass' && pass.speed > 0 && (pass.head < 4 || pass.head > map.cols - 4) ? 1 : 0);
+      mouthLight.intensity = 25 * (warm || 0);
+      if (warm) mouthLight.position.set(pass.dir > 0 ? 0.3 : map.cols - 0.3, pass.track.y + 1.6, pass.track.z);
       // Dust drifts; a passing train blows it along, and it stirs before. Motes outside the box around you wrap
       // in (all at once on the frame you arrive somewhere new, which is as good as a cut).
-      const wind = passing ? pass.dir * 6 * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 25) : pass && pass.phase === 'warn' ? 0.6 * pass.dir : 0;
+      const wind = passing ? pass.dir * 6 * gustK * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 25) : pass && pass.phase === 'warn' ? 0.6 * pass.dir : 0;
       const slow = reducedMotion ? 0.4 : 1;
       for (let i = 0; i < DUST; i++) {
         const j = i * 3;
@@ -573,17 +540,19 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       }
       // The newspaper skitters in the wind where it lies (a train on the far track barely stirs it), and stops
       // at the platform's ends.
-      const nm = news.mesh;
-      const near = passing ? (Math.abs(pass.track.z - nm.position.z) < 6 ? 1 : 0.3) * Math.max(0, 1 - Math.abs(pass.head - nm.position.x) / 12) : 0;
-      if (near > 0) {
-        nm.position.x = Math.min(45, Math.max(21, nm.position.x + pass.dir * 3 * near * dt));
-        nm.rotation.z = Math.sin(time * 9) * 0.3 * near;
-      } else nm.rotation.z *= Math.exp(-dt * 6);
+      if (news) {
+        const nm = news.mesh, [lo, hi] = decor.news.range;
+        const stir = passing ? gustK * (Math.abs(pass.track.z - nm.position.z) < 6 ? 1 : 0.3) * Math.max(0, 1 - Math.abs(pass.head - nm.position.x) / 12) : 0;
+        if (stir > 0) {
+          nm.position.x = Math.min(hi, Math.max(lo, nm.position.x + pass.dir * 3 * stir * dt));
+          nm.rotation.z = Math.sin(time * 9) * 0.3 * stir;
+        } else nm.rotation.z *= Math.exp(-dt * 6);
+      }
     },
     // A very slight shake while a train passes near you (spec §5; none with reduced motion).
     shake(time, walker, pass) {
-      if (reducedMotion || !pass || pass.phase !== 'pass') { SHAKE.x = SHAKE.y = 0; return SHAKE; }
-      const a = 0.05 * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 20);
+      if (reducedMotion || !pass || pass.phase !== 'pass' || !(pass.speed > 0.5)) { SHAKE.x = SHAKE.y = 0; return SHAKE; }
+      const a = 0.05 * Math.min(1, pass.speed / 20) * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 20);
       SHAKE.x = a * Math.sin(time * 61); SHAKE.y = a * Math.sin(time * 47);
       return SHAKE;
     },
@@ -607,24 +576,6 @@ function nameTexture(name) {
   return t;
 }
 
-function trainTexture(glow) {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  const g = c.getContext('2d');
-  g.fillStyle = glow ? '#000' : '#7d8592'; g.fillRect(0, 0, 512, 256);
-  if (!glow) { g.fillStyle = '#b8323a'; g.fillRect(0, 176, 512, 18); }
-  for (let i = 0; i < 6; i++) { // windows
-    g.fillStyle = glow ? '#d9b070' : '#2a2620';
-    g.fillRect(24 + i * 82, 56, 64, 72);
-    if (!glow) { g.fillStyle = 'rgba(255,255,255,0.35)'; g.font = `40px ${FONT}`; g.fillText('▤', 40 + i * 82, 110); }
-  }
-  if (!glow) { g.fillStyle = '#e8ecf2'; g.font = `700 22px ${FONT}`; g.fillText('MUSEUM LINE', 190, 230); }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-// The ticker's LED text: amber dots on black, drawn once, as wide as the whole message.
 function tickerTexture(text) {
   const px = 28, c = document.createElement('canvas'), g = c.getContext('2d');
   g.font = `700 ${px}px ${FONT}`;

@@ -121,6 +121,8 @@ export const PROPS = {
     opts: { bg: (c, w, h, pad) => { c.fillStyle = '#d7c2df'; c.beginPath(); c.moveTo(pad / 2, pad / 2); c.lineTo(w * 0.78, pad / 2); c.lineTo(w - pad / 2, h * 0.5); c.lineTo(w - pad / 2, h - pad / 2); c.lineTo(pad / 2, h - pad / 2); c.closePath(); c.fill(); } },
   },
   flap: { lines: ['▙'], colors: ['#d7c2df'], h: 0.3 },
+  // Across CANAL ST's closed stairs (subway ride spec §5).
+  tape: { lines: ['╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱', ' STREET EXIT CLOSED ', '   OPENING  SOON    ', '╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱╱'], colors: ['#1a1a1a', '#1a1a1a', '#1a1a1a', '#1a1a1a'], h: 0.9, opts: { bg: '#f2c230' } },
   // A pigeon side on, facing right (scene.js mirrors it), in quarter blocks: head and beak, body, tail and feet.
   pigeon: {
     frames: { stand: ['   ▗█▖', '▟████ ', '▝▜▀▛▘ '], peck: ['      ', '▟███▄ ', '▝▜▀▛▘█'], up: [' ▚  ▞ ', ' ▝██▙▖', '      '], down: ['      ', '▗▄██▙▖', '▘   ▝ '] },

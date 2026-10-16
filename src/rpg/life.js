@@ -1,5 +1,5 @@
 // Who lives in the station (station spec, "Life and props (round 2)"): pigeons on the platform, rats on the track
-// bed, and a few commuters waiting for a train that never stops. Pure: no three.js, no DOM. Each creature is a
+// bed, and a few commuters waiting on the platform. Pure: no three.js, no DOM. Each creature is a
 // small state machine stepped with dt; scene.js and index.js draw them. Seeded, so a run can be replayed.
 import { RADIUS, blocked } from './move.js';
 import { turnToward } from './rig.js';
@@ -25,7 +25,7 @@ export const STATION_LIFE = {
 };
 
 // A train counts as coming once its tunnel glows, and while it passes.
-const trainNear = (train, x, reach) => !!train && (train.phase === 'warn' || (train.phase === 'pass' && Math.abs(train.head - x) < reach));
+const trainNear = (train, x, reach) => !!train && (train.phase === 'warn' || (train.phase === 'pass' && (train.speed ?? 1) > 0.5 && Math.abs(train.head - x) < reach));
 
 // Pigeons: peck (the head bobs), hop a little, and flutter off when you come within SCARE or a train comes; they
 // come back to the same spot a while later.
@@ -166,7 +166,7 @@ function nearTrack(c, map) {
 export function stepCommuter(c, dt, { train, walker }, map) {
   const r = c.r, x0 = c.x, z0 = c.z;
   c.t -= dt;
-  const passing = !!train && train.phase === 'pass' && Math.max(train.head, train.tail) > 0 && Math.min(train.head, train.tail) < map.cols;
+  const passing = !!train && train.phase === 'pass' && (train.speed ?? 1) > 0.5 && Math.max(train.head, train.tail) > 0 && Math.min(train.head, train.tail) < map.cols;
   const track = nearTrack(c, map);
   // A train passing: watch it (turn toward its nose); stand back if it's on your side.
   let goal = null;
