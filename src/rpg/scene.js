@@ -130,14 +130,14 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // after you (render order 9, with the faded walls), so it only tints you and never punches a hole. Its colour
   // dims with it, so the bloom can't blow a faded tube or lit sign back up to full white.
   const faders = [];
-  const fadeable = (meshes, x, z, side) => {
+  const DIM = 0.35; // a faded light's colour, as a share of its own
+  const fadeable = (meshes, x, z, side, { opacity = FADE_OPACITY, dim = DIM } = {}) => {
     const list = (Array.isArray(meshes) ? meshes : [meshes]).map((m) => ({ m, order: m.renderOrder, depth: m.material.depthWrite, base: m.material.color.clone() }));
     for (const { m } of list) m.material.transparent = true;
-    const f = { list, x, z, side, k: 0, set: null };
+    const f = { list, x, z, side, opacity, dim, k: 0, set: null };
     faders.push(f);
     return f;
   };
-  const DIM = 0.35; // a faded light's colour, as a share of its own
   const stepFaders = (walker, dt) => {
     const ease = 1 - Math.exp(-dt / 0.12);
     for (let i = 0; i < faders.length; i++) {
@@ -147,8 +147,8 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       if (Math.abs(want - f.k) < 0.01) f.k = want;
       for (let j = 0; j < f.list.length; j++) {
         const { m, order, depth, base } = f.list[j], mat = m.material;
-        mat.opacity = 1 + (FADE_OPACITY - 1) * f.k;
-        mat.color.copy(base).multiplyScalar(1 + (DIM - 1) * f.k);
+        mat.opacity = 1 + (f.opacity - 1) * f.k;
+        mat.color.copy(base).multiplyScalar(1 + (f.dim - 1) * f.k);
         const faded = f.k > 0.01;
         mat.depthWrite = faded ? false : depth;
         m.renderOrder = faded ? 9 : order;
@@ -433,7 +433,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
 
   // Tubes south of you (at any x: the camera is kept inside the map, so it isn't always straight behind you) would
   // float mid-screen as solid slabs, so they fade.
-  for (const t of tubes) fadeable(t.bar, t.x, t.z, Infinity);
+  // A tube is a bright bar seen from above, so at the walls' 20% it still reads as a grey slab on the floor: it goes
+  // fainter, a ghost of itself.
+  for (const t of tubes) fadeable(t.bar, t.x, t.z, Infinity, { opacity: 0.1, dim: 0.2 });
 
   // Everything added in round 2 (station spec, "Life and props"): signs, the ticker, the turnstiles, the vent, the creatures.
   const updateLife = (time, dt, walker, pass, gates) => {
