@@ -3,9 +3,10 @@
 // between the lanes; on each lane's north cabinet a three-armed rotor of square bars that you turn a third of a turn
 // by walking through, and on its top a flat round tap target, the ◎ puck, whose light ring is dim white idle, green
 // while a paid gate is open for you and red a moment when you walk into it locked. No screens, no text. The line's
-// southernmost lane is the emergency exit (gates.js): a barred steel swing gate hinged at the wall, its hinge post
-// carrying on up as a sign post with the red EMERGENCY EXIT / ALARM WILL SOUND sign bolted to it and the alarm light
-// on top (on the see-through south wall they seemed to float). gates.js holds the
+// northernmost lane is the emergency exit (gates.js): a barred steel swing gate hinged at the north wall, its hinge
+// post carrying on up as a sign post with the red EMERGENCY EXIT / ALARM WILL SOUND sign bolted to it and the alarm
+// light on top. Every cabinet carries a rotor (the camera, south of the line, sees a rotor only on the cabinet north
+// of its lane), and there are none at the walls: a lane beside a wall has the wall as its side. gates.js holds the
 // state; this only draws it.
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
@@ -14,9 +15,8 @@ import { ARM_X, rotorTurns, ringState, alarmOn, gateKinds, HINGE_X, HINGE_IN, SW
 
 // A cabinet: its length along the lanes, and its height up to its top slab. Across the lanes it fills its post tile
 // and reaches LANE_IN into each gate tile beside it, so a lane is 1 − 2·LANE_IN wide, cabinet to cabinet: room for
-// you, and no gap a person could squeeze through. At the line's ends a cabinet runs into the wall.
+// you, and no gap a person could squeeze through. There are none at the line's ends: the wall is the lane's side.
 const CAB = { len: 0.9, h: 0.95 };
-const INTO_WALL = 0.3;
 // The rotor: its hub stands HUB_OUT off the cabinet's face and its level arm reaches across the lane to a hand's width
 // (HAND) short of the next cabinet, as a real tripod turnstile's does.
 const HAND = 0.08, HUB_OUT = 0.11;
@@ -59,17 +59,16 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
   const parts = { steel: [], top: [], dark: [] };
   const put = (kind, x, y, z, sx, sy, sz) => parts[kind].push([x, y, z, sx, sy, sz]);
 
-  // Cabinets: one on each post between lanes, and one at each end of the line against the wall, half in it, except
-  // beside the emergency gate, which hangs on the wall itself.
+  // Cabinets: one on each post between lanes, filling its tile and reaching LANE_IN into the lanes either side. None
+  // at the walls: the emergency gate hangs on the north wall, and a lane against a wall has the wall as its side.
   const cabs = new Map(); // its north edge → { z0, z1 }, its extent across the lanes
   const cabAt = (z0, z1) => { if (!cabs.has(z0)) cabs.set(z0, { z0, z1 }); return cabs.get(z0); };
   const lanes = gates.map((cell, i) => {
-    const north = map.at(cell.c, cell.r - 1);
-    // The lane's north cabinet: a post's, filling its tile, or one running into the wall.
-    cabAt(north?.ch === 't' ? cell.r - 1 - LANE_IN : cell.r - INTO_WALL, cell.r + LANE_IN);
-    const south = map.at(cell.c, cell.r + 1);
-    if (kinds[i] !== 'emergency' && south && south.ch !== 't' && south.ch !== ':') cabAt(cell.r + 1 - LANE_IN, cell.r + 1 + INTO_WALL);
-    return { i, cell, face: cell.r + LANE_IN, kind: kinds[i] };
+    const post = map.at(cell.c, cell.r - 1)?.ch === 't';
+    if (post) cabAt(cell.r - 1 - LANE_IN, cell.r + LANE_IN); // the lane's north cabinet, which carries its rotor
+    if (map.at(cell.c, cell.r + 1)?.ch === 't') cabAt(cell.r + 1 - LANE_IN, cell.r + 2 + LANE_IN);
+    // face: the north side of the lane (the cabinet's face, or the wall's).
+    return { i, cell, face: post ? cell.r + LANE_IN : cell.r, kind: kinds[i] };
   });
   const c0 = gates[0].c, cx = c0 + 0.04 + CAB.len / 2;
   for (const { z0, z1 } of cabs.values()) {
@@ -79,13 +78,13 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
     put('top', cx, y0 + CAB.h + 0.03, z, CAB.len + 0.03, 0.06, w + 0.03); // the top slab, a little proud
   }
 
-  // The emergency gates: a hinge post at the wall, and on it a swing panel of bars reaching across the lane to the
-  // cabinet, waist-to-chest high, with a push bar on the platform side; the sign on the wall over it, facing the
-  // camera, and the alarm light above the sign.
+  // The emergency gates: a hinge post at the north wall, and on it a swing panel of bars reaching south across the lane
+  // to the cabinet, waist-to-chest high, with a push bar on the platform side; the sign on the post over it, facing
+  // the camera, and the alarm light above the sign.
   const signs = [], exits = [];
   const H = 1.2; // the panel's height
   for (const lane of lanes.filter((l) => l.kind === 'emergency')) {
-    const { c, r } = lane.cell, hx = c + HINGE_X, hz = r + 1 - HINGE_IN, len = SWING_LEN;
+    const { c, r } = lane.cell, hx = c + HINGE_X, hz = r + HINGE_IN, len = SWING_LEN;
     put('steel', hx, y0 + (H + 0.12) / 2, hz, 0.08, H + 0.12, 2 * HINGE_IN); // hinge post, against the wall
     put('dark', hx, y0 + 0.02, hz, 0.14, 0.04, 0.14); // its foot plate
     put('top', hx, y0 + (H + 0.12 + POST_TOP) / 2, hz - 0.01, 0.06, POST_TOP - H - 0.12, 0.06); // the sign post above it
@@ -97,14 +96,15 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
       m.position.set(x, y, z); m.scale.set(sx, sy, sz);
       panel.add(m);
     };
-    // Built pointing north (−z) from the hinge; swung, it turns toward the hall (−x).
-    bar(0, H - 0.025, -len / 2, 0.05, 0.05, len); // top rail
-    bar(0, 0.62, -len / 2, 0.04, 0.04, len); // middle rail
-    bar(0, 0.12, -len / 2, 0.04, 0.04, len); // bottom rail
-    bar(0, (H + 0.1) / 2, -(len - 0.025), 0.05, H - 0.1, 0.05); // the free stile
-    bar(0, (H + 0.1) / 2, -0.04, 0.05, H - 0.1, 0.05); // the hinge stile
-    for (let z = 0.13; z < len - 0.06; z += 0.1) bar(0, (H + 0.1) / 2, -z, 0.022, H - 0.14, 0.022); // bars
-    bar(0.06, 0.95, -len / 2, 0.035, 0.05, len - 0.2, darkMat); // the push bar, on the platform side
+    // Built pointing south (+z) from the hinge; swung (a negative turn about y), it turns toward the hall (−x) and
+    // lies along the north wall.
+    bar(0, H - 0.025, len / 2, 0.05, 0.05, len); // top rail
+    bar(0, 0.62, len / 2, 0.04, 0.04, len); // middle rail
+    bar(0, 0.12, len / 2, 0.04, 0.04, len); // bottom rail
+    bar(0, (H + 0.1) / 2, len - 0.025, 0.05, H - 0.1, 0.05); // the free stile
+    bar(0, (H + 0.1) / 2, 0.04, 0.05, H - 0.1, 0.05); // the hinge stile
+    for (let z = 0.13; z < len - 0.06; z += 0.1) bar(0, (H + 0.1) / 2, z, 0.022, H - 0.14, 0.022); // bars
+    bar(0.06, 0.95, len / 2, 0.035, 0.05, len - 0.2, darkMat); // the push bar, on the platform side
     panel.position.set(hx, y0, hz);
     scene.add(panel);
     // The sign on the post, facing the camera (held by two clamps), and the alarm light on the post's top: a red
@@ -117,12 +117,12 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
     signs.push({ mesh: sign.mesh, x: hx, z: hz, side: 1.2 });
     const housing = new THREE.Mesh(unit, darkMat);
     housing.scale.set(0.3, 0.2, 0.12);
-    housing.position.set(hx, y0 + LAMP_Y, hz - 0.01);
+    housing.position.set(hx, y0 + LAMP_Y, hz + 0.01); // clear of the wall's face
     const lampMat = own(new THREE.MeshBasicMaterial({ color: ALARM_OFF.clone(), toneMapped: false }));
     const lamp = new THREE.Mesh(own(new THREE.BoxGeometry(0.24, 0.13, 0.04)), lampMat);
-    lamp.position.set(hx, y0 + LAMP_Y, hz + 0.05); // on the housing's face toward the camera
+    lamp.position.set(hx, y0 + LAMP_Y, hz + 0.07); // on the housing's face toward the camera
     const glow = new THREE.PointLight('#ff3a26', 0, 4, 1.4);
-    glow.position.set(hx - 0.2, y0 + LAMP_Y - 0.2, r + 0.4);
+    glow.position.set(hx - 0.2, y0 + LAMP_Y - 0.2, r + 0.6);
     scene.add(housing, lamp, glow);
     exits.push({ i: lane.i, panel, lampMat, glow });
   }
@@ -135,7 +135,7 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
     scene.add(mesh);
   }
   // Light over the line, so the steel reads as steel.
-  const zs = [...cabs.values()].flatMap((k) => [k.z0, k.z1]);
+  const zs = gates.flatMap((cell) => [cell.r, cell.r + 1]);
   const light = new THREE.PointLight('#dfe8ff', 3, 5.5, 1.6);
   light.position.set(c0 + 0.2, y0 + 2.7, (Math.min(...zs) + Math.max(...zs)) / 2);
   scene.add(light);
@@ -195,7 +195,7 @@ export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {})
       }
       for (const e of exits) {
         const k = g.gates[e.i];
-        e.panel.rotation.y = k.swing * (Math.PI / 2);
+        e.panel.rotation.y = -k.swing * (Math.PI / 2);
         // The alarm flashes while it sounds (steady with reduced motion); walking into the gate from the hall gives
         // a short steady red.
         const n = g.note, bumpedIt = n && n.gate === k && time >= n.from && time < n.from + 0.5;

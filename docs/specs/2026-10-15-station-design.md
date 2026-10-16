@@ -233,8 +233,10 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
     on the turnstile" the LED readers (`TAP HERE`, `GO`, `INSUFFICIENT FARE`, the swipe-again joke) went.
   - **A sealed line:** after "theres like empty space where u can slip through ... in real life", nothing a person
     could squeeze through. Each `t` post is a waist-high (0.95 + a lighter top slab) steel cabinet filling its tile
-    and reaching 0.08 (`LANE_IN`) into each gate tile beside it, so every lane is 0.84 wide, cabinet to cabinet; at
-    each end of the line a cabinet runs 0.3 into the wall. Sides a faint `═`, top `─`, a dark kick plate. A cool
+    and reaching 0.08 (`LANE_IN`) into each gate tile beside it, so a lane between two posts is 0.84 wide, cabinet
+    to cabinet. There are no cabinets at the walls (the ones that ran 0.3 into the wall at each end of the line
+    clipped into it, and the one by the emergency gate carried no arm): a lane beside a wall has the wall as its
+    side, so every cabinet carries a rotor. Sides a faint `═`, top `─`, a dark kick plate. A cool
     light hangs over the line. (A fifth lane was tried for "too much empty space" and taken out again: "extra one
     didnt help".)
   - **Rotor:** each turnstile lane has a three-armed rotor on its north cabinet: three square steel bars 120° apart
@@ -242,19 +244,21 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
     height, reaching to a hand's width (0.08) of the next cabinet, and the other two point down along the cabinet.
     It turns a third of a turn as you push through, driven by where you are, not a timer (`pushFrom`: nothing until
     your front reaches the level arm, `ARM_X` into the gate, then over 0.7 of walking, clicking over by itself for
-    the last 15%); when you leave the gate a full push becomes its new rest and a part push springs back. Locked,
+    the last 15%); from the camera, south of the line looking north, a rotor only shows on the cabinet north of its
+    lane, which is why the paid lanes are the ones with a post north of them. When you leave the gate a full push becomes its new rest and a part push springs back. Locked,
     you stop at the tile's edge against the level arm and it doesn't move. Going back to the hall you push it the
     other way.
   - **Tap target:** on top of the same cabinet a flat round puck, `◎` in geometry (a dark disc, a lit ring and dot),
     no text: dim white idle; green at the gate you're walking up to while you hold a ticket; red for 1.2 s
     (`REFUSED_FOR`) when you walk into it locked (`ringState`).
-  - **Emergency exit gate** (`gateKinds`: the southernmost gate of each column of two or more is kind
-    `'emergency'`; on the shipped map row 12, beside the south wall). Replaces the first try, a decorative gate in a
+  - **Emergency exit gate** (`gateKinds`: the northernmost gate of each column of two or more is kind
+    `'emergency'`; on the shipped map row 6, beside the north wall and the drinks machine; it was the southernmost,
+    row 12, until that left post 11's cabinet with no arm). Replaces the first try, a decorative gate in a
     recess north of the line that "is blocked" (it led into a wall). A barred steel swing gate, 1.2 high, hinged on
-    a post against the wall and, shut, reaching across its lane to the cabinet; a push bar on the platform side. The
+    a post against the north wall and, shut, reaching south across its lane to just short of post 7's cabinet; a push bar on the platform side. The
     hinge post carries on up as a lighter steel sign post: the red `EMERGENCY EXIT / ALARM WILL SOUND` sign, facing
     the camera, is clamped to it, and the alarm light in a dark housing sits on its top (hung on the see-through south
-    wall, they looked as if they floated). Exit only, free: from the hall it's locked, ticket or not, and walking into it doesn't
+    wall, where the gate first was, they looked as if they floated). Exit only, free: from the hall it's locked, ticket or not, and walking into it doesn't
     open the fare card machine (`blocked`, not `bumped`), just a 0.5 s steady red of the light. From the platform
     your front pushes it and it swings toward the hall following you (`swingFrom`: the angle at which the panel
     touches you, held right open once your middle passes the hinge line, so it's clear of you), and once you're out

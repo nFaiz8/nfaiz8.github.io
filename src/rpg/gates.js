@@ -6,7 +6,7 @@
 // east; an unlimited ride lasts the visit. Each gate has a three-armed rotor that you turn a third of a turn by
 // walking through (turnRotors), and a tap target whose light ring says what's going on (ringState).
 //
-// The southernmost gate of each column of two or more is the emergency exit instead (kind 'emergency'): exit only and
+// The northernmost gate of each column of two or more is the emergency exit instead (kind 'emergency'): exit only and
 // free. From the hall it's locked whether or not you hold a ticket, and walking into it doesn't open the fare card
 // machine; from the platform you push it open (swingGates) and walk out free, and the alarm goes (alarmOn).
 import { RADIUS } from './move.js';
@@ -18,15 +18,17 @@ export const START = 2000, TOP_UP = 2000;
 export const money = (cents) => `$${(cents / 100).toFixed(2)}`;
 const TOUCH = 0.12; // this close (a blocked step stops you up to one step short) to a shut gate's face counts as walking into it
 
-// Each column of gates' southernmost gate is its emergency exit, if the column has another gate to pay at.
+// Each column of gates' northernmost gate is its emergency exit, if the column has another gate to pay at. (From the
+// camera, south of the line looking north, a rotor only shows on the cabinet north of its lane, so the paid lanes are
+// the ones with a post north of them, and the lane against the north wall is the one without an arm.)
 export function gateKinds(map) {
   const cells = map.cells.filter((c) => c.ch === ':');
-  const south = new Map(), count = new Map();
+  const north = new Map(), count = new Map();
   for (const c of cells) {
     count.set(c.c, (count.get(c.c) || 0) + 1);
-    if (!south.has(c.c) || c.r > south.get(c.c)) south.set(c.c, c.r);
+    if (!north.has(c.c) || c.r < north.get(c.c)) north.set(c.c, c.r);
   }
-  return cells.map((c) => (count.get(c.c) > 1 && south.get(c.c) === c.r ? 'emergency' : 'turnstile'));
+  return cells.map((c) => (count.get(c.c) > 1 && north.get(c.c) === c.r ? 'emergency' : 'turnstile'));
 }
 
 export function createGates(map) {
@@ -168,8 +170,8 @@ export function ringState(g, i, w, t) {
   return hasTicket(g) && coming ? 'go' : 'idle';
 }
 
-// The emergency gate: a barred panel HINGE_X into its tile, hinged at the wall (the tile's south edge, just inside
-// it) and reaching across the lane. Coming from the platform your front pushes it, and it swings toward the hall
+// The emergency gate: a barred panel HINGE_X into its tile, hinged at the wall (the tile's north edge, just inside
+// it) and reaching south across the lane. Coming from the platform your front pushes it, and it swings toward the hall
 // following you, like the rotor: its angle is where the panel would touch you (atan of how far past the hinge line
 // your front is, over how far you are from the hinge), clicking fully open (a quarter turn, against the wall) for the
 // last part. It stays open until you're clear of its sweep. From the hall it doesn't move. Once you've left it it swings shut by itself (SHUT_RATE).
@@ -177,16 +179,17 @@ export const HINGE_X = 0.12, HINGE_IN = 0.06, SHUT_RATE = 2.5;
 const QUARTER = Math.PI / 2;
 // How open a walker at (x, z) pushing west has the gate (0 … 1).
 export function swingFrom(k, x, z) {
-  const hx = k.c + HINGE_X, hz = k.r + 1 - HINGE_IN;
+  const hx = k.c + HINGE_X, hz = k.r + HINGE_IN;
   const past = hx - (x - RADIUS);
   if (past <= 0) return 0;
   // Once your middle is past the hinge line the gate is held right open (by the last half step), so you're clear of
   // where it swings shut behind you.
-  const p = Math.max(Math.atan2(past, Math.max(0.12, hz - z - RADIUS * 0.6)) / QUARTER, (hx - x) / 0.5);
+  const p = Math.max(Math.atan2(past, Math.max(0.12, z - RADIUS * 0.6 - hz)) / QUARTER, (hx - x) / 0.5);
   return p >= CLICK ? 1 : p;
 }
 // How far a turnstile cabinet reaches into the gate tile beside it (turnstiles.js draws them), and the emergency
-// panel's length: from the hinge across the lane to just short of the cabinet's face, so shut it fills the lane.
+// panel's length: from the hinge at the north wall across the lane to just short of the face of the cabinet south of
+// it, so shut it fills the lane.
 export const LANE_IN = 0.08;
 export const SWING_LEN = 1 - HINGE_IN - LANE_IN - 0.015;
 export function swingGates(g, w, dt) {

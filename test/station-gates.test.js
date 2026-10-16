@@ -28,10 +28,10 @@ function walk(g, w, input, seconds, dt = 1 / 60, onFrame = null) {
 }
 const at = (x, z) => ({ ...createWalker(MAP), x, z, y: 0 });
 
-test('the shipped map has four gates in one column, the southernmost the emergency exit', () => {
+test('the shipped map has four gates in one column, the northernmost the emergency exit', () => {
   const g = createGates(MAP);
   assert.deepEqual(g.gates.map((k) => [k.c, k.r]), [[12, 6], [12, 8], [12, 10], [12, 12]]);
-  assert.deepEqual(g.gates.map((k) => k.kind), ['turnstile', 'turnstile', 'turnstile', 'emergency']);
+  assert.deepEqual(g.gates.map((k) => k.kind), ['emergency', 'turnstile', 'turnstile', 'turnstile']);
   assert.equal(g.wallet, START);
   assert.equal(g.pass, null);
 });
@@ -85,7 +85,7 @@ test('an unlimited ride lasts the visit', () => {
 });
 
 test('coming from the platform side is free, and the gate shuts behind you', () => {
-  const g = createGates(MAP), w = at(13.6, 6.5);
+  const g = createGates(MAP), w = at(13.6, 12.5);
   walk(g, w, { x: -1, y: 0 }, 1);
   assert.ok(w.x < GATE_C - RADIUS);
   assert.equal(hasTicket(g), false);
@@ -111,7 +111,7 @@ test('the arms open for you going through and shut after', () => {
   const g = createGates(MAP), w = at(13.3, 8.5);
   easeArms(g, w, 1);
   assert.equal(g.gates[1].open, 1, 'opens for you on the platform side, going out');
-  assert.equal(g.gates[0].open, 0, 'not the gate in another row');
+  assert.equal(g.gates[2].open, 0, 'not the gate in another row');
   const h = at(11.65, 8.5);
   easeArms(g, h, 3);
   assert.equal(g.gates[1].open, 0, 'shut to you in the hall without a ticket');
@@ -137,7 +137,7 @@ test('the rotor turns a third of a turn as you push through, driven by where you
 });
 
 test('pushFrom: nothing until your front reaches the arm, then over SWEEP, clicking over at the end', () => {
-  const k = createGates(MAP).gates[0];
+  const k = createGates(MAP).gates[1];
   assert.equal(pushFrom(k, GATE_C - RADIUS, 1), 0, 'stopped at a shut gate, short of the arm');
   assert.equal(pushFrom(k, GATE_C + ARM_X - RADIUS, 1), 0);
   assert.ok(Math.abs(pushFrom(k, GATE_C + ARM_X - RADIUS + 0.35, 1) - 0.5) < 1e-9, 'half way');
@@ -166,23 +166,23 @@ test('locked, the rotor does not move; going back to the hall it turns the other
 
 test('the tap target: idle, red a moment when you walk into it locked, green at your gate once you hold a ticket', () => {
   const g = createGates(MAP), far = at(5, 8.5);
-  assert.deepEqual(g.gates.map((_, i) => ringState(g, i, far, 0)), ['idle', 'idle', 'idle', null], 'the emergency gate has none');
+  assert.deepEqual(g.gates.map((_, i) => ringState(g, i, far, 0)), [null, 'idle', 'idle', 'idle'], 'the emergency gate has none');
   const w = at(11.7, 8.5), k = g.gates[1];
   refused(g, k, 10);
   assert.equal(ringState(g, 1, w, 10.1), 'refused');
-  assert.equal(ringState(g, 0, w, 10.1), 'idle', 'only on its own gate');
+  assert.equal(ringState(g, 2, w, 10.1), 'idle', 'only on its own gate');
   assert.equal(ringState(g, 1, w, 10 + REFUSED_FOR + 0.01), 'idle', 'and only for a while');
   buy(g, 'single');
   assert.equal(ringState(g, 1, w, 20), 'go');
-  assert.equal(ringState(g, 0, w, 20), 'idle', 'green only at the gate you are at');
+  assert.equal(ringState(g, 2, w, 20), 'idle', 'green only at the gate you are at');
   walk(g, w, { x: 1, y: 0 }, 1);
   assert.equal(ringState(g, 1, w, 30), 'idle', 'idle once you are through');
 });
 
-// The kinds come from the map: the southernmost gate of a column with more than one.
+// The kinds come from the map: the northernmost gate of a column with more than one.
 const mini = (rows) => parseStation(['name: T', ...rows].join('\n'));
-test('gateKinds: the southernmost gate of each column of two or more is the emergency exit; a lone gate is a turnstile', () => {
-  assert.deepEqual(gateKinds(MAP), ['turnstile', 'turnstile', 'turnstile', 'emergency']);
+test('gateKinds: the northernmost gate of each column of two or more is the emergency exit; a lone gate is a turnstile', () => {
+  assert.deepEqual(gateKinds(MAP), ['emergency', 'turnstile', 'turnstile', 'turnstile']);
   const m = mini([
     '#########',
     '#S..:...#',
@@ -193,12 +193,12 @@ test('gateKinds: the southernmost gate of each column of two or more is the emer
   ]);
   const kinds = m.cells.filter((c) => c.ch === ':').map((c) => [c.c, c.r]);
   assert.deepEqual(kinds, [[4, 1], [6, 2], [4, 3], [6, 4]]);
-  assert.deepEqual(gateKinds(m), ['turnstile', 'turnstile', 'emergency', 'emergency']);
+  assert.deepEqual(gateKinds(m), ['emergency', 'emergency', 'turnstile', 'turnstile']);
   const lone = mini(['#######', '#S.:.E#', '#######']);
   assert.deepEqual(gateKinds(lone), ['turnstile']);
 });
 
-const EXIT_Z = 12.5, exitGate = (g) => g.gates[3];
+const EXIT_Z = 6.5, exitGate = (g) => g.gates[0];
 test('the emergency gate is locked from the hall, ticket or not, and walking into it does not open the fare machine', () => {
   for (const pass of [null, 'single', 'unlimited']) {
     const g = createGates(MAP), w = at(10.5, EXIT_Z);
@@ -249,6 +249,9 @@ test('swingFrom: nothing until your front reaches the panel, then more the furth
   assert.equal(swingFrom(k, hx + RADIUS + 0.5, EXIT_Z), 0);
   const a = swingFrom(k, hx + RADIUS - 0.1, EXIT_Z), b = swingFrom(k, hx + RADIUS - 0.3, EXIT_Z);
   assert.ok(a > 0 && a < b && b < 1, `${a} < ${b}`);
+  // The hinge is on the north wall: the same push nearer it (further north) opens the gate further.
+  const n = swingFrom(k, hx + RADIUS - 0.1, EXIT_Z - 0.15), s = swingFrom(k, hx + RADIUS - 0.1, EXIT_Z + 0.15);
+  assert.ok(n > s && s > 0, `north ${n} > south ${s}`);
   assert.equal(swingFrom(k, hx - 1, EXIT_Z), 1);
 });
 

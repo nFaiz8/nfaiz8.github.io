@@ -42,19 +42,19 @@ Fluorescent tubes are placed for you: along the middle row of each platform band
 ## Turnstiles
 
 A column of `:` gates (with `t` posts between them) is a ticket line, drawn New York style: each `t` is a steel
-cabinet filling its tile and reaching a little into the gates beside it, each turnstile has a three-armed rotor and a
-round tap target on the cabinet north of it, and the wall tile at each end of the column gets a cabinet running into
-it. The game treats **west as outside**: walking east into a turnstile without a ticket stops you there and opens the
+cabinet filling its tile and reaching a little into the gates beside it, and each turnstile has a three-armed rotor and
+a round tap target on the cabinet north of it (from the camera, south of the line, that's the only side a rotor
+shows on). There are no cabinets at the walls: a lane beside a wall has the wall as its side. The game treats **west as outside**: walking east into a turnstile without a ticket stops you there and opens the
 fare card machine; walking west through one is always free. So put the gates with the way in on their west side and
 the paid area to the east, leave a tile of floor on both sides of each gate, and wall off both ends of the column.
 A single ride is used up once you come out of a gate on its east side; an unlimited ride lasts the visit
 (`src/rpg/gates.js`).
 
-The **southernmost gate** of a column with two or more gates is the **emergency exit** instead (`gateKinds`): a
-swing gate hinged on the wall south of it, with its sign and alarm light on that wall. It's exit only and free:
+The **northernmost gate** of a column with two or more gates is the **emergency exit** instead (`gateKinds`): a
+swing gate hinged on the wall north of it, with its sign and alarm light on its hinge post. It's exit only and free:
 locked from the west whatever you hold (and it never opens the fare card machine), pushed open from the east, and
-the alarm sounds as you come out. So give that lane a wall, not a post, south of it. A column with a single gate
-has no emergency exit.
+the alarm sounds as you come out. So give that lane a wall, not a post, north of it, and give every other gate a
+post north of it to carry its rotor. A column with a single gate has no emergency exit.
 
 ## What the checker wants
 
