@@ -294,6 +294,49 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.screenshot({ path: 'e2e/shots/station-bridge.png' });
   });
 
+  await check('first person: C looks through your eyes, the mouse turns you, W walks where you look; C again comes back out', async () => {
+    const st = (f, a) => page.evaluate(f, a);
+    if (!(await page.evaluate(() => !!window.__station))) { await page.goto('about:blank'); await page.goto(`${url}#/station`); }
+    await inStationSlow(page);
+    const face = (yaw) => st((yaw) => { const s = window.__station, l = s.firstPerson(); s.look(-(yaw - l.yaw) / 0.0024, 0); }, yaw);
+    await st(() => { window.__station.setTime(20 + 6, { hold: true }); window.__station.teleport(60, 7.5); }); // L0 standing
+    await nFrames(page, 10);
+    await page.keyboard.press('KeyC');
+    await nFrames(page, 3);
+    let fp = await st(() => window.__station.firstPerson());
+    assert.equal(fp.on, true);
+    assert.equal(fp.figure, false, 'your own figure is hidden');
+    const feet = await st(() => window.__station.world());
+    assert.ok(fp.eye[1] - feet.y > 1.2 && fp.eye[1] - feet.y < 1.8, `eye height ${fp.eye[1] - feet.y}`);
+    await face(Math.PI); // north, at the train
+    await nFrames(page, 3);
+    await page.screenshot({ path: `${SHOTS}/station-fp-platform.png` });
+    const z0 = (await st(() => window.__station.world())).z;
+    await page.keyboard.down('KeyW'); await nFrames(page, 12); await page.keyboard.up('KeyW');
+    const w1 = await st(() => window.__station.world());
+    assert.ok(w1.z < z0 - 0.3 && Math.abs(w1.x - 60) < 0.3, `W walked north, the way you look: ${z0} → ${JSON.stringify(w1)}`);
+    await face(-Math.PI / 2); // west
+    const x1 = w1.x;
+    await page.keyboard.down('KeyW'); await nFrames(page, 12); await page.keyboard.up('KeyW');
+    assert.ok((await st(() => window.__station.world())).x < x1 - 0.3, 'turned west, W walks west');
+    // Riding, in the car, then out on the bridge looking upriver at the skyline.
+    for (let i = 0; i < 4; i++) { await st(() => { window.__station.setTime(20 + 18 + 8, { hold: true }); window.__station.board(0, 30, 0.6); }); await nFrames(page, 6); }
+    await face(Math.PI / 2);
+    await nFrames(page, 3);
+    await page.screenshot({ path: `${SHOTS}/station-fp-car.png` });
+    for (let i = 0; i < 6; i++) { await st(() => { window.__station.setTime(20 + 18 + 28, { hold: true }); window.__station.board(0, 30, 0.6); }); await nFrames(page, 6); }
+    await face(Math.PI);
+    await st(() => window.__station.look(0, -60));
+    await nFrames(page, 3);
+    assert.ok((await st(() => window.__station.env())).bridge > 0.9, 'on the bridge');
+    await page.screenshot({ path: `${SHOTS}/station-fp-bridge.png` });
+    await page.keyboard.press('KeyC');
+    await nFrames(page, 3);
+    fp = await st(() => window.__station.firstPerson());
+    assert.equal(fp.on, false);
+    assert.equal(fp.figure, true);
+  });
+
   await check('frame time: the script stays well inside a 60 fps frame on the platform, in the tunnel and on the bridge', async () => {
     const at = async (setup) => { await page.evaluate(setup); await nFrames(page, 70); const p = await page.evaluate(() => window.__station.perf()); console.log('  ', JSON.stringify(p)); return p.cpu; };
     const platform = await at(() => { window.__station.setTime(20 + 5, { hold: true }); window.__station.teleport(60, 6.5); });

@@ -48,6 +48,8 @@ export function createPost(renderer, scene, camera) {
       composer.setSize(w, h);
       for (const p of [across, down]) p.uniforms.texel.value.set(1 / (w * dpr), 1 / (h * dpr));
     },
+    // The tilt-shift on or off (first person sees everything sharp).
+    setTilt(on) { for (const p of [across, down]) { p.uniforms.top.value = on ? 2.0 : 0; p.uniforms.bottom.value = on ? 1.4 : 0; } },
     setFocus(y01) { across.uniforms.focus.value = down.uniforms.focus.value = Math.min(0.9, Math.max(0.1, y01)); },
     render() { composer.render(); },
     dispose() { bloom.dispose(); across.dispose?.(); down.dispose?.(); output.dispose(); composer.dispose(); },

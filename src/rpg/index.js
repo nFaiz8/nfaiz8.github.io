@@ -27,6 +27,7 @@ import { local, localsAt } from './schedule.js';
 import { createRider, stepRider, frameOrigin, sit, stand, FADE } from './rider.js';
 import { stationWithTrains, trainMap, offPoles, lurch, seatNear, trainOrigin, inTrain } from './car.js';
 import { LEVEL } from './map.js';
+import { FP, createLook, look, fpInput, lookPoint } from './firstperson.js';
 
 // A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
 // dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
@@ -51,7 +52,7 @@ function footY(map, w) {
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, bridge = null, hint = null, fader = null, onKey = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, bridge = null, hint = null, fader = null, onKey = null, camHint = null, onLook = null, onLock = null;
   const stations = [null, null], groups = [null, null]; // the line's two stations (MUSEUM's is built at once)
   const people = []; // the commuters' figures
   const riderFigs = []; // the riders aboard trains (a pool)
@@ -67,6 +68,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     groups[1]?.removeFromParent();
     if (onKey) removeEventListener('keydown', onKey);
     hint?.remove();
+    camHint?.remove();
+    if (onLook) removeEventListener('mousemove', onLook);
+    if (onLock) document.removeEventListener('pointerlockchange', onLock);
+    if (document.pointerLockElement === canvas) document.exitPointerLock?.();
     fader?.remove();
     trainView?.dispose();
     tunnel?.dispose();
@@ -160,10 +165,39 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const cam = createCamera(walker);
 
     // Touch: hold a finger down to walk toward it (spec §4).
+    // First person (firstperson.js): C swaps to your eyes. A click there locks the pointer and the mouse looks
+    // (Esc lets it go); without the lock, or on a touch screen, a drag looks, and the keys still walk.
+    let fp = false, locked = false, drag = null;
+    const view = createLook();
     let finger = null;
-    const onDown = (e) => { finger = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture?.(e.pointerId); };
-    const onMove = (e) => { if (finger) { finger.x = e.clientX; finger.y = e.clientY; } };
-    const onUp = () => { finger = null; };
+    const onDown = (e) => {
+      if (fp) {
+        drag = { x: e.clientX, y: e.clientY };
+        if (!phone && !locked) canvas.requestPointerLock?.()?.catch?.(() => {});
+        return;
+      }
+      finger = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture?.(e.pointerId);
+    };
+    const onMove = (e) => {
+      if (fp) { if (drag && !locked) { look(view, e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY; } return; }
+      if (finger) { finger.x = e.clientX; finger.y = e.clientY; }
+    };
+    const onUp = () => { finger = null; drag = null; };
+    onLook = (e) => { if (fp && locked) look(view, e.movementX || 0, e.movementY || 0); };
+    onLock = () => { locked = document.pointerLockElement === canvas; showCamHint(); };
+    addEventListener('mousemove', onLook);
+    document.addEventListener('pointerlockchange', onLock);
+    const setFp = (on) => {
+      fp = on;
+      finger = drag = null;
+      if (fp) { view.yaw = pose.yaw; view.pitch = 0; } // looking the way you face
+      else if (locked) document.exitPointerLock?.();
+      figure.setVisible(!fp);
+      blob.visible = !fp;
+      post.setTilt(!fp); // the tilt-shift is a model's look from above; your own eyes see it all sharp
+      resize();
+      showCamHint();
+    };
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
@@ -179,18 +213,27 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       return new Set(k == null ? [] : riders(k).filter((r) => r.seat != null).map((r) => r.seat));
     };
     onKey = (e) => {
-      if (e.key !== 'e' && e.key !== 'E') return;
       if (e.target?.closest?.('input, textarea')) return;
+      if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) { setFp(!fp); return; }
+      if (e.key !== 'e' && e.key !== 'E') return;
       if (rider.seat) stand(rider, walker, clock()); else sit(rider, walker, taken(), clock());
     };
     addEventListener('keydown', onKey);
     hint = document.createElement('div');
     hint.className = 'station-hint';
     hint.textContent = '[E] sit';
-    Object.assign(hint.style, { position: 'absolute', left: '50%', bottom: '18%', transform: 'translateX(-50%)', font: '14px monospace', color: '#ffd27a', background: 'rgba(5,6,10,0.7)', padding: '2px 8px', display: 'none', pointerEvents: 'none' });
+    Object.assign(hint.style, { position: 'absolute', left: '50%', bottom: '18%', transform: 'translateX(-50%)', zIndex: '2', font: '14px monospace', color: '#ffd27a', background: 'rgba(5,6,10,0.7)', padding: '2px 8px', display: 'none', pointerEvents: 'none' });
     stage.append(hint);
+    camHint = document.createElement('div');
+    camHint.className = 'station-cam';
+    Object.assign(camHint.style, { position: 'absolute', left: '16px', bottom: '16px', zIndex: '2', font: '12px monospace', color: '#8a877f', pointerEvents: 'none' });
+    stage.append(camHint);
+    const showCamHint = () => {
+      camHint.textContent = !fp ? '[C] first person' : locked ? '[C] third person · esc frees the mouse' : `[C] third person · ${phone ? 'drag' : 'click'} to look`;
+    };
+    showCamHint();
     fader = document.createElement('div');
-    Object.assign(fader.style, { position: 'absolute', inset: '0', background: '#000', opacity: '0', pointerEvents: 'none' });
+    Object.assign(fader.style, { position: 'absolute', inset: '0', zIndex: '2', background: '#000', opacity: '0', pointerEvents: 'none' });
     stage.append(fader);
     const v = new THREE.Vector3();
     const fingerInput = () => {
@@ -206,7 +249,11 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const dpr = Math.min(phone ? 1.5 : 2, devicePixelRatio || 1);
       renderer.setPixelRatio(dpr);
       renderer.setSize(W, H, false);
-      if (W < H) {
+      if (fp) {
+        camera.aspect = W / H;
+        camera.fov = FP.fov;
+        camera.clearViewOffset();
+      } else if (W < H) {
         camera.fov = fovFor(W / (H * PORTRAIT_CROP));
         camera.setViewOffset(W, H * PORTRAIT_CROP, 0, H * (PORTRAIT_CROP - 1), W, H); // sets the aspect too
       } else {
@@ -259,8 +306,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       // Everything on the line, and your own train even out past its ends (turned round after a long hidden tab).
       const trains = trainsWith(tt, mine ? mine.k : null);
       if (!rider.seat) unstick(walker, m); // never start a frame inside something solid (a seat is on the bench, so not then)
-      if (ticket.isOpen) finger = null;
-      let input = ticket.isOpen ? STILL : finger ? fingerInput() : keys();
+      if (ticket.isOpen) { finger = drag = null; if (locked) document.exitPointerLock?.(); } // the machine wants the mouse
+      let input = ticket.isOpen ? STILL : finger ? fingerInput() : fp ? fpInput(keys(), view.yaw) : keys();
       if (rider.seat && (input.x || input.y)) stand(rider, walker, tt);
       if (rider.seat) input = STILL;
       if (!rider.seat) {
@@ -293,7 +340,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       // Face where you walk (keeping the last facing when you stop); the stride follows the ground covered,
       // and the gait is a smoothed speed, so starting and stopping blend. Seated, you face across the car.
       const speed = rider.seat ? 0 : Math.hypot(walker.vx, walker.vz);
-      if (rider.seat) targetYaw = rider.seat.yaw; else if (speed > 0.3) targetYaw = Math.atan2(walker.vx, walker.vz);
+      if (rider.seat) targetYaw = rider.seat.yaw; else if (fp) targetYaw = view.yaw; else if (speed > 0.3) targetYaw = Math.atan2(walker.vx, walker.vz);
       pose.sit = rider.seat ? 1 : 0;
       pose.yaw = turnToward(pose.yaw, targetYaw, dt);
       pose.gait += (speed / SPEED - pose.gait) * (1 - Math.exp(-dt / GAIT_EASE));
@@ -307,7 +354,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
 
       // The stations, by where the camera is: each is built the first time it comes near, and hidden while it's away.
       const camX = o.x + cam.x;
-      sunK = bridge.update(camX, o.z + eyeFor(cam).z, t);
+      const eyeZ = fp ? wz : o.z + eyeFor(cam).z; // in first person the eye is where you stand
+      sunK = bridge.update(camX, eyeZ, t);
       // Underground nothing is further than 80; out on the bridge the city is hundreds of tiles off.
       const far = sunK > 0 ? 4000 : 80;
       if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
@@ -322,7 +370,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
         stations[i].update(t, dt, here, pass, i === 0 ? gates : null, tt);
         if (i === 0) museumPass = pass;
       }
-      tunnel.update(camX, t, wz, o.z + eyeFor(cam).z);
+      tunnel.update(camX, t, wz, eyeZ);
       for (const p of people) {
         const c = stepCommuter(p.c, dt, { train: museumPass, walker: atMuseum ? walker : { x: -1e4, z: -1e4 } }, map);
         p.pose.yaw = c.yaw; p.pose.shift = c.shift; p.pose.t = t + c.home.x; // desynchronised breathing
@@ -346,8 +394,16 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       cam.wantPitch = onBridge ? CAM.bridgePitch : CAM.pitch;
       followCamera(cam, walker, dt, f.kind === 'station' ? maps[f.stop] : FREE, camera.aspect);
       const eye = eyeFor(cam), shake = f.kind === 'station' && f.stop === 0 ? world.shake(t, walker, museumPass) : { x: 0, y: 0 };
-      camera.position.set(o.x + eye.x + shake.x, eye.y + shake.y, o.z + eye.z);
-      camera.lookAt(o.x + cam.x + shake.x, cam.y + shake.y, o.z + cam.z);
+      if (fp) {
+        // Your eyes: the head joint (so the walk bobs it a little, and sitting lowers it), the shake on top.
+        const head = joints.head, at = { x: feet.x + head.x + shake.x, y: feet.y + head.y + FP.eye + shake.y, z: feet.z + head.z };
+        const to = lookPoint(at, view);
+        camera.position.set(at.x, at.y, at.z);
+        camera.lookAt(to.x, to.y, to.z);
+      } else {
+        camera.position.set(o.x + eye.x + shake.x, eye.y + shake.y, o.z + eye.z);
+        camera.lookAt(o.x + cam.x + shake.x, cam.y + shake.y, o.z + cam.z);
+      }
       figure.update(joints, camera, feet);
       for (const p of people) p.figure.update(p.joints, camera, p.at);
       let fi = 0;
@@ -384,8 +440,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
         others.update(list, now, dt, t, camera, feet);
         mp.tick(where());
       }
-      v.set(feet.x, feet.y + 0.8, feet.z).project(camera);
-      post.setFocus((v.y + 1) / 2);
+      if (!fp) { v.set(feet.x, feet.y + 0.8, feet.z).project(camera); post.setFocus((v.y + 1) / 2); }
       cpu[frames % 60] = performance.now() - f0; // the script, not the drawing (SwiftShader draws on the CPU too)
       post.render();
       frames++;
@@ -412,6 +467,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
         walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; walker.y = maps[stop].levelAt(x, z) ?? walker.y; },
       board(k, x, z) { rider.frame = { kind: 'train', k }; rider.seat = null; rider.t = rider.prevT = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; }, // (the camera jumps with you)
       frame: () => ({ ...rider.frame }),
+      firstPerson(on) { if (on !== undefined && on !== fp) setFp(on); return { on: fp, yaw: view.yaw, pitch: view.pitch, eye: camera.position.toArray(), figure: !fp }; },
+      look(dx, dy) { look(view, dx, dy); },
       aboard: () => (rider.frame.kind === 'train' ? { k: rider.frame.k, x: walker.x, z: walker.z, seat: rider.seat?.i ?? null } : null),
       world: () => ({ x: feet.x, y: feet.y, z: feet.z }),
       sit: () => sit(rider, walker, taken(), clock()),
