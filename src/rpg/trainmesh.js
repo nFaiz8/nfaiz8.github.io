@@ -1,6 +1,7 @@
 // The trains (subway ride spec §3): five New York cars, stainless and ribbed, three double doors a side, a cab at each
-// end with a route bullet, a destination sign and lamps, warm inside with benches, poles, ad cards and a strip map
-// over each door. A small pool of models is placed on the trains nearest the camera each frame.
+// end with a route bullet, a destination sign and lamps, warm inside with benches, poles and a strip map over each
+// door. (No ad cards: Faiz tried them and preferred the walls bare.) A small pool of models is placed on the trains
+// nearest the camera each frame.
 //
 // A model is built in its train's frame (x from its west end, z from the track's middle; car.js) and placed at the
 // train's west end, so it's the same whichever way the train runs; only the lamps and signs know its direction.
@@ -140,49 +141,9 @@ function ledTexture(text) {
   t.repeat.set(Math.min(1, 24 / Math.max(1, text.length)), 1);
   return t;
 }
-// An ad card (Faiz's asks): one of the gallery's panoramas, cropped to fill the card, with a slogan across the top in a
-// display serif and the site's name in the corner, like a real car card. A text card while it loads (or with none).
-export const AD = { w: 0.95, h: 0.35 }; // 2.71:1, the panoramas' shape
-export const SLOGANS = [
-  'See the city. Upstairs.', 'Now showing at faiz.pics', 'Every frame, one fare.', 'Grain is a feature.',
-  'Stand clear of the closing shutter.', 'Next stop: the gallery.', 'Shot here. Hung upstairs.', 'Mind the light.',
-];
-const SERIF = '"Didot", "Bodoni 72", "Playfair Display", Georgia, serif';
-const SANS = '"Futura", "Avenir Next", "Helvetica Neue", Arial, sans-serif';
-function drawAd(g, w, h, i, img) {
-  if (img) {
-    const k = img.width / img.height / (w / h); // >1: wider than the card, so trim its sides
-    const sw = k > 1 ? img.height * (w / h) : img.width, sh = k > 1 ? img.height : img.width / (w / h);
-    g.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, w, h);
-  } else {
-    g.fillStyle = ['#e8dfc8', '#1d2a3a', '#f2c230'][i % 3]; g.fillRect(0, 0, w, h);
-  }
-  const band = g.createLinearGradient(0, 0, 0, h * 0.5);
-  band.addColorStop(0, 'rgba(8, 8, 10, 0.78)'); band.addColorStop(1, 'rgba(8, 8, 10, 0)');
-  g.fillStyle = band; g.fillRect(0, 0, w, h * 0.5);
-  g.fillStyle = '#f6f1e6'; g.textAlign = 'center'; g.textBaseline = 'top';
-  g.font = `italic 600 ${Math.round(h * 0.2)}px ${SERIF}`;
-  g.fillText(SLOGANS[i % SLOGANS.length], w / 2, h * 0.07, w * 0.92);
-  g.textAlign = 'right'; g.textBaseline = 'bottom';
-  g.font = `500 ${Math.round(h * 0.09)}px ${SANS}`;
-  g.fillStyle = 'rgba(246, 241, 230, 0.85)';
-  g.fillText('FAIZ.PICS', w - h * 0.06, h - h * 0.05);
-}
-function adTexture(i, url, loader) {
-  const W = 512, H = Math.round(512 / (AD.w / AD.h));
-  const t = canvasTexture(W, H, (g, w, h) => drawAd(g, w, h, i, null));
-  if (url) loader.load(url, (img) => {
-    drawAd(t.image.getContext('2d'), W, H, i, img.image);
-    t.needsUpdate = true;
-    img.dispose();
-  });
-  return t;
-}
-
-export function createTrains(scene, { reducedMotion = false, ads = [] } = {}) {
+export function createTrains(scene, { reducedMotion = false } = {}) {
   const owned = [];
   const own = (x) => { owned.push(x); return x; };
-  const loader = new THREE.TextureLoader();
   const geo = {
     north: own(sideGeo(-1)), south: own(sideGeo(1)), ends: own(endsGeo(false)), lastEnds: own(endsGeo(true)),
     roof: own(slab(0, TRAIN.car, H.top, H.top + 0.1, -CAR.half, CAR.half)),
@@ -191,7 +152,6 @@ export function createTrains(scene, { reducedMotion = false, ads = [] } = {}) {
     strip: own(new THREE.BoxGeometry(TRAIN.car - 0.6, 0.03, 0.12)),
     bogie: own(slab(1.2, 3.6, H.bottom - 0.45, H.bottom, -1.0, 1.0)),
     cab: own(new THREE.PlaneGeometry(2.9, 3.3)),
-    ad: own(new THREE.PlaneGeometry(AD.w, AD.h)),
     stripMap: own(new THREE.PlaneGeometry(1.2, 0.15)),
     leaf: own(new THREE.BoxGeometry(CAR.door, H.lintel - F, 0.05)),
     lamp: own(new THREE.SphereGeometry(0.1, 10, 8)),
@@ -207,8 +167,6 @@ export function createTrains(scene, { reducedMotion = false, ads = [] } = {}) {
     leaf: own(new THREE.MeshStandardMaterial({ map: steelTex, metalness: 0.5, roughness: 0.4, color: '#c8ccd4' })),
     shaft: own(new THREE.MeshBasicMaterial({ color: '#ffcf8a', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })),
   };
-  const adTex = Array.from({ length: 8 }, (_, i) => own(adTexture(i, ads[i % Math.max(1, ads.length)] || null, loader)));
-  const adMats = adTex.map((t) => own(new THREE.MeshBasicMaterial({ map: t, toneMapped: false, color: '#d8d2c6' })));
 
   function build() {
     const group = new THREE.Group(), cars = [];
@@ -227,15 +185,6 @@ export function createTrains(scene, { reducedMotion = false, ads = [] } = {}) {
       for (const m of Object.values(parts)) g.add(m);
       for (const s of [-0.62, 0.62]) { const l = new THREE.Mesh(geo.strip, glow); l.position.set(TRAIN.car / 2, H.ceil, s); g.add(l); }
       for (const u of [2.4, TRAIN.car - 2.4]) { const b = new THREE.Mesh(geo.bogie, mat.bogie); b.position.x = u - 2.4; g.add(b); }
-      // Ad cards over the windows, on the inside of both walls; strip maps over the doors.
-      WINDOWS.forEach(([a, b], i) => {
-        for (const s of [-1, 1]) {
-          const ad = new THREE.Mesh(geo.ad, adMats[(c * 7 + i * 2 + (s > 0 ? 1 : 0)) % adMats.length]);
-          ad.position.set((a + b) / 2, H.lintel + 0.18, s * (CAR.wall - 0.01));
-          ad.rotation.y = s > 0 ? Math.PI : 0;
-          g.add(ad);
-        }
-      });
       const strips = [];
       for (const d of CAR.doors) for (const s of [-1, 1]) {
         const m = new THREE.Mesh(geo.stripMap, stripMats[0]);

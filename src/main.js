@@ -54,7 +54,6 @@ const RENDERERS = { museum: createMuseumRenderer, canvas: createCanvasRenderer, 
 const RENDERER_KEY = 'ascii-renderer-2'; // new key: everyone starts in the museum look, whatever they picked before
 
 let map, world, renderer, input, viewer, mapView, grid, pvp = null, fightHud = null;
-let adPhotos = []; // a few of the photos, for the ad cards in the subway's cars
 // The arena's maps (gorge addendum): each level's text, and the decor drawn over it (train.js's interface).
 const LEVEL_TEXT = { train: trainText, gorge: gorgeText };
 const DECOR = {
@@ -635,7 +634,7 @@ async function goDown({ instant = false } = {}) {
     if (instant && location.hash !== STATION_HASH) replaceHash(STATION_HASH); // the panels' close handlers rewrote it
     const { startStation } = await import('./rpg/index.js');
     if (stationState !== 'down' || gen !== downGen) return; // the back button won while it loaded
-    station = startStation(stage, { onExit: () => goUp(), keys: () => input.state(), reducedMotion, phone: touch, mp: stationNet(), ads: adPhotos });
+    station = startStation(stage, { onExit: () => goUp(), keys: () => input.state(), reducedMotion, phone: touch, mp: stationNet() });
   } catch (err) {
     console.warn(err);
     if (gen !== downGen || stationState !== 'down') return; // a newer trip owns the state now
@@ -869,8 +868,6 @@ async function boot() {
     const mapAsked = ARENA.enabled ? chooseMap() : null;
     data = await loadData(undefined, ARENA.enabled ? Object.values(ARENA.photos) : []); // both maps' photos live in the arena
     if (mapAsked) arenaMap = await mapAsked;
-    // The panoramas: about the ad cards' own shape, so they aren't squashed (Faiz's ask).
-    adPhotos = [...data.byId.values()].filter((p) => !p.hidden && !p.variantOf && p.src?.low && p.width / p.height > 2.4).slice(0, 8).map((p) => p.src.low);
   } catch (err) {
     fatal(err);
     return;

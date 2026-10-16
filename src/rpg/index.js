@@ -46,7 +46,7 @@ function footY(map, w) {
 // mp (station spec, Multiplayer; null when off the net): { list(now) (peers3d's), tick({ x, z, y, a }) (where I
 // am, every frame), now() (the server's clock, ms since 1970), chat() (opens the chat line), emote(kind) }. The
 // train runs on the shared clock (sharedTime of now(), or of this machine's clock), unless setTime pins it.
-export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null, ads = [] }) {
+export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
   let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null, tunnel = null, hint = null, fader = null, onKey = null;
@@ -96,7 +96,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     scene.add(museum);
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
     world = buildScene(museum, map, { reducedMotion });
-    trainView = createTrains(scene, { reducedMotion, ads });
+    trainView = createTrains(scene, { reducedMotion });
     tunnel = createTunnel(scene, { reducedMotion });
     const walker = createWalker(map);
     // The line's two stations (subway ride spec §5): MUSEUM built now, CANAL ST the first time the camera comes near it.
