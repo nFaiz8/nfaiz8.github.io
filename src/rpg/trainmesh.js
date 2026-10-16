@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TRAIN, LENGTH } from './schedule.js';
 import { CAR, PITCH, POLES, trainOrigin } from './car.js';
-import { trussShade, sunAt, lampAt, STOPS } from './line.js';
+import { trussShade, sunAt, lampAt, STOPS, pieceAt } from './line.js';
 import { LEVEL } from './map.js';
 
 const F = LEVEL.platform; // the car's floor, level with the platforms
@@ -282,7 +282,9 @@ export function createTrains(scene, { reducedMotion = false, ads = [] } = {}) {
     for (let c = 0; c < TRAIN.cars; c++) for (const d of CAR.doors) for (const s of [-1, 1]) for (const side of [-1, 1]) {
       const open = tr.at != null && Math.sign(s) === (tr.track.i === 0 ? 1 : -1) ? tr.doors : 0;
       v.set(c * PITCH + d + side * (CAR.door / 2 + open * CAR.door * 0.95), (F + H.lintel) / 2, s * (CAR.half - 0.1));
-      m4.compose(v, q.identity(), sc.set(1, 1, 1));
+      // The south side's leaves go with its wall when that fades, or they'd stand as dark slabs between you and the car.
+      const hide = s > 0 && model.cars[c].fade < 0.5;
+      m4.compose(v, q.identity(), hide ? sc.set(0, 0, 0) : sc.set(1, 1, 1));
       model.leaves.setMatrixAt(i++, m4);
     }
     model.leaves.instanceMatrix.needsUpdate = true;
@@ -310,7 +312,7 @@ export function createTrains(scene, { reducedMotion = false, ads = [] } = {}) {
     let p = 0;
     for (let c = 0; c < TRAIN.cars; c++) for (const [a, b] of WINDOWS) {
       const wx = o.x + c * PITCH + (a + b) / 2;
-      const k = Math.min(1, (ctx.sun ?? 1) * sunAt(wx) * trussShade(wx) + 0.5 * lampAt(wx) * (sunAt(wx) ? 0 : 1));
+      const k = Math.min(1, (ctx.sun ?? 1) * sunAt(wx) * trussShade(wx) + (pieceAt(wx).kind === 'tunnel' ? 0.5 * lampAt(wx) : 0));
       v.set(c * PITCH + (a + b) / 2 + 0.35, F + 0.01, 0.25);
       m4.compose(v, FLAT, sc.set(k > 0.01 ? (b - a) * 0.95 : 0, 1, k > 0.01 ? 1.9 * k + 0.2 : 0));
       model.patches.setMatrixAt(p++, m4);

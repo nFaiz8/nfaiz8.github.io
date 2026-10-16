@@ -88,3 +88,9 @@ test('frameOrigin: a station is its x on the line; a train its west end and trac
   const tr = local(3, 500);
   assert.deepEqual(frameOrigin({ kind: 'train', k: 3 }, 500), trainOrigin(tr));
 });
+
+test('a slow frame as the doors open (building the next station, say) still lets you off', () => {
+  const r = { frame: { kind: 'train', k: 0 }, seat: null, fade: 0 }, me = w(30, -0.5);
+  assert.equal(stepRider(r, me, arrivalAtStop(0, 1) + DOORS.open[0] + 3), 'alight');
+  assert.deepEqual(r.frame, { kind: 'station', stop: 1 });
+});

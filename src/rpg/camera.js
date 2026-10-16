@@ -1,6 +1,6 @@
 // The station's camera (station spec §4): pitched 35° down, 10 back, following a point 1 above you on a
 // 0.15 s spring, kept inside the map, never rotating. Pure: index.js copies it onto the three.js camera.
-export const CAM = { pitch: (35 * Math.PI) / 180, dist: 10, lift: 1, spring: 0.15, bridge: 16, zoom: 0.8 };
+export const CAM = { pitch: (35 * Math.PI) / 180, dist: 10, lift: 1, spring: 0.15, bridge: 16, inside: 7, zoom: 0.8 }; // inside: closer in a train's car (Faiz's ask)
 
 export const tilesAcross = (aspect) => (aspect >= 1 ? 12 : 8);
 

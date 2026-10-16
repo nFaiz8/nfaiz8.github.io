@@ -3,7 +3,7 @@
 //
 // The moves happen at door times, not at the doorway, so the floor never shifts under you while you walk: while a train
 // stands you walk in the station's frame (its map includes the train, car.js), and you join the train's frame as its
-// doors start to close with you inside; you leave it as its doors start to open at a station.
+// doors start to close with you inside; you leave it while its doors are open at a station.
 import { STOPS } from './line.js';
 import { local, localsAt, arrivalAtStop, turnaroundDue, turnaround, LOCAL, DOORS, PERIOD } from './schedule.js';
 import { inTrain, trainOrigin, pushIn, seatNear, standFrom } from './car.js';
@@ -65,7 +65,9 @@ export function stepRider(rider, w, t) {
   }
   for (const stop of [0, 1]) {
     const s = sinceStop(k, stop, t);
-    if (s >= DOORS.open[0] && s < DOORS.open[0] + 0.5) { reframe(rider, w, { kind: 'station', stop }, t); return 'alight'; }
+    // Any time its doors are open, not only as they start to: a slow frame then mustn't carry you past your stop. (You
+    // walk a standing train in the station's frame anyway; its doors closing round you put you back in its own.)
+    if (s >= DOORS.open[0] && s < DOORS.close[0]) { reframe(rider, w, { kind: 'station', stop }, t); return 'alight'; }
   }
   return null;
 }

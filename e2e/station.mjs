@@ -241,6 +241,44 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.screenshot({ path: 'e2e/shots/station-local-standing.png' });
   });
 
+  await check('the whole ride: walk on at MUSEUM, the doors close, ride, sit, get off at CANAL ST', async () => {
+    const st = (f) => page.evaluate(f);
+    await st(() => { window.__station.setTime(20 + 3); window.__station.teleport(28.5, 6.5); }); // L0 standing; car 0's middle door
+    // Walk north through the open door, holding the clock where the doors are open (frames are slow without a GPU).
+    await page.keyboard.down('ArrowUp');
+    for (let i = 0; i < 5; i++) { await st(() => window.__station.setTime(20 + 3)); await nFrames(page, 10); }
+    await page.keyboard.up('ArrowUp');
+    const inside = await st(() => window.__station.world());
+    assert.ok(inside.z < 4, `walked into the car: ${JSON.stringify(inside)}`);
+    await st(() => window.__station.setTime(20 + 15.2)); // the chime: the doors start closing
+    await nFrames(page, 5);
+    assert.equal((await st(() => window.__station.aboard()))?.k, 0, 'aboard L0');
+    await st(() => window.__station.setTime(20 + 18 + 12)); // riding
+    await nFrames(page, 5);
+    await page.keyboard.press('e');
+    await nFrames(page, 5);
+    assert.notEqual((await st(() => window.__station.aboard())).seat, null, 'E sat down');
+    await page.keyboard.down('ArrowLeft'); await nFrames(page, 10); await page.keyboard.up('ArrowLeft');
+    assert.equal((await st(() => window.__station.aboard())).seat, null, 'a move key stood up');
+    await st(() => window.__station.setTime(20 + 75 + 1.1)); // pulling in at CANAL ST: the doors start opening
+    await nFrames(page, 5);
+    assert.deepEqual(await st(() => window.__station.frame()), { kind: 'station', stop: 1 });
+    await nFrames(page, 40);
+    await page.screenshot({ path: 'e2e/shots/station-canal.png' });
+  });
+
+  await check('staying on past the last stop brings you back on the next train the other way', async () => {
+    // L1 (westbound) ends at MUSEUM at 80 and leaves at 98; still aboard at 106, you're on L2 (eastbound), ~30 s out.
+    await page.evaluate(() => { window.__station.setTime(80 + 18 + 7); window.__station.board(1, 30, 0); });
+    await nFrames(page, 5);
+    await page.evaluate(() => window.__station.setTime(80 + 18 + 8.5));
+    await nFrames(page, 5);
+    const a = await page.evaluate(() => window.__station.aboard());
+    assert.equal(a?.k, 2, `eastbound now: ${JSON.stringify(a)}`);
+    await page.evaluate(() => window.__station.teleport(30.5, 9.5)); // back on MUSEUM's platform for the checks after
+  });
+
+
   await check('a train comes out of the tunnel and passes', async () => {
     await page.evaluate((s) => { window.__station.teleport(30.5, 9.5); window.__station.setTime(s); }, startOf(0) - 2);
     await page.waitForFunction(() => window.__station.train()?.phase === 'warn', { timeout: 10000 });
