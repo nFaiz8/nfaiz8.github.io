@@ -17,6 +17,7 @@ import { createTicketMachine } from './ticket.js';
 import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut } from './life.js';
 import { createStationAudio } from './audio.js';
 import { createOthers, createTalkBar } from './others.js';
+import { createTrains } from './trainmesh.js';
 
 // A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
 // dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
@@ -38,10 +39,10 @@ function footY(map, w) {
 // mp (station spec, Multiplayer; null when off the net): { list(now) (peers3d's), tick({ x, z, y, a }) (where I
 // am, every frame), now() (the server's clock, ms since 1970), chat() (opens the chat line), emote(kind) }. The
 // train runs on the shared clock (sharedTime of now(), or of this machine's clock), unless setTime pins it.
-export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null }) {
+export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false, mp = null, ads = [] }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, audio, raf = 0, resize = null, hook = null, others = null, talk = null, trainView = null;
   const people = []; // the commuters' figures
   const teardown = () => {
     cancelAnimationFrame(raf);
@@ -51,6 +52,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     others?.dispose();
     talk?.destroy();
     world?.dispose();
+    trainView?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
     blobGeo?.dispose();
@@ -80,6 +82,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     scene.add(museum);
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
     world = buildScene(museum, map, { reducedMotion });
+    trainView = createTrains(scene, { reducedMotion, ads });
     const walker = createWalker(map);
     // The turnstiles: shut from the hall without a ticket, the emergency gate shut from the hall always (gates.js);
     // the walker collides with the map as gated.
@@ -227,6 +230,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       camera.lookAt(cam.x + shake.x, cam.y + shake.y, cam.z);
       figure.update(joints, camera, feet);
       for (const p of people) p.figure.update(p.joints, camera, p.at);
+      trainView.update(trains, { me: { x: walker.x, z: walker.z }, mine: null, time: t, dt, sun: 1 });
       audio.update({ t, dt, walker, pose, gates, train, pigeons: world.pigeons, rats: world.rats, people });
       if (others) {
         others.update(mp.list(now), now, dt, t, camera, feet);
@@ -245,6 +249,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       time,
       train: () => passFor(trainsAt(clock()), 0, map),
       trains: () => trainsAt(clock()),
+      shownTrains: () => trainView.shown(),
       clock,
       setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
       others: () => (others ? others.shown() : []),

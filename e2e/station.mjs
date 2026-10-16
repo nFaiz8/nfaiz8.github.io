@@ -13,6 +13,8 @@ const check = async (name, fn) => {
   try { await fn(); results.push(['ok', name]); } catch (e) { results.push(['FAIL', name, e.message]); }
 };
 const inStation = (page) => page.waitForFunction(() => window.__station && window.__station.frames() > 20, { timeout: 30000 });
+// The ride's checks wait longer: SwiftShader (no GPU) can take most of a minute to go down.
+const inStationSlow = (page) => page.waitForFunction(() => window.__station && window.__station.frames() > 20, { timeout: 120000 });
 const backInGallery = (page) => page.waitForFunction(() => !window.__station && window.__ascii.station() === 'off' && !window.__ascii.world.frozen, { timeout: 15000 });
 const takeStairs = (page) => page.evaluate(() => { const s = window.__ascii.map.stairs.inside; window.__ascii.walkTo(s.x + 2, s.y); });
 
@@ -226,6 +228,17 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(life.pigeons.length, 4);
     assert.equal(life.rats.length, 2);
     await page.screenshot({ path: `${SHOTS}/station-platform.png` });
+  });
+
+  await check('a local stands at the platform with its doors open: five NYC cars', async () => {
+    await inStationSlow(page);
+    await page.evaluate(() => { window.__station.setTime(20 + 6); window.__station.teleport(60, 6.5); }); // L0 standing
+    await nFrames(page, 40); // the first train compiles its shaders: slow without a GPU, so pin the time again after
+    await page.evaluate(() => window.__station.setTime(20 + 6));
+    await nFrames(page, 3);
+    const shown = await page.evaluate(() => window.__station.shownTrains());
+    assert.ok(shown.some((s) => s.id === 'L0'), JSON.stringify(shown));
+    await page.screenshot({ path: 'e2e/shots/station-local-standing.png' });
   });
 
   await check('a train comes out of the tunnel and passes', async () => {
