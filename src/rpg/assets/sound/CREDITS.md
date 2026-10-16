@@ -60,3 +60,7 @@ primary value of the product being distributed)". So these are used only as part
 | `clunk.mp3` | Foley / "Foley Lock Metal Lock Movement Short 01.wav" | 0.3 s, mono |
 | `train-bed.mp3` | Transportation / "Transportation Train Pass By 01.wav" | 4 s from the middle of the pass, crossfaded into a loop, mono |
 | `city.mp3` | Ambience 2 / "Ambience Traffic Under Road 01.wav" | 8 s crossfaded into a loop, mono, low-passed |
+
+## Music: the site's own
+
+- `music/tuffjazz.mp3`: the site owner's own track (no licence needed). Re-encoded to 96 kbps stereo, loudness-normalised to about −17.4 LUFS; streamed, not decoded whole.

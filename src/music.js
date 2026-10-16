@@ -1,7 +1,8 @@
 // Noir jazz in the museum, drifting down the station's exit stairs (station spec §8). main.js imports this on the
 // visitor's first key press or tap, so the gallery's first load carries none of it, and calls unlock() on that gesture
 // and every later one: the first makes the AudioContext and starts the track loading; a later one resumes the context
-// if the browser held it back. The track is noir jazz, one of three (track-choice.js: ?track=1, the default, 2 or 3;
+// if the browser held it back. The track is the site's own jazz (streamed; track-choice.js ?track=1, the default) or
+// one of three noir jazz pieces to compare (?track=2, 3 or 4;
 // all CC BY 4.0, the playing one credited in the map and the sound button's tooltip; see CREDITS.md). Only the
 // chosen one is fetched.
 //
@@ -17,6 +18,7 @@ export const LOOP_START = TRACK.loopStart;
 export const LOOP_END = TRACK.loopEnd;
 // Each a literal URL, not an import, so nothing loads but the chosen file (Vite still bundles all three).
 const URLS = {
+  tuffjazz: () => new URL('./rpg/assets/music/tuffjazz.mp3', import.meta.url).href,
   'signs-to-nowhere': () => new URL('./rpg/assets/music/signs-to-nowhere.mp3', import.meta.url).href,
   'spy-glass': () => new URL('./rpg/assets/music/spy-glass.mp3', import.meta.url).href,
   'covert-affair': () => new URL('./rpg/assets/music/covert-affair.mp3', import.meta.url).href,
@@ -25,11 +27,15 @@ const trackUrl = URLS[TRACK.file]();
 export const GALLERY = { gain: 0.16, cutoff: 16000, pan: 0 }; // background level in the museum
 export const ARRIVING = { gain: 0.1, cutoff: 1100, pan: -0.4 }; // at the foot of the stairs, before the station places it
 
-let ctx = null, out = null, filter = null, panner = null, source = null, sources = 0, unsubscribe = null;
+let ctx = null, out = null, filter = null, panner = null, source = null, el = null, sources = 0, unsubscribe = null;
 let mix = { ...GALLERY }, scene = 'gallery', muted = false;
 
 export function unlock({ where } = {}) {
-  if (ctx) { if (ctx.state === 'suspended' && !document.hidden) ctx.resume().catch(() => {}); return; }
+  if (ctx) {
+    if (ctx.state === 'suspended' && !document.hidden) ctx.resume().catch(() => {});
+    if (el?.paused && !document.hidden) el.play().catch(() => {}); // a browser that blocked play() lets the next gesture start it
+    return;
+  }
   const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!AC) return;
   try { start(new AC(), { where: where || scene }); } catch { ctx = null; }
@@ -55,6 +61,7 @@ function start(context, { where = 'gallery' } = {}) {
 }
 
 async function load() {
+  if (TRACK.stream) return stream();
   try {
     const res = await fetch(trackUrl);
     if (!res.ok) return;
@@ -71,6 +78,22 @@ async function load() {
     sources++;
     apply(1.5); // fades in
   } catch { /* no music, silently */ }
+}
+
+// A long track streams through an <audio> element into the same filter and gain, so it starts in a second or two,
+// downloads only as it plays and is never decoded whole (16 minutes would be ~350 MB of samples). It loops whole.
+async function stream() {
+  try {
+    el = new Audio();
+    el.preload = 'auto';
+    el.loop = true;
+    el.src = trackUrl;
+    // Fades in once it's actually playing (if the browser blocks this play(), unlock() starts it on the next gesture).
+    el.addEventListener('playing', () => { if (!sources) { sources = 1; apply(1.5); } });
+    source = ctx.createMediaElementSource(el);
+    source.connect(filter);
+    await el.play();
+  } catch { /* no music yet, or none */ }
 }
 
 // Ease the music toward the current mix, over about `ramp` seconds.
@@ -96,8 +119,8 @@ export function place(m, ramp = 0.3) {
 
 function onVisible() {
   if (!ctx) return;
-  if (document.hidden) ctx.suspend().catch(() => {});
-  else ctx.resume().catch(() => {});
+  if (document.hidden) { ctx.suspend().catch(() => {}); el?.pause(); }
+  else { ctx.resume().catch(() => {}); el?.play().catch(() => {}); }
 }
 
 // Test hook (main.js puts it on window.__ascii.music): the context's state, how many sources play, and the mix.
