@@ -45,3 +45,21 @@ test('kept inside the map', () => {
   followCamera(narrow, { x: 0, y: 0, z: 0 }, 1, { cols: 6, rows: 4 }, 16 / 9);
   assert.equal(narrow.x, 3, 'a map narrower than the view is centred');
 });
+
+test('a camera in a train frame: no clamp along x; the distance eases toward cam.want', () => {
+  const free = { cols: Infinity, rows: Infinity }; // a train's frame: no clamp either way
+  const cam = createCamera({ x: 500, y: -3, z: 0 });
+  followCamera(cam, { x: 500, y: -3, z: 0 }, 1, free, 16 / 9);
+  assert.ok(Math.abs(cam.x - 500) < 1e-6);
+  cam.want = CAM.bridge;
+  for (let i = 0; i < 300; i++) followCamera(cam, { x: 500, y: -3, z: 0 }, 1 / 60, free, 16 / 9);
+  assert.ok(Math.abs(cam.dist - CAM.bridge) < 0.1);
+  const e = eyeFor(cam);
+  assert.ok(e.z - cam.z > Math.cos(CAM.pitch) * CAM.dist, 'further back');
+});
+
+test('a station frame with x0: the clamp is shifted', () => {
+  const cam = createCamera({ x: 0, y: 0, z: 9 });
+  followCamera(cam, { x: 0, y: 0, z: 9 }, 1, { cols: 92, rows: 19, x0: 0 }, 16 / 9);
+  assert.equal(cam.x, tilesAcross(16 / 9) / 2);
+});

@@ -1,6 +1,6 @@
 // The station's camera (station spec §4): pitched 35° down, 10 back, following a point 1 above you on a
 // 0.15 s spring, kept inside the map, never rotating. Pure: index.js copies it onto the three.js camera.
-export const CAM = { pitch: (35 * Math.PI) / 180, dist: 10, lift: 1, spring: 0.15 };
+export const CAM = { pitch: (35 * Math.PI) / 180, dist: 10, lift: 1, spring: 0.15, bridge: 16, zoom: 0.8 };
 
 export const tilesAcross = (aspect) => (aspect >= 1 ? 12 : 8);
 
@@ -17,16 +17,20 @@ export function followCamera(cam, t, dt, map, aspect) {
   cam.x += (t.x - cam.x) * k;
   cam.y += (t.y + CAM.lift - cam.y) * k;
   cam.z += (t.z - cam.z) * k;
+  // The distance eases toward cam.want (further out on the bridge, spec §4), on its own slower spring.
+  cam.dist ??= CAM.dist;
+  cam.dist += ((cam.want ?? CAM.dist) - cam.dist) * (dt > 0 ? 1 - Math.exp(-dt / CAM.zoom) : 0);
   const hw = tilesAcross(aspect) / 2, hd = Math.min(4, hw / aspect);
   // Keeps the focus off the map's edges: the screen's sides at the focus stay inside the map, and the focus
   // stays off the north and south walls. At 35° the view still reaches past them (about 15 north, 3 south);
   // the outer walls and the dark hide that.
-  cam.x = clamp(cam.x, hw, map.cols - hw);
-  cam.z = clamp(cam.z, hd * 0.25, map.rows - hd * 0.5);
+  const x0 = map.x0 ?? 0;
+  if (Number.isFinite(map.cols)) cam.x = clamp(cam.x, x0 + hw, x0 + map.cols - hw);
+  if (Number.isFinite(map.rows)) cam.z = clamp(cam.z, hd * 0.25, map.rows - hd * 0.5);
   return cam;
 }
 
 // v kept within [lo, hi]; an empty range (lo > hi) gives its middle. Shared with rig.js.
 export const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.max(lo, Math.min(hi, v)));
 
-export const eyeFor = (cam) => ({ x: cam.x, y: cam.y + Math.sin(CAM.pitch) * CAM.dist, z: cam.z + Math.cos(CAM.pitch) * CAM.dist });
+export const eyeFor = (cam) => ({ x: cam.x, y: cam.y + Math.sin(CAM.pitch) * (cam.dist ?? CAM.dist), z: cam.z + Math.cos(CAM.pitch) * (cam.dist ?? CAM.dist) });

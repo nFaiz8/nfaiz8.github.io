@@ -50,6 +50,8 @@ const HAND_L = { idle: [0.45, 1.72, -0.3], walk: [0.35, 1.7, -0.1], swing: 0.6, 
 const HAND_R = { idle: [0.45, 1.2, 0.6], walk: [0.45, 1.15, 0.6], swing: 0.22 };
 const RUN_SWING = 0.5; // the arms swing this much more when you run
 const SHIFT = { x: 0.045, drop: 0.012 };
+const SEAT_H = 0.34, SEAT_FEET = 0.3; // sitting: the hips a shin over the feet point, the feet a thigh forward of it
+const HOLD = 1.1; // holding a pole: the hand this far over the shoulder, in u
 const PHONE = [0.1, 0.35, 0.65]; // phone: the right hand held up before the chest [out, down, forward], in u
 const BREATH = { period: 2.4, h: 0.012 }; // the arena's breath: a slow, tiny rise
 const LANTERN = { below: 0.075, sway: 0.015, swing: 0.03 };
@@ -119,6 +121,9 @@ export function poseFigure(state, out = {}) {
   // shift (−1…1): standing with your weight on one foot, the hip over it and a touch lower (commuters do this).
   const shift = clamp(fin(state.shift, 0), -1, 1) * (1 - g);
   const hip = set(S.hip, -g * WALK.sway * Math.cos(p) + SHIFT.x * shift, hipY - SHIFT.drop * Math.abs(shift), 0);
+  // Sitting (subway ride spec §4): the hips down onto a seat SEAT_H over the feet point (the bench), the feet forward.
+  const sit = clamp(fin(state.sit, 0), 0, 1);
+  if (sit) { hip.y = lerp(hip.y, SEAT_H, sit); hip.z = lerp(hip.z, -0.04, sit); }
   const lean = g * WALK.lean + r * WALK.runLean;
   const ux = 0, uy = Math.cos(lean), uz = Math.sin(lean); // up the torso
   const neck = set(S.neck, hip.x + ux * BONES.torso, hip.y + uy * BONES.torso, hip.z + uz * BONES.torso);
@@ -129,6 +134,7 @@ export function poseFigure(state, out = {}) {
   const fw = lerp(FEET_W.idle, FEET_W.walk, g), lift = g * WALK.lift + r * WALK.runLift;
   set(S.fL, fw, lift * Math.max(0, Math.cos(p)), g * strideAt(p, a));
   set(S.fR, -fw, lift * Math.max(0, Math.cos(q)), g * strideAt(q, a));
+  if (sit) { S.fL.z = lerp(S.fL.z, SEAT_FEET, sit); S.fR.z = lerp(S.fR.z, SEAT_FEET, sit); S.fL.y *= 1 - sit; S.fR.y *= 1 - sit; }
   twoBone(hip, S.fL, BONES.thigh, BONES.shin, KNEE_POLE, out.kneeL, out.footL);
   twoBone(hip, S.fR, BONES.thigh, BONES.shin, KNEE_POLE, out.kneeR, out.footR);
 
@@ -139,6 +145,7 @@ export function poseFigure(state, out = {}) {
   const hr = (i) => lerp(HAND_R.idle[i], HAND_R.walk[i], g) * U;
   set(S.tL, sh.x + hl(0), sh.y - hl(1) + sw * HAND_L.raise * U * Math.max(0, -s), sh.z + hl(2) - sw * HAND_L.swing * U * s);
   if (state.phone) set(S.tR, sh.x - PHONE[0] * U, sh.y - PHONE[1] * U, sh.z + PHONE[2] * U);
+  else if (state.hold) set(S.tR, sh.x - 0.12 * U, sh.y + HOLD * U, sh.z + 0.35 * U); // up on a pole
   else set(S.tR, sh.x - hr(0), sh.y - hr(1), sh.z + hr(2) + sw * HAND_R.swing * U * s);
   twoBone(sh, S.tL, BONES.upperArm, BONES.foreArm, ELBOW_POLE_L, out.elbowL, out.handL);
   twoBone(sh, S.tR, BONES.upperArm, BONES.foreArm, ELBOW_POLE_R, out.elbowR, out.handR);

@@ -173,3 +173,12 @@ test('stepGait: backward (against the facing) the cycle runs backward; at rest t
   for (let i = 0; i < 6; i++) stepGait(q, 0.9 / 60, 0, 1 / 60, 0.9); // sideways at walking pace: forward-ish, not backward
   assert.ok(q.phase > 0 && q.gait > 0.5);
 });
+
+test('sitting lowers the hips to the seat and puts the feet forward; holding raises the right hand', () => {
+  const stood = poseFigure({ yaw: 0 }), sat = poseFigure({ yaw: 0, sit: 1 });
+  assert.ok(Math.abs(sat.hip.y - 0.34) < 0.02, `hip ${sat.hip.y}`);
+  assert.ok(sat.footL.z > stood.footL.z + 0.2, 'feet forward (yaw 0 faces +z)');
+  assert.ok(sat.kneeL.z > sat.hip.z + 0.2 && sat.kneeL.y > 0.25, 'thighs forward, knees up');
+  const held = poseFigure({ yaw: 0, hold: 1 });
+  assert.ok(held.handR.y > stood.handR.y + 0.5);
+});
