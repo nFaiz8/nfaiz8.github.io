@@ -72,7 +72,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
-    world = buildScene(scene, map, { reducedMotion });
+    world = buildScene(scene, map, { reducedMotion, anisotropy: renderer.capabilities.getMaxAnisotropy() });
     const walker = createWalker(map);
     // The turnstiles: shut from the hall without a ticket, the emergency gate shut from the hall always (gates.js);
     // the walker collides with the map as gated.

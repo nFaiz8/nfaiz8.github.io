@@ -1,5 +1,5 @@
 // The turnstiles drawn (station spec, "Life and props (round 2)"), New York style and generic, in the station's own
-// look: matte boxes with a faint glyph on each face (like the benches and the kiosk). Waist-high steel cabinets
+// look: matte boxes painted with dense ASCII (surface.js, like the benches and the kiosk). Waist-high steel cabinets
 // between the lanes; on each lane's north cabinet a three-armed rotor of square bars that you turn a third of a turn
 // by walking through, and on its top a flat round tap target, the ◎ puck, whose light ring is dim white idle, green
 // while a paid gate is open for you and red a moment when you walk into it locked. No screens, no text. The line's
@@ -9,7 +9,8 @@
 // state; this only draws it.
 import * as THREE from 'three';
 import { LEVEL } from './map.js';
-import { FONT, makeSprite } from './sprites.js';
+import { makeSprite } from './sprites.js';
+import { asciiMaterial } from './surface.js';
 import { ARM_X, rotorTurns, ringState, alarmOn, gateKinds, HINGE_X, HINGE_IN, SWING_LEN, LANE_IN } from './gates.js';
 
 // A cabinet: its length along the lanes, and its height up to its top slab. Across the lanes it fills its post tile
@@ -23,21 +24,6 @@ const HAND = 0.08, HUB_OUT = 0.11;
 const HUB_Y = 0.92, ARM = 1 - 2 * LANE_IN - HUB_OUT - HAND, ARM_R = 0.026;
 const TILT = Math.PI / 3; // the rotor's axis, down from level into the lane: one arm level, two down along the cabinet
 
-// A face texture as the station's other boxes have: a base colour with one faint glyph.
-function glyphTexture(base, ink, glyph, alpha = 0.35) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, 64, 64);
-  g.globalAlpha = alpha; g.fillStyle = ink;
-  g.font = `${64 * 0.8}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(glyph, 32, 34);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
-}
-
 // The puck's ring colours (bright enough to bloom when lit), and the alarm light's.
 const RING = { idle: new THREE.Color(0.62, 0.64, 0.68), go: new THREE.Color(0.35, 2.1, 0.6), refused: new THREE.Color(2.4, 0.3, 0.22) };
 const ALARM_ON = new THREE.Color(2.8, 0.1, 0.05), ALARM_OFF = new THREE.Color(0.22, 0.04, 0.03);
@@ -45,14 +31,14 @@ const BLINK = 3; // the alarm light's flashes a second (steady with reduced moti
 const SIGN_Y = 1.72, LAMP_Y = 2.2; // the sign's centre and the alarm light's, over the hall floor
 const POST_TOP = LAMP_Y - 0.1; // the sign post, rising out of the hinge post, ends under the alarm light
 
-export function buildTurnstiles(scene, map, own, { reducedMotion = false } = {}) {
+export function buildTurnstiles(scene, map, own, { reducedMotion = false, anisotropy = 1 } = {}) {
   const gates = map.cells.filter((cell) => cell.ch === ':');
   if (!gates.length) return { update() {}, signs: [] };
   const kinds = gateKinds(map);
   const y0 = LEVEL.hall;
-  const matte = (base, ink, glyph) => own(new THREE.MeshStandardMaterial({ map: own(glyphTexture(base, ink, glyph)), roughness: 0.75, metalness: 0.15 }));
-  const steelMat = matte('#7a8290', '#d0d7e2', '═'); // the cabinets' sides: steel, its brushing a faint ═
-  const topMat = matte('#8f98a6', '#e1e7f0', '─'); // their tops, the gate's rails and bars
+  const matte = (kind) => asciiMaterial(kind, own, { anisotropy, roughness: 0.75, metalness: 0.15 });
+  const steelMat = matte('steel'); // the cabinets' sides: steel, brushed ─ with a seeded ≡
+  const topMat = matte('steelTop'); // their tops, the gate's rails and bars: ≡
   const darkMat = own(new THREE.MeshStandardMaterial({ color: '#23262d', roughness: 0.85 }));
   const armMat = own(new THREE.MeshStandardMaterial({ color: '#b9c1cc', roughness: 0.55, metalness: 0.2 }));
   const unit = own(new THREE.BoxGeometry(1, 1, 1));

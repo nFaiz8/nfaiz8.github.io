@@ -8,6 +8,7 @@ import { TRAIN, departures } from './train.js';
 import { tubeFault, DRIP } from './sound.js';
 import { STATION_LIFE, createPigeon, stepPigeon, createRat, stepRat } from './life.js';
 import { buildTurnstiles } from './turnstiles.js';
+import { asciiMaterial, worldMapped } from './surface.js';
 
 export const WALL_HEIGHT = 4; // over the highest floor beside a wall
 // Walls this close on the camera's side fade (spec §4). The eye sits cos 35° × 10 ≈ 8.2 south of the focus, plus
@@ -17,7 +18,7 @@ const FADE_REACH = 10;
 const TUNNEL = 3.4; // a tunnel mouth's height over the track
 const FADE_OPACITY = 0.2; // a faded wall's or pillar's nearest face
 
-// A tile texture: a base colour with one faint glyph over it.
+// A texture of one faint glyph over a base colour (the train's roof panels).
 function glyphTexture([base, ink, glyph], alpha = 0.35, size = 64) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -31,13 +32,10 @@ function glyphTexture([base, ink, glyph], alpha = 0.35, size = 64) {
   t.anisotropy = 4;
   return t;
 }
-const SURF = {
-  wall: ['#3a3f4f', '#8d96ad', '┼'], hall: ['#4a4640', '#a49b8a', '·'], platform: ['#3f4148', '#9aa0ad', '·'],
-  edge: ['#c9a227', '#3a2f10', '▀'], track: ['#26231f', '#7a6a55', '═'], stair: ['#4b4a50', '#b0b0bc', '─'],
-  kiosk: ['#5a2e2a', '#d9a090', '▤'], pillar: ['#55596a', '#a9afc2', '│'], bench: ['#5b4632', '#c49a6c', '═'],
-};
+// The surfaces' looks (base, ink and glyph grid) are surface.js's SURFACES.
+const SURF = ['wall', 'hall', 'platform', 'edge', 'track', 'stair', 'kiosk', 'pillar', 'bench'];
 
-export function buildScene(scene, map, { reducedMotion = false } = {}) {
+export function buildScene(scene, map, { reducedMotion = false, anisotropy = 1 } = {}) {
   const SHAKE = { x: 0, y: 0 }; // reused each frame
   const owned = []; // everything to dispose
   const own = (x) => { owned.push(x); return x; };
@@ -47,8 +45,8 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
 
   const unit = own(new THREE.BoxGeometry(1, 1, 1));
   const mats = {};
-  for (const [k, s] of Object.entries(SURF)) mats[k] = own(new THREE.MeshStandardMaterial({ map: own(glyphTexture(s)), roughness: 0.92, metalness: 0 }));
-  const boxes = Object.fromEntries(Object.keys(SURF).map((k) => [k, []]));
+  for (const k of SURF) mats[k] = asciiMaterial(k, own, { anisotropy });
+  const boxes = Object.fromEntries(SURF.map((k) => [k, []]));
   const box = (kind, x, y, z, sx = 1, sy = 1, sz = 1) => boxes[kind].push([x, y, z, sx, sy, sz]);
 
   const levels = (c, r) => {
@@ -157,7 +155,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // included), so a faded wall only ever tints you, never hides you.
   const depthOnly = own(new THREE.MeshBasicMaterial({ colorWrite: false, transparent: true }));
   const fadeSets = Object.entries(fading).filter(([, list]) => list.length).map(([kind, list]) => {
-    const fadeMat = own(mats[kind].clone());
+    const fadeMat = worldMapped(own(mats[kind].clone()));
     fadeMat.transparent = true; fadeMat.opacity = FADE_OPACITY; fadeMat.depthWrite = false; fadeMat.depthFunc = THREE.LessEqualDepth;
     const solid = new THREE.InstancedMesh(unit, mats[kind], list.length), faded = new THREE.InstancedMesh(unit, fadeMat, list.length);
     const mask = new THREE.InstancedMesh(unit, depthOnly, list.length);
@@ -289,7 +287,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   fadeable([tickerBox, tickerFace], ticker.x, ticker.z, ticker.w / 2 + 0.6);
 
   // The turnstiles: steel cabinets, rotors and tap targets, and the emergency gate (turnstiles.js).
-  const turnstiles = buildTurnstiles(scene, map, own, { reducedMotion });
+  const turnstiles = buildTurnstiles(scene, map, own, { reducedMotion, anisotropy });
   for (const g of turnstiles.signs) fadeable(g.mesh, g.x, g.z, g.side);
 
   // The buzzing lamp over the kiosk: a short tube on the shutter's lintel that never quite settles.
