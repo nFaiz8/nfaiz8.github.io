@@ -9,13 +9,12 @@ import { trainAt } from './train.js';
 import { createCamera, followCamera, eyeFor, fovFor } from './camera.js';
 import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
-import { poseFigure, turnToward, advancePhase } from './rig.js';
+import { poseFigure, turnToward, advancePhase, stepGait, GAIT_EASE } from './rig.js';
 import { createPost } from './post.js';
 import { createGates, gatedMap, trackGates, bumped, blocked, easeArms, turnRotors, swingGates, rotorTurns, refused, ringState, alarmOn } from './gates.js';
 import { createTicketMachine } from './ticket.js';
-import { STATION_LIFE, createCommuter, stepCommuter, pushOut } from './life.js';
+import { STATION_LIFE, COMMUTER, createCommuter, stepCommuter, pushOut } from './life.js';
 
-const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
 // A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
 // dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
 // the screen shows the far wall instead.
@@ -84,7 +83,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     STATION_LIFE.commuters.forEach((spec, i) => {
       const c = createCommuter(spec, i);
       people.push({ c, figure: createFigure(scene, { glow: false, color: spec.color, lantern: false, phone: !!spec.phone }), joints: {}, at: { x: 0, y: 0, z: 0 },
-        pose: { yaw: c.yaw, phase: 0, gait: 0, t: 0, reducedMotion, shift: 0, phone: !!spec.phone }, walked: 0 });
+        pose: { yaw: c.yaw, phase: 0, gait: 0, t: 0, reducedMotion, shift: 0, phone: !!spec.phone }, px: c.x, pz: c.z });
     });
     const crowd = people.map((p) => p.c);
 
@@ -183,9 +182,9 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       for (const p of people) {
         const c = stepCommuter(p.c, dt, { train, walker }, map);
         p.pose.yaw = c.yaw; p.pose.shift = c.shift; p.pose.t = t + c.home.x; // desynchronised breathing
-        p.pose.gait += (Math.min(1, c.speed / 1.1) * 0.8 - p.pose.gait) * (1 - Math.exp(-dt / 0.2));
-        p.pose.phase = advancePhase(p.pose.phase, c.walked - p.walked, p.pose.gait);
-        p.walked = c.walked;
+        // Their rig walks as yours does: the cycle by the ground covered, backward when they step back facing the track.
+        stepGait(p.pose, c.x - p.px, c.z - p.pz, dt, COMMUTER.walk);
+        p.px = c.x; p.pz = c.z;
         poseFigure(p.pose, p.joints);
         p.at.x = c.x; p.at.y = map.levelAt(c.x, c.z) ?? 0; p.at.z = c.z;
         if (c.phone) {

@@ -28,6 +28,20 @@ const STRIDE = 1.1, RUN_STRIDE = 1.3;
 export const strideFor = (gait) => STRIDE + (RUN_STRIDE - STRIDE) * runK(gait);
 // Advance the walk cycle by the ground covered, so the stride always matches it.
 export const advancePhase = (phase, walked, gait) => mod(phase + (TAU * walked) / strideFor(gait), TAU);
+// The gait follows a smoothed speed over GAIT_EASE seconds, so starting and stopping blend into and out of idle.
+export const GAIT_EASE = 0.12;
+// Walk a figure that moved (dx, dz) in dt at a walking speed of `walk`: the gait eases toward speed / walk and the
+// cycle advances by the ground covered, so the feet stay planted. Moving backward (against its yaw) it steps
+// backward: the cycle runs the other way. For figures driven from outside, as the commuters are; pose is
+// { yaw, phase, gait }, changed in place.
+export function stepGait(pose, dx, dz, dt, walk) {
+  const d = Math.hypot(dx, dz), speed = dt > 0 ? d / dt : 0;
+  const yaw = fin(pose.yaw, 0), back = d > 1e-9 && dx * Math.sin(yaw) + dz * Math.cos(yaw) < -0.25 * d;
+  const gait = fin(pose.gait, 0);
+  pose.gait = gait + (Math.min(SPRINT, speed / walk) - gait) * (dt > 0 ? 1 - Math.exp(-dt / GAIT_EASE) : 0);
+  pose.phase = advancePhase(fin(pose.phase, 0), back ? -d : d, pose.gait);
+  return pose;
+}
 
 const WALK = { lift: 0.09, runLift: 0.05, drop: 0.035, runDrop: 0.03, bob: 0.015, sway: 0.02, lean: 0.1, runLean: 0.12 };
 const FEET_W = { idle: 0.3 * U, walk: 0.28 * U }; // each foot out from the middle

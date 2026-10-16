@@ -147,3 +147,29 @@ test('a commuter can stand on one foot more (shift), and hold a phone up before 
   assert.ok(Math.abs(dist(phone.shoulder, phone.elbowR) - BONES.upperArm) < 1e-6);
   assert.ok(Math.abs(dist(phone.elbowR, phone.handR) - BONES.foreArm) < 1e-6);
 });
+
+test('stepGait: the cycle advances in proportion to the ground covered, at the player\'s stride', async () => {
+  const { stepGait, strideFor, advancePhase } = await import('../src/rpg/rig.js');
+  const a = { yaw: 0, phase: 0, gait: 1 }, b = { yaw: 0, phase: 0, gait: 1 };
+  stepGait(a, 0, 0.1, 0.1, 1); // 0.1 south (forward at yaw 0) in 0.1 s at walking pace
+  stepGait(b, 0, 0.2, 0.2, 1);
+  assert.ok(Math.abs(a.phase - (TAU * 0.1) / strideFor(a.gait)) < 1e-9);
+  assert.ok(Math.abs(b.phase - 2 * a.phase) < 1e-9, `${b.phase} vs 2 × ${a.phase}`);
+  assert.ok(Math.abs(a.gait - 1) < 1e-9, 'walking pace is gait 1');
+  // The player's own advance agrees.
+  assert.ok(Math.abs(advancePhase(0, 0.1, 1) - a.phase) < 1e-9);
+});
+
+test('stepGait: backward (against the facing) the cycle runs backward; at rest the gait eases to idle', async () => {
+  const { stepGait } = await import('../src/rpg/rig.js');
+  const p = { yaw: Math.PI, phase: 1, gait: 1 }; // facing north
+  stepGait(p, 0, 0.05, 0.05, 1); // moving south: backward
+  assert.ok(p.phase < 1, `phase ${p.phase}`);
+  const ph = p.phase;
+  for (let i = 0; i < 60; i++) stepGait(p, 0, 0, 1 / 60, 1);
+  assert.ok(p.gait < 0.01, `gait ${p.gait}`);
+  assert.equal(p.phase, ph, 'standing, the cycle holds');
+  const q = { yaw: 0, phase: 0, gait: 0 };
+  for (let i = 0; i < 6; i++) stepGait(q, 0.9 / 60, 0, 1 / 60, 0.9); // sideways at walking pace: forward-ish, not backward
+  assert.ok(q.phase > 0 && q.gait > 0.5);
+});

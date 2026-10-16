@@ -272,8 +272,12 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
 - **Commuters** (4; `life.js` behaviour, `rig.js` + `figure.js` drawing): the same stick figure in muted
   colours (cool greys, a teal coat, a dusty red) with no lantern; one holds a phone (`rig.js`'s `phone` pose,
   a small lit screen and a faint light). They breathe, shift their weight (`shift`), turn to look down the
-  track now and then, and when a train passes they turn to watch it, the ones by its track stepping back 0.5
-  from the edge, then settle. One paces slowly between two spots and waits rather than walk into you. They're
+  track now and then, and when a train passes they turn to watch it, the ones by its track stepping back 1.0
+  from the edge (a couple of real backward steps at walking pace, still facing the track), then settle. After
+  "the people just glide they dont have walking animations", their rigs walk as yours does (`stepGait` in
+  `rig.js`): the cycle advances by the ground they cover at your stride, so the feet don't skate, and runs
+  backward when they move against their facing; the gait is their smoothed speed over walking speed, blending
+  back to idle at rest; walking somewhere they turn toward it with `turnToward`. One paces slowly between two spots and waits rather than walk into you. They're
   solid (a 0.25 circle you're pushed out of) and never leave the platform. Their figures are disposed with
   the station.
 

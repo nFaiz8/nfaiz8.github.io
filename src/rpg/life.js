@@ -2,6 +2,7 @@
 // bed, and a few commuters waiting for a train that never stops. Pure: no three.js, no DOM. Each creature is a
 // small state machine stepped with dt; scene.js and index.js draw them. Seeded, so a run can be replayed.
 import { RADIUS, blocked } from './move.js';
+import { turnToward } from './rig.js';
 
 const TAU = 2 * Math.PI;
 export function rng(seed) {
@@ -143,7 +144,8 @@ export function stepRat(rat, dt, { train }, map) {
 
 // Commuters: stand mostly still, breathing (rig.js), shift their weight now and then, sometimes turn to look down the
 // track, and when a train passes step back from the edge and turn to watch it, then settle. One paces.
-export const COMMUTER = { radius: 0.25, walk: 0.9, back: 0.5, step: 1.4, settle: [1, 2.5] };
+// Stepping back is a couple of real steps (back about two strides' halves) at walking pace, still facing the track.
+export const COMMUTER = { radius: 0.25, walk: 0.9, back: 1.0, step: 0.9, settle: [1, 2.5] };
 
 export function createCommuter(spec, seed = 0) {
   const r = rng(seed + 303);
@@ -172,8 +174,11 @@ export function stepCommuter(c, dt, { train, walker }, map) {
     c.watching = true; c.settle = between(r, COMMUTER.settle[0], COMMUTER.settle[1]);
     const head = Math.max(-2, Math.min(map.cols + 2, train.head));
     c.targetYaw = Math.atan2(head - c.x, train.track.z - c.z);
-    if (train.track === track && !c.walkTo) goal = { x: c.home.x, z: c.home.z + Math.sign(c.home.z - track.z) * COMMUTER.back };
-    else goal = { x: c.x, z: c.z }; // stop where you are
+    if (train.track === track && !c.walkTo) {
+      goal = { x: c.home.x, z: c.home.z + Math.sign(c.home.z - track.z) * COMMUTER.back };
+      // Stepping back, they face the track (so the steps are backward ones), and turn to watch once they're back.
+      if (Math.hypot(goal.x - c.x, goal.z - c.z) > 0.05) c.targetYaw = track.z > c.z ? 0 : Math.PI;
+    } else goal = { x: c.x, z: c.z }; // stop where you are
   } else if (c.watching) {
     c.settle -= dt;
     goal = { x: c.x, z: c.z };
@@ -215,9 +220,9 @@ export function stepCommuter(c, dt, { train, walker }, map) {
   }
   c.speed = speed;
   c.walked += Math.hypot(c.x - x0, c.z - z0);
-  // Turn and shift on springs.
-  const turn = 1 - Math.exp(-dt / (c.watching ? 0.25 : 0.6));
-  c.yaw = wrapAngle(c.yaw + wrapAngle(c.targetYaw - c.yaw) * turn);
+  // Walking somewhere, face the way you go (the rig's turn, as yours); otherwise turn on a slower spring.
+  if (speed > 0 && c.state === 'walk' && !c.watching) c.yaw = turnToward(c.yaw, c.targetYaw, dt);
+  else c.yaw = wrapAngle(c.yaw + wrapAngle(c.targetYaw - c.yaw) * (1 - Math.exp(-dt / (c.watching ? 0.25 : 0.6))));
   c.shift += (c.shiftTo - c.shift) * (1 - Math.exp(-dt / 0.5));
   return c;
 }
