@@ -28,6 +28,7 @@ import { createMap } from './map.js';
 import { createShots } from './shots.js';
 import { createGrid } from './grid.js';
 import { createAdmin } from './admin.js';
+import { isMuted, setMuted, onMuted } from './sound-pref.js';
 
 const stage = document.getElementById('stage');
 const captionEl = document.getElementById('caption');
@@ -299,6 +300,7 @@ function onKey(e) {
   if (e.code === 'KeyI' && shots && !shotsBtn.hidden) { shots.toggle(); return true; }
   if (e.code === 'Backquote' && ARENA.enabled) { admin.toggle(arenaMap); return true; }
   if (e.code === 'KeyF') { toggleFullscreen(); return true; }
+  if (e.code === 'KeyV' && !e.repeat) { setMuted(!isMuted()); return true; } // sound (M is the map)
   if (e.code === 'Space' && world.mode === 'side') return true; // jump (input.js holds it)
   if (e.code === 'KeyE') { // only E opens (not Enter or Space)
     if (world.focus) openFrame(world.focus, world.mode === 'side' ? { instant: true } : undefined);
@@ -615,6 +617,7 @@ async function closePanels(cancelled) {
 async function goDown({ instant = false } = {}) {
   if (stationState !== 'off' || !map.stairs) return;
   stationState = 'down';
+  music?.setScene('station'); // the jazz goes quiet and muffled, as if from the top of the stairs
   const gen = ++downGen;
   world.frozen = true;
   world.path = null;
@@ -634,6 +637,7 @@ async function goDown({ instant = false } = {}) {
     console.warn(err);
     if (gen !== downGen || stationState !== 'down') return; // a newer trip owns the state now
     stationState = 'off';
+    music?.setScene('gallery');
     standAtStairs();
     world.frozen = false;
     if (location.hash === STATION_HASH) replaceHash('');
@@ -649,7 +653,7 @@ async function goDown({ instant = false } = {}) {
 }
 async function goUp({ fromHistory = false } = {}) {
   if (stationState === 'down') {
-    stationState = 'off'; standAtStairs(); world.frozen = false;
+    stationState = 'off'; music?.setScene('gallery'); standAtStairs(); world.frozen = false;
     await fade(false);
     if (fromHistory && location.hash && location.hash !== STATION_HASH) applyRoute(parseRoute(location.hash));
     return;
@@ -669,12 +673,43 @@ async function goUp({ fromHistory = false } = {}) {
     if (!fromHistory && location.hash === STATION_HASH) replaceHash('');
     world.frozen = false;
     stationState = 'off';
+    music?.setScene('gallery'); // back up: the jazz comes back in full, where it had got to
     await fade(false);
   }
   stage.focus({ preventScroll: true });
   // Back to a route (a photo, a room): the hashchange that brought you up is applied now you're here.
   if (fromHistory && location.hash && location.hash !== STATION_HASH) applyRoute(parseRoute(location.hash));
 }
+// Sound (station spec §8): smooth jazz in the museum, from the visitor's first key press or tap. Only then does
+// music.js load (and the track after it), so the gallery's first load carries none of it; it makes the AudioContext,
+// and each later gesture resumes it if the browser held it back. The station moves the same music (no second copy).
+let music = null, musicLoading = false;
+function unlockAudio(e) {
+  if (e.type === 'keydown' && e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
+  if (music) { music.unlock(); return; }
+  if (musicLoading) return;
+  musicLoading = true;
+  // Making an AudioContext can stall the page for ~0.1 s (the audio device opening), so it waits until you stand still.
+  import('./music.js').then((m) => whenStill(() => { music = m; m.unlock({ where: stationState === 'off' ? 'gallery' : 'station' }); })).catch(() => { musicLoading = false; });
+}
+function whenStill(fn, waited = 0) {
+  const s = input ? input.state() : {};
+  if ((!s.x && !s.y && !world?.path) || waited > 4000) fn();
+  else setTimeout(() => whenStill(fn, waited + 150), 150);
+}
+addEventListener('keydown', unlockAudio, true);
+addEventListener('pointerdown', unlockAudio, true);
+const soundBtn = document.getElementById('sound-btn');
+function showSound(m) {
+  if (!soundBtn) return;
+  soundBtn.firstChild.textContent = m ? '[×]' : '[♪]';
+  soundBtn.lastChild.textContent = m ? ' muted' : ' sound';
+  soundBtn.setAttribute('aria-pressed', String(m));
+}
+showSound(isMuted());
+onMuted(showSound);
+soundBtn?.addEventListener('click', () => { setMuted(!isMuted()); soundBtn.blur(); });
+
 const muted = new Set(); // ids whose chat you've hidden, for this visit
 function stopFollowing() { if (following) { following = null; lastFocus = undefined; } }
 
@@ -1088,6 +1123,7 @@ async function boot() {
   if (onLocalhost) window.__ascii.freezeTrain = (t) => { trainAt = t; };
   window.__ascii.pvp = () => pvp;
   window.__ascii.input = () => input;
+  window.__ascii.music = () => (music ? music.musicState() : { state: 'none', sources: 0, loaded: false, requested: musicLoading });
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 
