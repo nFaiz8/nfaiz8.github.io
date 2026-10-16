@@ -273,22 +273,20 @@ await withBrowser(async ({ page, url, errors }) => {
   });
 
   await check('riding through the tunnel: lamps stream past, the car lit warm inside', async () => {
-    await page.evaluate(() => { window.__station.setTime(20 + 18 + 8); window.__station.board(0, 30, 0); }); // L0, 8 s out of MUSEUM
-    await nFrames(page, 30);
-    await page.evaluate(() => window.__station.setTime(20 + 18 + 8));
-    await nFrames(page, 3);
+    await page.evaluate(() => { window.__station.setTime(20 + 18 + 8, { hold: true }); window.__station.board(0, 30, 0); }); // L0, 8 s out of MUSEUM, the clock held
+    // Hold the clock there while it settles (frames are slow without a GPU; left running it reaches CANAL ST and turns round).
+    for (let i = 0; i < 4; i++) { await page.evaluate(() => window.__station.setTime(20 + 18 + 8, { hold: true })); await nFrames(page, 8); }
     const a = await page.evaluate(() => window.__station.aboard());
     assert.equal(a.k, 0);
     assert.ok(await page.evaluate(() => window.__station.tunnelShown() > 10), 'tunnel segments drawn around you');
-    assert.ok(await page.evaluate(() => window.__station.ridersShown() >= 10), 'people aboard your train');
     assert.ok(await page.evaluate(() => window.__station.ridersShown() >= 10), 'people aboard your train');
     await page.screenshot({ path: 'e2e/shots/station-tunnel.png' });
   });
 
   await check('on the bridge: the skyline, the sky, sun shafts through the windows; the camera pulled back', async () => {
-    await page.evaluate(() => { window.__station.setTime(20 + 18 + 28); window.__station.board(0, 30, 0); }); // mid-bridge
+    await page.evaluate(() => { window.__station.setTime(20 + 18 + 28, { hold: true }); window.__station.board(0, 30, 0); }); // mid-bridge, the clock held
     // The camera's springs settle; the clock is held mid-bridge meanwhile (frames are slow without a GPU).
-    for (let i = 0; i < 9; i++) { await page.evaluate(() => window.__station.setTime(20 + 18 + 28)); await nFrames(page, 10); }
+    for (let i = 0; i < 9; i++) { await page.evaluate(() => window.__station.setTime(20 + 18 + 28, { hold: true })); await nFrames(page, 10); }
     await page.evaluate(() => window.__station.setTime(20 + 18 + 28));
     await nFrames(page, 3);
     const env = await page.evaluate(() => window.__station.env());
@@ -298,9 +296,10 @@ await withBrowser(async ({ page, url, errors }) => {
 
   await check('frame time: the script stays well inside a 60 fps frame on the platform, in the tunnel and on the bridge', async () => {
     const at = async (setup) => { await page.evaluate(setup); await nFrames(page, 70); const p = await page.evaluate(() => window.__station.perf()); console.log('  ', JSON.stringify(p)); return p.cpu; };
-    const platform = await at(() => { window.__station.setTime(20 + 5); window.__station.teleport(60, 6.5); });
-    const tunnel = await at(() => { window.__station.setTime(20 + 18 + 8); window.__station.board(0, 30, 0); });
-    const bridge = await at(() => { window.__station.setTime(20 + 18 + 28); window.__station.board(0, 30, 0); });
+    const platform = await at(() => { window.__station.setTime(20 + 5, { hold: true }); window.__station.teleport(60, 6.5); });
+    const tunnel = await at(() => { window.__station.setTime(20 + 18 + 8, { hold: true }); window.__station.board(0, 30, 0); });
+    const bridge = await at(() => { window.__station.setTime(20 + 18 + 28, { hold: true }); window.__station.board(0, 30, 0); });
+    await page.evaluate(() => window.__station.setTime(20 + 5)); // the clock runs again
     console.log(`  cpu ms/frame: platform ${platform.toFixed(2)}, tunnel ${tunnel.toFixed(2)}, bridge ${bridge.toFixed(2)}`);
     for (const ms of [platform, tunnel, bridge]) assert.ok(ms < 6, `${ms} ms of script a frame`);
   });

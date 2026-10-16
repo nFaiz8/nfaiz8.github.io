@@ -10,6 +10,7 @@ import { rng } from './life.js';
 
 export const MANHATTAN = { east: 350, tip: 260, north: -1500, width: 650 };
 export const BROOKLYN = { west: 550, east: 1100, south: 400, north: -1200 };
+export const CORRIDOR = [-25, 45]; // the line's tracks, and room either side
 
 // The island's west shore (the Hudson) at z: nothing at the tip, widening northward.
 export function manhattanWest(z) {
@@ -47,6 +48,9 @@ const LANDMARKS = [
 export function buildCity(seed = 42) {
   const r = rng(seed), lots = [];
   const nearLandmark = (x, z) => LANDMARKS.some((l) => Math.abs(l.x - x) < 26 && Math.abs(l.z - z) < 20);
+  // The line runs underground to the bridge along z 0…19: nothing is built over it, or towers would rise through the
+  // tunnels and the bridge's approaches.
+  const overLine = (z0, z1) => z1 > CORRIDOR[0] && z0 < CORRIDOR[1];
   // A block's lots: split along x into n, each a little in from its neighbours.
   const block = (borough, g, bx, bz, n, height, inside) => {
     const x0 = g.ox + bx * g.ax + g.avenue / 2, x1 = g.ox + (bx + 1) * g.ax - g.avenue / 2;
@@ -54,7 +58,7 @@ export function buildCity(seed = 42) {
     const w = (x1 - x0) / n;
     for (let i = 0; i < n; i++) {
       const a = x0 + i * w + 0.3, b = x0 + (i + 1) * w - 0.3;
-      if (!inside(a, b, z0, z1) || nearLandmark((a + b) / 2, (z0 + z1) / 2)) continue;
+      if (!inside(a, b, z0, z1) || nearLandmark((a + b) / 2, (z0 + z1) / 2) || overLine(z0, z1)) continue;
       lots.push({ borough, x: (a + b) / 2, z: (z0 + z1) / 2, w: b - a, d: z1 - z0, h: height((a + b) / 2, (z0 + z1) / 2) });
     }
   };

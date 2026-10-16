@@ -232,11 +232,11 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       : { x: feet.x, z: feet.z, y: feet.y, a: pose.yaw });
     // The script's time each frame, the last 60 (the e2e reads it; headless can't time the GPU).
     const cpu = new Float32Array(60);
-    let last = performance.now(), t0 = last, leaving = false, frames = 0, pinned = false;
+    let last = performance.now(), t0 = last, leaving = false, frames = 0, pinned = false, held = null;
     const time = () => (performance.now() - t0) / 1000;
     // The train's clock: shared by everyone (Multiplayer), or this station's own once setTime pins it (tests).
     const epoch = () => (mp ? mp.now() : performance.timeOrigin + performance.now());
-    const clock = () => (pinned ? time() : sharedTime(epoch()));
+    const clock = () => held ?? (pinned ? time() : sharedTime(epoch()));
     function frame(now) {
       raf = requestAnimationFrame(frame);
       if (document.hidden) { last = now; return; } // paused while hidden (spec §5)
@@ -259,7 +259,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const mine = f.kind === 'train' ? local(f.k, tt) : null;
       // Everything on the line, and your own train even out past its ends (turned round after a long hidden tab).
       const trains = trainsWith(tt, mine ? mine.k : null);
-      unstick(walker, m); // never start a frame inside something solid
+      if (!rider.seat) unstick(walker, m); // never start a frame inside something solid (a seat is on the bench, so not then)
       if (ticket.isOpen) finger = null;
       let input = ticket.isOpen ? STILL : finger ? fingerInput() : keys();
       if (rider.seat && (input.x || input.y)) stand(rider, walker, tt);
@@ -407,7 +407,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       ridersShown: () => ridersShown,
       perf: () => ({ cpu: cpu.reduce((a, b) => a + b, 0) / 60, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, lights: (() => { let n = 0; scene.traverseVisible((o) => { if (o.isPointLight) n++; }); return n; })() }),
       clock,
-      setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
+      // hold: the train clock stands still at s (tests on a slow renderer); otherwise it runs on from s.
+      setTime(s, { hold = false } = {}) { t0 = performance.now() - s * 1000; pinned = true; held = hold ? s : null; },
       others: () => (others ? others.shown() : []),
       mine: () => (others ? others.mine() : null),
       teleport(x, z, stop = 0) { rider.frame = { kind: 'station', stop }; rider.seat = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; walker.y = maps[stop].levelAt(x, z) ?? walker.y; },

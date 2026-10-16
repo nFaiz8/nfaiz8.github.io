@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCity, manhattanWest, MANHATTAN, BROOKLYN, GRID } from '../src/rpg/city.js';
+import { buildCity, manhattanWest, MANHATTAN, BROOKLYN, GRID, CORRIDOR } from '../src/rpg/city.js';
 
 const city = buildCity();
 
@@ -47,4 +47,9 @@ test('the skyline reads as Manhattan: Midtown and the tip tall, the Lower East S
 
 test('Brooklyn is across the river, east of its shore', () => {
   for (const l of city.lots.filter((l) => l.borough === 'brooklyn')) assert.ok(l.x - l.w / 2 >= BROOKLYN.west - 1e-9);
+});
+
+test('nothing is built over the line (it would rise through the tunnels)', () => {
+  for (const l of city.lots) assert.ok(l.z + l.d / 2 <= CORRIDOR[0] || l.z - l.d / 2 >= CORRIDOR[1], `a building over the line at z ${l.z}`);
+  assert.ok(CORRIDOR[0] < 0 && CORRIDOR[1] > 19);
 });

@@ -41,8 +41,8 @@ export function createTunnel(scene, { reducedMotion = false } = {}) {
   // Per segment: [material, x offset in the segment, y, z, sx, sy, sz] boxes.
   const zN = 0.5, zS = 18.5, y0 = LEVEL.track;
   const parts = [
-    ['wall', LAMP / 2, y0 + WALL_H / 2 - 0.2, zN - 0.15, LAMP, WALL_H, 0.3],
-    ['wall', LAMP / 2, y0 + WALL_H / 2 - 0.2, zS + 0.15, LAMP, WALL_H, 0.3],
+    ['wallN', LAMP / 2, y0 + WALL_H / 2 - 0.2, zN - 0.15, LAMP, WALL_H, 0.3],
+    ['wallS', LAMP / 2, y0 + WALL_H / 2 - 0.2, zS + 0.15, LAMP, WALL_H, 0.3],
     ['middle', LAMP / 2, y0 + 0.5, 9.5, LAMP, 1.0, 9.4],
     ...TRACKS.map((t) => ['bed', LAMP / 2, y0 - 0.1, t.z, LAMP, 0.2, 3.6]),
     ...TRACKS.flatMap((t) => [-0.72, 0.72].map((dz) => ['rail', LAMP / 2, y0 + 0.06, t.z + dz, LAMP, 0.12, 0.1])),
@@ -55,7 +55,7 @@ export function createTunnel(scene, { reducedMotion = false } = {}) {
   const byMat = {};
   for (const p of parts) (byMat[p[0]] ||= []).push(p);
   const meshes = Object.entries(byMat).map(([k, list]) => {
-    const m = new THREE.InstancedMesh(unit, mats[k.startsWith('column') ? 'column' : k], list.length * SEGS);
+    const m = new THREE.InstancedMesh(unit, mats[k.startsWith('column') ? 'column' : k.startsWith('wall') ? 'wall' : k], list.length * SEGS);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     m.frustumCulled = false;
     scene.add(m);
@@ -70,7 +70,12 @@ export function createTunnel(scene, { reducedMotion = false } = {}) {
   return {
     // meZ, camZ: you and the camera; the row of columns between them is hidden, or it would stand across your car.
     update(camX, time, meZ = 9.5, camZ = 30) {
-      for (const { k, m } of meshes) if (k.startsWith('column')) { const z = k === 'columnN' ? 4.6 : 14.4; m.visible = !(z > meZ && z < camZ); }
+      // The same for the outer walls: riding the south track the camera is out past the south wall, which would black out
+      // the view; that wall goes (with its lamp and cable), as a station's south wall fades.
+      for (const { k, m } of meshes) {
+        const z = { columnN: 4.6, columnS: 14.4, wallN: zN, wallS: zS }[k];
+        if (z !== undefined) m.visible = !(z > meZ && z < camZ);
+      }
       const first = Math.floor(camX / LAMP) - SEGS / 2;
       if (first !== lastFirst) {
         lastFirst = first;

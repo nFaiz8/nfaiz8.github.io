@@ -128,7 +128,7 @@ export function createBridge(scene, { reducedMotion = false } = {}) {
     update(camX, camZ, time) {
       // k: how far the camera is out on the bridge, easing over 30 tiles from each anchorage.
       const k = Math.max(0, Math.min(1, Math.min(camX - (B.x0 - 10), B.x1 + 10 - camX) / 30));
-      group.visible = camX > B.x0 - 160 && camX < B.x1 + 160;
+      group.visible = camX > B.x0 - 60 && camX < B.x1 + 60; // underground, none of it
       scene.background.lerpColors(DARK, SKY, k);
       scene.fog.color.lerpColors(DARK, HAZE, k);
       scene.fog.near = 16 + (160 - 16) * k;
