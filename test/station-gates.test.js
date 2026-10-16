@@ -4,20 +4,23 @@ import fs from 'node:fs';
 import { parseStation } from '../src/rpg/map.js';
 import { createWalker, stepWalker, RADIUS } from '../src/rpg/move.js';
 import { createGates, gatedMap, trackGates, bumped, buy, topUp, easeArms, hasTicket, PRICES, START, TOP_UP, money,
-  turnRotors, rotorTurns, pushFrom, ARM_X, readerText, READER, tapped, refused, swipeAgain, AGAIN_FOR, REFUSED_FOR } from '../src/rpg/gates.js';
-import { emergencyTile, ledLines } from '../src/rpg/turnstiles.js';
+  turnRotors, rotorTurns, pushFrom, ARM_X, refused, REFUSED_FOR, ringState, gateKinds, blocked, swingGates, swingFrom, alarmOn,
+  ALARM_FOR, HINGE_X } from '../src/rpg/gates.js';
 
 const MAP = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
 const GATE_C = 12; // the shipped map's turnstile column
 
 // Walk with input for a while, as index.js does each frame.
+let clock = 0; // the station's time, carried across walks
 function walk(g, w, input, seconds, dt = 1 / 60, onFrame = null) {
   const map = gatedMap(MAP, g, w);
   let bumps = 0;
   for (let t = 0; t < seconds - 1e-9; t += dt) {
+    clock += dt;
     stepWalker(w, dt, input, map);
-    trackGates(g, w);
+    trackGates(g, w, clock);
     turnRotors(g, w);
+    swingGates(g, w, dt);
     if (bumped(g, w, input)) bumps++;
     onFrame?.();
   }
@@ -25,9 +28,10 @@ function walk(g, w, input, seconds, dt = 1 / 60, onFrame = null) {
 }
 const at = (x, z) => ({ ...createWalker(MAP), x, z, y: 0 });
 
-test('the shipped map has four gates in one column', () => {
+test('the shipped map has four gates in one column, the southernmost the emergency exit', () => {
   const g = createGates(MAP);
   assert.deepEqual(g.gates.map((k) => [k.c, k.r]), [[12, 6], [12, 8], [12, 10], [12, 12]]);
+  assert.deepEqual(g.gates.map((k) => k.kind), ['turnstile', 'turnstile', 'turnstile', 'emergency']);
   assert.equal(g.wallet, START);
   assert.equal(g.pass, null);
 });
@@ -160,44 +164,108 @@ test('locked, the rotor does not move; going back to the hall it turns the other
   assert.equal(g.pass, 'single', 'and you kept your ticket');
 });
 
-test('the reader: idle alternates TAP HERE and SWIPE CARD; INSUFFICIENT FARE; GO; JUST USED', () => {
-  const g = createGates(MAP, 3), far = at(5, 8.5);
-  assert.deepEqual(g.gates.map((_, i) => readerText(g, i, far, 0)), [READER.tap, READER.swipe, READER.tap, READER.swipe]);
+test('the tap target: idle, red a moment when you walk into it locked, green at your gate once you hold a ticket', () => {
+  const g = createGates(MAP), far = at(5, 8.5);
+  assert.deepEqual(g.gates.map((_, i) => ringState(g, i, far, 0)), ['idle', 'idle', 'idle', null], 'the emergency gate has none');
   const w = at(11.7, 8.5), k = g.gates[1];
   refused(g, k, 10);
-  assert.equal(readerText(g, 1, w, 10.1), 'INSUFFICIENT FARE');
-  assert.equal(readerText(g, 0, w, 10.1), READER.tap, 'only on its own gate');
-  assert.equal(readerText(g, 1, w, 10 + REFUSED_FOR + 0.01), READER.swipe, 'and only for a while');
+  assert.equal(ringState(g, 1, w, 10.1), 'refused');
+  assert.equal(ringState(g, 0, w, 10.1), 'idle', 'only on its own gate');
+  assert.equal(ringState(g, 1, w, 10 + REFUSED_FOR + 0.01), 'idle', 'and only for a while');
   buy(g, 'single');
-  g.seed = 3; g.taps = 0; // seed 3's first tap is a plain one
-  assert.equal(tapped(g, k, 20), false);
-  assert.equal(readerText(g, 1, w, 20), 'GO');
-  assert.equal(readerText(g, 0, w, 20), READER.tap, 'GO only at the gate you are at');
+  assert.equal(ringState(g, 1, w, 20), 'go');
+  assert.equal(ringState(g, 0, w, 20), 'idle', 'green only at the gate you are at');
   walk(g, w, { x: 1, y: 0 }, 1);
-  assert.equal(g.used, 1);
-  assert.equal(readerText(g, 1, w, 30), READER.swipe, 'idle once you are through');
-  walk(g, w, { x: -1, y: 0 }, 1);
-  refused(g, k, 40);
-  assert.equal(readerText(g, 1, w, 40.5), 'JUST USED');
+  assert.equal(ringState(g, 1, w, 30), 'idle', 'idle once you are through');
 });
 
-test('swipe again: about one tap in four, the same for the same seed, and GO after a second', () => {
-  let hits = 0;
-  for (let n = 0; n < 4000; n++) hits += swipeAgain(12345, n) ? 1 : 0;
-  assert.ok(hits > 850 && hits < 1150, `${hits} of 4000`);
-  for (let n = 0; n < 50; n++) assert.equal(swipeAgain(99, n), swipeAgain(99, n));
-  const seed = [...Array(100).keys()].find((s) => swipeAgain(s, 0));
-  const g = createGates(MAP, seed), w = at(11.7, 8.5), k = g.gates[1];
+// The kinds come from the map: the southernmost gate of a column with more than one.
+const mini = (rows) => parseStation(['name: T', ...rows].join('\n'));
+test('gateKinds: the southernmost gate of each column of two or more is the emergency exit; a lone gate is a turnstile', () => {
+  assert.deepEqual(gateKinds(MAP), ['turnstile', 'turnstile', 'turnstile', 'emergency']);
+  const m = mini([
+    '#########',
+    '#S..:...#',
+    '#...t.:.#',
+    '#...:.t.#',
+    '#.....:E#',
+    '#########',
+  ]);
+  const kinds = m.cells.filter((c) => c.ch === ':').map((c) => [c.c, c.r]);
+  assert.deepEqual(kinds, [[4, 1], [6, 2], [4, 3], [6, 4]]);
+  assert.deepEqual(gateKinds(m), ['turnstile', 'turnstile', 'emergency', 'emergency']);
+  const lone = mini(['#######', '#S.:.E#', '#######']);
+  assert.deepEqual(gateKinds(lone), ['turnstile']);
+});
+
+const EXIT_Z = 12.5, exitGate = (g) => g.gates[3];
+test('the emergency gate is locked from the hall, ticket or not, and walking into it does not open the fare machine', () => {
+  for (const pass of [null, 'single', 'unlimited']) {
+    const g = createGates(MAP), w = at(10.5, EXIT_Z);
+    if (pass) buy(g, pass);
+    let bumps = 0, blocks = 0;
+    const map = gatedMap(MAP, g, w), input = { x: 1, y: 0 };
+    for (let i = 0; i < 90; i++) {
+      stepWalker(w, 1 / 60, input, map);
+      trackGates(g, w, i / 60);
+      swingGates(g, w, 1 / 60);
+      if (bumped(g, w, input)) bumps++;
+      if (blocked(g, w, input)) blocks++;
+    }
+    assert.ok(w.x + RADIUS <= GATE_C + 1e-6, `${pass}: stopped against it, x ${w.x}`);
+    assert.equal(bumps, 0, `${pass}: no fare machine`);
+    assert.ok(blocks > 0, `${pass}: it is blocked`);
+    assert.equal(exitGate(g).swing, 0, `${pass}: it does not move`);
+    assert.equal(g.pass, pass, `${pass}: and costs nothing`);
+    assert.equal(alarmOn(g, exitGate(g), 1), false, 'no alarm');
+  }
+});
+
+test('from the platform the emergency gate pushes open as you go, lets you out free, sounds the alarm, then swings shut', () => {
+  clock = 100;
+  const g = createGates(MAP), w = at(13.6, EXIT_Z), k = exitGate(g);
+  const seen = [];
+  walk(g, w, { x: -1, y: 0 }, 1.2, 1 / 60, () => seen.push(k.swing));
+  assert.ok(w.x < GATE_C - RADIUS, `out in the hall: ${w.x}`);
+  assert.equal(g.pass, null);
+  assert.equal(g.used, 0, 'free');
+  assert.ok(seen.some((v) => v > 0.2 && v < 0.8), 'part open while you push');
+  assert.ok(seen.includes(1), 'right open as you pass');
+  assert.ok(g.alarm && g.alarm.gate === k, 'the alarm went');
+  assert.ok(alarmOn(g, k, g.alarm.from + 0.1) && alarmOn(g, k, g.alarm.from + ALARM_FOR - 0.1));
+  assert.equal(alarmOn(g, k, g.alarm.from + ALARM_FOR + 0.01), false, 'for ALARM_FOR');
+  walk(g, w, { x: -1, y: 0 }, 0.5);
+  walk(g, w, { x: 0, y: 0 }, 2.5);
+  assert.equal(k.swing, 0, 'shut again');
+  // And it's locked again from the hall.
+  const h = at(10.5, EXIT_Z);
+  walk(g, h, { x: 1, y: 0 }, 1);
+  assert.ok(h.x + RADIUS <= GATE_C + 1e-6);
+});
+
+test('swingFrom: nothing until your front reaches the panel, then more the further you go, clicking open at the end', () => {
+  const k = exitGate(createGates(MAP)), hx = GATE_C + HINGE_X;
+  assert.equal(swingFrom(k, hx + RADIUS, EXIT_Z), 0);
+  assert.equal(swingFrom(k, hx + RADIUS + 0.5, EXIT_Z), 0);
+  const a = swingFrom(k, hx + RADIUS - 0.1, EXIT_Z), b = swingFrom(k, hx + RADIUS - 0.3, EXIT_Z);
+  assert.ok(a > 0 && a < b && b < 1, `${a} < ${b}`);
+  assert.equal(swingFrom(k, hx - 1, EXIT_Z), 1);
+});
+
+test('backing out of the emergency gate into the platform: no alarm, and it shuts', () => {
+  const g = createGates(MAP), w = at(13.6, EXIT_Z), k = exitGate(g);
+  walk(g, w, { x: -1, y: 0 }, 0.45);
+  assert.ok(k.swing > 0, 'pushed part way');
+  walk(g, w, { x: 1, y: 0 }, 1);
+  walk(g, w, { x: 0, y: 0 }, 2);
+  assert.equal(g.alarm, null);
+  assert.equal(k.swing, 0);
+});
+
+test('a single is not used up going out by the emergency gate', () => {
+  const g = createGates(MAP), w = at(13.6, EXIT_Z);
   buy(g, 'single');
-  assert.equal(tapped(g, k, 5), true);
-  assert.equal(readerText(g, 1, w, 5.2), 'SWIPE AGAIN AT THIS TURNSTILE');
-  assert.equal(readerText(g, 1, w, 5 + AGAIN_FOR + 0.01), 'GO');
-  assert.equal(g.taps, 1, 'the next tap is the next number');
-});
-
-test('the line has an emergency gate spot at its north end, and the LED text fits its display', () => {
-  assert.deepEqual(emergencyTile(MAP), { c: GATE_C, r: 5 });
-  assert.deepEqual(ledLines('GO'), ['GO']);
-  assert.deepEqual(ledLines('SWIPE AGAIN AT THIS TURNSTILE'), ['SWIPE AGAIN AT', 'THIS TURNSTILE']);
-  assert.deepEqual(ledLines('INSUFFICIENT FARE'), ['INSUFFICIENT', 'FARE']);
+  walk(g, w, { x: -1, y: 0 }, 1.2);
+  assert.equal(g.pass, 'single');
+  assert.equal(g.used, 0);
 });

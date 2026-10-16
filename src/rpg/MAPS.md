@@ -38,16 +38,19 @@ Fluorescent tubes are placed for you: along the middle row of each platform band
 ## Turnstiles
 
 A column of `:` gates (with `t` posts between them) is a ticket line, drawn New York style: each `t` is a steel
-cabinet, each gate has a three-armed rotor and a reader on the cabinet north of it, and the wall tile at each end of
-the column gets a cabinet half in it. The game treats **west as outside**: walking east into a gate without a ticket
-stops you there and opens the fare card machine; walking west through one is always free. So put the gates with the
-way in on their west side and the paid area to the east, and leave a tile of floor on both sides of each gate. A
-single ride is used up once you come out of a gate on its east side; an unlimited ride lasts the visit
+cabinet filling its tile and reaching a little into the gates beside it, each turnstile has a three-armed rotor and a
+round tap target on the cabinet north of it, and the wall tile at each end of the column gets a cabinet running into
+it. The game treats **west as outside**: walking east into a turnstile without a ticket stops you there and opens the
+fare card machine; walking west through one is always free. So put the gates with the way in on their west side and
+the paid area to the east, leave a tile of floor on both sides of each gate, and wall off both ends of the column.
+A single ride is used up once you come out of a gate on its east side; an unlimited ride lasts the visit
 (`src/rpg/gates.js`).
 
-If the column's north end is a wall tile with hall floor west of it, that tile is drawn as a recess holding an
-emergency exit gate (`src/rpg/turnstiles.js`, `emergencyTile`); it's still a wall to walk into. So a gate on the
-column's first row wants a wall, not a post, north of it.
+The **southernmost gate** of a column with two or more gates is the **emergency exit** instead (`gateKinds`): a
+swing gate hinged on the wall south of it, with its sign and alarm light on that wall. It's exit only and free:
+locked from the west whatever you hold (and it never opens the fare card machine), pushed open from the east, and
+the alarm sounds as you come out. So give that lane a wall, not a post, south of it. A column with a single gate
+has no emergency exit.
 
 ## What the checker wants
 

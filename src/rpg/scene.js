@@ -6,7 +6,7 @@ import { LEVEL } from './map.js';
 import { makeSprite, PROPS, FONT, boxed } from './sprites.js';
 import { TRAIN, departures } from './train.js';
 import { STATION_LIFE, createPigeon, stepPigeon, createRat, stepRat } from './life.js';
-import { buildTurnstiles, emergencyTile, LINTEL } from './turnstiles.js';
+import { buildTurnstiles } from './turnstiles.js';
 
 export const WALL_HEIGHT = 4; // over the highest floor beside a wall
 // Walls this close on the camera's side fade (spec §4). The eye sits cos 35° × 10 ≈ 8.2 south of the focus, plus
@@ -71,17 +71,13 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // and a wall only 4 over the track would let it see over into the void.
   const roof = Math.max(...map.cells.filter((cell) => cell.level != null).map((cell) => cell.level)) + WALL_HEIGHT;
   const edge = (c, r) => c === 0 || r === 0 || c === map.cols - 1 || r === map.rows - 1;
-  const exitTile = emergencyTile(map); // a wall tile opened into a recess for the emergency gate (turnstiles.js)
   for (const cell of map.cells) {
     const { c, r, ch } = cell, x = c + 0.5, z = r + 0.5;
     if (ch === '#' || ch === 'n') {
       const ls = levels(c, r);
       if (!ls.length) continue; // buried in other walls
       const lo = Math.min(...ls) - 0.4, top = edge(c, r) ? roof : Math.max(...ls) + WALL_HEIGHT;
-      if (exitTile && exitTile.c === c && exitTile.r === r) {
-        box('hall', x, LEVEL.hall - 0.1, z, 1, 0.2, 1);
-        wallColumn(c, r, LEVEL.hall + LINTEL, top, true);
-      } else wallColumn(c, r, lo, top);
+      wallColumn(c, r, lo, top);
       continue;
     }
     if (ch === '=') {
@@ -254,7 +250,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   const clockText = (d, tick) => boxed([` ${String(d.getHours()).padStart(2, '0')}${tick ? ':' : ' '}${String(d.getMinutes()).padStart(2, '0')} `], 7);
   let clockKey = '';
   const clock = makeSprite(clockText(new Date(), true), ['#5a2a24', '#ff6a4a', '#5a2a24'], 0.56, { glow: true, bright: 1.35, bg: '#0b0605' });
-  clock.mesh.position.set(12.5, 2.5, wallFace); // over the emergency gate's sign
+  clock.mesh.position.set(12.5, 2.5, wallFace); // over the turnstile line
   const boardLines = (d) => [' DEPARTURES', ...d.lines.map((l) => ` ${l} `)];
   const board = makeSprite(boardLines(departures(0, map)), ['#ffd27a', '#ffb340', '#ffb340'], 0.85, { glow: true, bright: 1.6, bg: '#050402', gap: 0.25, frame: '#6a4a18' });
   board.mesh.position.set(15.7, 2.0, wallFace);
@@ -291,7 +287,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   scene.add(tickerBox, tickerFace);
   fadeable([tickerBox, tickerFace], ticker.x, ticker.z, ticker.w / 2 + 0.6);
 
-  // The turnstiles: steel cabinets, rotors and readers, and the emergency gate (turnstiles.js).
+  // The turnstiles: steel cabinets, rotors and tap targets, and the emergency gate (turnstiles.js).
   const turnstiles = buildTurnstiles(scene, map, own, { reducedMotion });
   for (const g of turnstiles.signs) fadeable(g.mesh, g.x, g.z, g.side);
 
@@ -453,7 +449,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     // The ticker: a character every 0.18 s (slower with reduced motion); dimmed when it hangs between the camera and you.
     const step = Math.floor(time / (reducedMotion ? 0.4 : 0.18));
     tickerTex.offset.x = (step % TICKER.length) / TICKER.length;
-    // The turnstiles' rotors and readers.
+    // The turnstiles' rotors and tap targets, and the emergency gate.
     turnstiles.update(time, walker, gates);
     // The kiosk lamp buzzes: mostly on, with a quick dip now and then (steady with reduced motion).
     let kk = 1;

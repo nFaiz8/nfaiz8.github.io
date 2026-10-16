@@ -227,42 +227,48 @@ Added on 2026-10-15 after the user said "make it more lively, the things on the 
     gates solid. A single ride is used up when you come out of the gate on the platform side; an unlimited ride
     lasts the visit, shown by a small `▣ UNLIMITED` chip (`▣ SINGLE RIDE` while you hold a single).
   - **Look:** the station's own, not shiny 3D: matte boxes with one faint glyph per face like the benches and the
-    kiosk, and the lit reader framed like the departures board (a first glossy version with chrome rods and ball
-    ends was "ugly").
-  - **Cabinets:** each `t` post is a waist-high (0.95 + a lighter top slab) steel cabinet, 0.5 across and 0.9 along
-    the lanes, its sides a faint `═`, its top `─`, with a dark kick plate; one more stands at each end of the line,
-    half in the wall. A cool light hangs over the line.
-  - **Rotor:** each gate has a three-armed rotor on its lane's north cabinet: three square steel bars 120° apart on a dark hub,
-    its axis tilted 60° down into the lane, so one arm is always level across the lane at waist height and the other
-    two point down along the cabinet. It turns a third of a turn as you push through, driven by where you are, not a
-    timer (`pushFrom`: nothing until your front reaches the level arm, `ARM_X` into the gate, then over 0.7 of
-    walking, clicking over by itself for the last 15%); when you leave the gate a full push becomes its new rest and
-    a part push springs back. Locked, you stop at the tile's edge against the level arm and it doesn't move. Going
-    back to the hall you push it the other way.
-  - **Reader:** on top of the same cabinet, leaning toward its lane (and the camera), a black LED panel framed in a
-    dim line of its colour, the tap mark `◎` at its left (pale blue idle, green, red, or blinking amber) and the
-    text beside it (amber, or green, its text fitted to the fewest lines that give the biggest letters; redrawn
-    only when the text or the mark changes): idle `TAP HERE` / `SWIPE CARD` on alternate
-    gates; `GO` in green at the gate you're walking up to while you hold a ticket; `INSUFFICIENT FARE` (red) for
-    2.5 s when you walk into a shut gate, or `JUST USED` once you've used a single. The first tap after buying
-    shows `SWIPE AGAIN AT THIS TURNSTILE` for 1 s, then `GO`, about one time in four (`swipeAgain(seed, n)`, seeded
-    per visit, deterministic for the tests); its `◎` blinks amber meanwhile (steady with reduced motion, the
-    message still shows).
-  - **Emergency exit gate:** at the line's north end the wall tile beside the vending machine (`emergencyTile`:
-    a wall at the end of the gate column with hall floor west of it) is opened into a recess up to 2.0, with a steel
-    swing gate of bars between a hinge post and a latch post (left a little ajar, as they often are, so the camera
-    sees its bars), a red alarm light on the latch, and a red `EMERGENCY EXIT / ALARM WILL SOUND` sign on the lintel,
-    with the clock over it. Decorative: the tile is still a wall to walk into.
-  - **Fare card machine:** walking into a shut gate stops you and opens an ASCII pop-up styled on a fare card
+    kiosk (a first glossy version with chrome rods and ball ends was "ugly"). No screens: after "we dont need sreens
+    on the turnstile" the LED readers (`TAP HERE`, `GO`, `INSUFFICIENT FARE`, the swipe-again joke) went.
+  - **A sealed line:** after "theres like empty space where u can slip through ... in real life", nothing a person
+    could squeeze through. Each `t` post is a waist-high (0.95 + a lighter top slab) steel cabinet filling its tile
+    and reaching 0.08 (`LANE_IN`) into each gate tile beside it, so every lane is 0.84 wide, cabinet to cabinet; at
+    each end of the line a cabinet runs 0.3 into the wall. Sides a faint `═`, top `─`, a dark kick plate. A cool
+    light hangs over the line. (A fifth lane was tried for "too much empty space" and taken out again: "extra one
+    didnt help".)
+  - **Rotor:** each turnstile lane has a three-armed rotor on its north cabinet: three square steel bars 120° apart
+    on a dark hub, its axis tilted 60° down into the lane, so one arm is always level across the lane at waist
+    height, reaching to a hand's width (0.08) of the next cabinet, and the other two point down along the cabinet.
+    It turns a third of a turn as you push through, driven by where you are, not a timer (`pushFrom`: nothing until
+    your front reaches the level arm, `ARM_X` into the gate, then over 0.7 of walking, clicking over by itself for
+    the last 15%); when you leave the gate a full push becomes its new rest and a part push springs back. Locked,
+    you stop at the tile's edge against the level arm and it doesn't move. Going back to the hall you push it the
+    other way.
+  - **Tap target:** on top of the same cabinet a flat round puck, `◎` in geometry (a dark disc, a lit ring and dot),
+    no text: dim white idle; green at the gate you're walking up to while you hold a ticket; red for 1.2 s
+    (`REFUSED_FOR`) when you walk into it locked (`ringState`).
+  - **Emergency exit gate** (`gateKinds`: the southernmost gate of each column of two or more is kind
+    `'emergency'`; on the shipped map row 12, beside the south wall). Replaces the first try, a decorative gate in a
+    recess north of the line that "is blocked" (it led into a wall). A barred steel swing gate, 1.2 high, hinged on
+    a post against the wall and, shut, reaching across its lane to the cabinet; a push bar on the platform side. On
+    the wall over it, facing the camera, the red `EMERGENCY EXIT / ALARM WILL SOUND` sign and above that the alarm
+    light in a dark housing. Exit only, free: from the hall it's locked, ticket or not, and walking into it doesn't
+    open the fare card machine (`blocked`, not `bumped`), just a 0.5 s steady red of the light. From the platform
+    your front pushes it and it swings toward the hall following you (`swingFrom`: the angle at which the panel
+    touches you, held right open once your middle passes the hinge line, so it's clear of you), and once you're out
+    on the hall side the alarm sounds for 3 s (`ALARM_FOR`, `alarmOn`): the light flashes 3 times a second with a
+    red glow (steady red with reduced motion). Clear of its sweep it swings shut by itself (`swingGates`). A single
+    isn't used up going out this way.
+  - **Fare card machine:** walking into a shut turnstile stops you and opens an ASCII pop-up styled on a fare card
     vending machine, a dark blue screen in a brushed-steel bezel (`FARE CARD`: `▸ single ride $2.90`,
-    `unlimited ride $7.00`, `[ BUY + TAP ]`, `balance $20.00`, `esc ×`). It sits high on the screen so the gate and
-    its reader stay in view. ↑/↓ choose, Enter buys, Esc closes; a tap picks or presses, a tap outside closes. While
-    it's open you don't move and keys go to it alone (a capture listener). Buying takes the price from an in-game
-    balance (starting at $20.00, per visit), shows `✓ beep`, closes, and the gate's reader takes your tap. Short of
-    money: `insufficient funds` and a `[ top up +$20 ]` button. No real payment fields of any kind. It doesn't
-    reopen until you stop pushing the gate. It's created and removed with the station.
-  - Test hooks: `__station.gates()` also gives each gate's `reader` text and `rotor` turns; `__station.setSeed(n)`
-    picks the swipe-again taps.
+    `unlimited ride $7.00`, `[ BUY + TAP ]`, `balance $20.00`, `esc ×`). It sits high on the screen so the gate stays
+    in view. ↑/↓ choose, Enter buys, Esc closes; a tap picks or presses, a tap outside closes. While it's open you
+    don't move and keys go to it alone (a capture listener). Buying takes the price from an in-game balance
+    (starting at $20.00, per visit), shows `✓ beep`, closes, and the gate's tap target turns green. What the readers
+    used to say is said here: `ride used · buy another` once you've used a single, and short of money
+    `insufficient funds` and a `[ top up +$20 ]` button. No real payment fields of any kind. It doesn't reopen until
+    you stop pushing the gate. It's created and removed with the station.
+  - Test hooks: `__station.gates()` also gives each gate's `kind`, `ring` state (`null` for the emergency gate),
+    `rotor` turns and emergency `swing`, and whether the `alarm` is sounding.
 - **Commuters** (4; `life.js` behaviour, `rig.js` + `figure.js` drawing): the same stick figure in muted
   colours (cool greys, a teal coat, a dusty red) with no lantern; one holds a phone (`rig.js`'s `phone` pose,
   a small lit screen and a faint light). They breathe, shift their weight (`shift`), turn to look down the

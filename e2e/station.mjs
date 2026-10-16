@@ -61,7 +61,7 @@ await withBrowser(async ({ page, url, errors }) => {
     const w = await page.evaluate(() => ({ ...window.__station.walker }));
     assert.ok(w.x < 12, `stopped at the gate: x ${w.x.toFixed(2)}`);
     assert.match(await page.evaluate(() => document.querySelector('.ticket').innerText), /FARE CARD[\s\S]*single ride[\s\S]*\$2\.90[\s\S]*unlimited ride[\s\S]*\$7\.00[\s\S]*BUY \+ TAP[\s\S]*balance \$20\.00/);
-    assert.equal((await gates()).reader[1], 'INSUFFICIENT FARE', 'the reader of the gate you walked into');
+    assert.equal((await gates()).ring[1], 'refused', 'the tap target of the gate you walked into goes red');
     await page.screenshot({ path: `${SHOTS}/station-ticket.png` });
   });
 
@@ -74,6 +74,45 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(await popup(), false);
   });
 
+  // The emergency gate: the southernmost lane, exit only and free.
+  await check('the emergency gate is locked from the hall, and walking into it opens no fare machine', async () => {
+    await page.evaluate(() => window.__station.teleport(10.5, 12.5));
+    await page.keyboard.down('KeyD');
+    try { await sleep(900); } finally { await page.keyboard.up('KeyD'); }
+    const w = await page.evaluate(() => ({ ...window.__station.walker }));
+    assert.ok(w.x < 12, `stopped at it: x ${w.x.toFixed(2)}`);
+    assert.equal(await popup(), false, 'no pop-up');
+    const g = await gates();
+    assert.equal(g.swing[3], 0, 'it did not move');
+    assert.equal(g.alarm, false);
+    await page.screenshot({ path: `${SHOTS}/station-emergency-shut.png` });
+  });
+
+  await check('from the platform the emergency gate swings open, lets you out without a ticket, and sounds the alarm', async () => {
+    await page.evaluate(() => window.__station.teleport(13.6, 12.5));
+    await sleep(200);
+    const before = await gates();
+    assert.equal(before.pass, null, 'no ticket');
+    await hold('KeyA', () => window.__station.walker.x < 12.3);
+    await nFrames(page, 2);
+    const mid = (await gates()).swing[3];
+    assert.ok(mid > 0.1, `it swings open as you push: ${mid.toFixed(2)}`);
+    await hold('KeyA', () => window.__station.walker.x < 10.3);
+    let g = await gates();
+    assert.equal(g.alarm, true, 'the alarm sounds');
+    assert.equal(await popup(), false);
+    assert.equal(g.wallet, before.wallet, 'free');
+    await page.waitForFunction(() => window.__station.gates().swing[3] < 0.6, { timeout: 3000 });
+    await page.screenshot({ path: `${SHOTS}/station-emergency-alarm.png` });
+    await page.waitForFunction(() => { const g = window.__station.gates(); return g.swing[3] === 0 && !g.alarm; }, { timeout: 5000 });
+    // The regular gates still want a ticket (and the next check carries on from this gate).
+    await page.evaluate(() => window.__station.teleport(10.5, 8.5));
+    await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
+    assert.ok((await page.evaluate(() => window.__station.walker.x)) < 12);
+    await page.keyboard.press('Escape');
+    await sleep(300);
+  });
+
   await check('a single ride lets you through once, turning the rotor a third; the next time from the hall it asks again', async () => {
     await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
     const x0 = await page.evaluate(() => window.__station.walker.x);
@@ -84,9 +123,8 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.equal(g.pass, 'single');
     assert.equal(g.wallet, 2000 - 290);
     assert.ok(Math.abs((await page.evaluate(() => window.__station.walker.x)) - x0) < 0.05, 'you stood still while it was open');
-    // The reader takes your tap: GO, though now and then it asks you to swipe again first.
-    assert.match(g.reader[1], /^(GO|SWIPE AGAIN AT THIS TURNSTILE)$/);
-    await page.waitForFunction(() => window.__station.gates().reader[1] === 'GO', { timeout: 3000 });
+    // The tap target turns green.
+    assert.equal(g.ring[1], 'go');
     // Mid-push: the rotor follows where you are, so stand there (a held key overshoots) and look.
     await hold('KeyD', () => window.__station.walker.x > 11.9);
     await page.evaluate(() => window.__station.teleport(12.2, 8.5));
@@ -105,7 +143,7 @@ await withBrowser(async ({ page, url, errors }) => {
     // ...and going in again asks again.
     await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
     assert.ok((await page.evaluate(() => window.__station.walker.x)) < 12);
-    assert.equal((await gates()).reader[1], 'JUST USED');
+    assert.match(await page.evaluate(() => document.querySelector('.ticket').innerText), /ride used/, 'the machine says your single is used up');
   });
 
   await check('an unlimited ride lets you through again and again', async () => {
@@ -124,10 +162,14 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.match(await page.evaluate(() => document.querySelector('.ticket-chip').innerText), /UNLIMITED/);
   });
 
-  await check('the turnstile line from the hall: steel cabinets, rotors and readers', async () => {
+  await check('the turnstile line from the hall: steel cabinets, rotors and tap targets, no screens', async () => {
     await page.evaluate(() => window.__station.teleport(10.6, 9.5)); // in line with a cabinet, so no gate is yours
     await sleep(700);
-    assert.deepEqual((await gates()).reader, ['TAP HERE', 'SWIPE CARD', 'TAP HERE', 'SWIPE CARD']);
+    const g = await gates();
+    assert.deepEqual(g.kind, ['turnstile', 'turnstile', 'turnstile', 'emergency']);
+    assert.deepEqual(g.ring, ['idle', 'idle', 'idle', null]);
+    assert.equal(g.reader, undefined, 'no readers');
+    assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /TAP HERE|SWIPE|INSUFFICIENT FARE|JUST USED/);
     await page.screenshot({ path: `${SHOTS}/station-turnstiles.png` });
   });
 

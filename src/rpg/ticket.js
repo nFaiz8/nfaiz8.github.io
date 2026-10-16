@@ -1,7 +1,8 @@
 // The fare card machine (station spec, "Life and props (round 2)"): a small ASCII pop-up over the station when you
 // walk into a shut turnstile, styled on a New York fare card vending machine (no real names or logos). In-game money
-// only: pick a single ride or an unlimited ride, BUY + TAP, and the gate's reader takes your tap. No real payment
-// fields of any kind. gates.js holds the balance and the ticket; this is only the DOM.
+// only: pick a single ride or an unlimited ride, BUY + TAP, and the gate's tap target turns green. No real payment
+// fields of any kind. The turnstiles have no screens, so what a reader would say is said here: that your single is
+// used up, or that you're short of money. gates.js holds the balance and the ticket; this is only the DOM.
 //
 // While it's open the walker stands still (index.js) and every key goes to it alone: ↑ ↓ (or W S) choose, Enter
 // buys, T tops up, Esc closes. A tap picks an option or presses a button; a tap outside the box closes it.
@@ -104,7 +105,8 @@ export function createTicketMachine(gates, { parent = document.body, onBought = 
 
   function show() {
     if (open) return;
-    open = true; done = false; status = ''; funds = false; downOnBackdrop = false;
+    open = true; done = false; funds = false; downOnBackdrop = false;
+    status = gates.used > 0 && !gates.pass ? 'ride used · buy another' : '';
     root.hidden = false;
     render();
     focusSel();
