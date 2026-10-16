@@ -35,25 +35,28 @@ await withBrowser(async ({ page, url, errors }) => {
   await check('you walk', async () => {
     const a = await page.evaluate(() => ({ ...window.__station.walker }));
     await page.keyboard.down('KeyD');
-    await sleep(600);
-    await page.keyboard.up('KeyD');
+    try { await sleep(600); } finally { await page.keyboard.up('KeyD'); }
     const b = await page.evaluate(() => ({ ...window.__station.walker }));
     assert.ok(b.x > a.x + 1, `moved east ${a.x.toFixed(2)} → ${b.x.toFixed(2)}`);
   });
 
   await check('resizing keeps the station filling the window', async () => {
-    await page.setViewport({ width: 800, height: 600, deviceScaleFactor: 1 });
+    const dims = () => page.evaluate(() => { const c = document.querySelector('canvas.station'); return { w: c.clientWidth, h: c.clientHeight, bw: c.width, bh: c.height }; });
+    try {
+      await page.setViewport({ width: 800, height: 600, deviceScaleFactor: 1 });
+      await sleep(300);
+      assert.deepEqual(await dims(), { w: 800, h: 600, bw: 800, bh: 600 });
+    } finally {
+      await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    }
     await sleep(300);
-    const size = await page.evaluate(() => { const c = document.querySelector('canvas.station'); return { w: c.clientWidth, h: c.clientHeight }; });
-    assert.deepEqual(size, { w: 800, h: 600 });
-    await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+    assert.deepEqual(await dims(), { w: 1440, h: 900, bw: 1440, bh: 900 });
   });
 
   await check('the exit brings you up in front of the stairs, and not straight back down', async () => {
     await page.evaluate(() => window.__station.teleport(2.5, 9.5));
     await page.keyboard.down('KeyA');
-    await page.waitForFunction(() => !window.__station, { timeout: 5000 });
-    await page.keyboard.up('KeyA');
+    try { await page.waitForFunction(() => !window.__station, { timeout: 5000 }); } finally { await page.keyboard.up('KeyA'); }
     await backInGallery(page);
     const { p, s } = await page.evaluate(() => ({ p: { ...window.__ascii.world.player }, s: window.__ascii.map.stairs }));
     assert.ok(Math.abs(p.x - s.front.x) < 1.5 && Math.abs(p.y - s.front.y) < 1.5, `in front: ${p.x},${p.y}`);
@@ -74,7 +77,9 @@ await withBrowser(async ({ page, url, errors }) => {
     await takeStairs(page);
     await page.waitForFunction(() => window.__ascii.station() !== 'off', { timeout: 15000 });
     await page.evaluate(() => history.pushState(null, '', '#/elsewhere'));
+    const before = await page.evaluate(() => window.__ascii.station());
     await page.evaluate(() => { location.hash = ''; });
+    console.log(`  (back during the walk down: state just before the hash change was '${before}')`);
     await backInGallery(page);
     await sleep(500);
     assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 0);
