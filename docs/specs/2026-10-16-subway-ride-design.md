@@ -31,9 +31,10 @@ west tunnel · Station 1 (MUSEUM) · tunnel · bridge · tunnel · Station 2 (CA
 - **World coordinates.** Station 1 keeps x = 0 at its west edge, so its map coordinates are line
   coordinates. Every other piece is placed east of it. Positions everywhere (the walker, commuters,
   multiplayer) are in line coordinates.
-- **Only the near pieces exist.** The scene builds the piece the camera is in and its neighbours, and
-  disposes of pieces two away. The skyline doesn't exist while you're in Station 1, and Station 1 doesn't
-  while you're on the bridge.
+- **Only the near pieces are drawn.** A piece is built the first time the camera comes near it and is hidden
+  while the camera is away from it, so nothing far off costs a frame. (Pieces are kept once built rather
+  than disposed, so coming back never hitches; the line has only seven.) The tunnels are drawn as a stretch
+  that follows the camera.
 
 ## 2. The schedule and how trains move
 
@@ -44,18 +45,20 @@ null) }`, with `head` its front's x. Everyone computes the same trains in the sa
 
 ### Locals (the ones you ride)
 
-- **One a minute at each station, alternating direction.**
+- **One a minute at MUSEUM, alternating direction.**
   - **Eastbound** locals run on the **north** track: out of the west tunnel, stop at MUSEUM, run to
     CANAL ST, stop, and go on into the east tunnel, where they end.
   - **Westbound** locals run on the **south** track, the mirror image: stop at CANAL ST, then MUSEUM, then
     off west.
-  - At either station a local arrives every 60 s, the direction alternating, so a ride to the other
-    station boards every 2 minutes.
-- **A stop is about 30 s:** brake in about 6 s, doors start opening 1 s after it stops and are open about
-  18 s, a 2 s chime and close, then about 6 s pulling out.
-- **The ride is about 60 s door to door:** speed up through the tunnel to about 20 tiles/s and cruise,
-  slow to about half speed for the bridge (about 20 s of skyline), speed up into the second tunnel, brake
-  into the other station.
+  - At MUSEUM a local arrives every 60 s, the direction alternating, so a ride to CANAL ST boards every
+    2 minutes.
+  - At CANAL ST they come 30 s and 90 s apart in turn. (With a ride of about a minute both stations can't
+    be evenly spaced; MUSEUM, where people wait, is.)
+- **A stop is 18 s standing, about 30 s with braking and pulling out:** brake in 6 s, doors open 1–2 s
+  after it stops and stay open until 15 s, a 2 s chime and close, it leaves at 18 s, then 6 s pulling out.
+- **The ride is 57 s from leaving one station to stopping at the next** (780 tiles): speed up through the
+  tunnel to 20 tiles/s and cruise, slow to 10 for the bridge (about 21 s of skyline), speed up into the
+  second tunnel, brake into the other station.
 - **Motion is a closed-form curve.** Position along the line comes from a speed profile made of constant
   speeds joined by smooth (eased) changes, so position and speed are continuous and any moment can be
   computed directly, with no stepping. The exact distances (the gap between the stations, the bridge's
@@ -74,11 +77,11 @@ null) }`, with `head` its front's x. Everyone computes the same trains in the sa
 
 - The board over the stairs shows real service, the next local each way:
   ```
-  TO CANAL ST        1 MIN
-  TO MUSEUM          2 MIN
+  TO CANAL ST     1 MIN
+  LAST STOP       2 MIN
   ```
-  It still switches to the `NOT IN SERVICE · STAND BACK` warning from `SERVICE` seconds before an express
-  until it has gone. Pure (`departures(t, line, station)`), so it only redraws when its text changes.
+  A local ending its trip here says `LAST STOP`; one standing says `NOW`. It switches to the
+  `EXPRESS TRAIN · STAND BACK` warning from `SERVICE` seconds before an express until it has gone. Pure (`departures(t, line, station)`), so it only redraws when its text changes.
 - The ticker's "THE NEXT TRAIN DOES NOT STOP AT THIS STATION" goes; it gets lines that fit
   (`STAND CLEAR OF THE CLOSING DOORS`, `EXPRESS TRAINS DO NOT STOP AT THIS STATION`, …).
 
@@ -99,9 +102,8 @@ dim).
   - an end door at each car end, so the whole train is walkable;
   - ad cards over the windows (Faiz's photos, from `photos/`);
   - a strip map over each door: the stations as dots, the next one lit.
-- **Doors** are modelled on both sides. Which side opens depends on the station: at MUSEUM's island
-  platform the north track opens its south doors and the south track its north doors; at CANAL ST's side
-  platforms each track opens the side its platform is on.
+- **Doors** are modelled on both sides. Which side opens depends on the platform: at both stations' island
+  platforms the north track opens its south doors and the south track its north doors.
 - **The roof** of the car you're in fades away, the way the station's south walls fade near you now, so
   the camera sees in. Other cars keep their roofs.
 - The old 4-box train and its textures in `scene.js` go.
@@ -147,9 +149,10 @@ dim).
 
 - At CANAL ST an eastbound local announces `LAST STOP` (the westbound does the same at MUSEUM). It then
   pulls into the end tunnel.
-- If you're still aboard, the screen fades in the tunnel, and you come back in the same car and spot
-  aboard the next local the other way as it pulls into that same station, as if it had turned round. You
-  stay on the shared schedule; there's no limbo.
+- If you're still aboard 8 s after it leaves, the screen fades, and you come back in the same spot aboard
+  the next local the other way into that same station, wherever it is on its way in (at CANAL ST it's
+  already braking in; at MUSEUM it's still about 30 s out in the west tunnel). You stay on the shared
+  schedule; there's no limbo.
 
 ## 5. The places along the line
 
@@ -186,10 +189,12 @@ The big moment: the Manhattan Bridge at golden hour.
 
 ### Station 2 (CANAL ST), the placeholder
 
-- **Side platforms** instead of an island: a platform north of the north track and one south of the south
-  track, with the tracks between them, and a passage under the tracks joining the two sides.
-- A different tile colour band, its own name sign, its own turnstiles, benches, departures board and a
-  little life (pigeons, a puddle).
+- **An island platform** between the two tracks, like MUSEUM's. (Side platforms were the first idea, but a
+  passage under the tracks needs a second floor level, which the map format doesn't have; with an island
+  you can catch the train back from the same platform.) Its look is its own: a different tile colour band,
+  pillars and benches on a different rhythm, and the closed stairs up in the middle of the platform.
+- Its own name sign, departures board and a little life (pigeons, a puddle). No turnstiles yet: they come
+  with the street above.
 - **The way up is closed:** taped off, with a `STREET EXIT CLOSED · OPENING SOON` sign. The real place up
   there is the next feature.
 
@@ -211,7 +216,7 @@ The big moment: the Manhattan Bridge at golden hour.
 - **One area for everything underground.** The `station` area covers the whole line: both stations and
   the trains. You see everyone below ground wherever they are; the lobby sign keeps counting them.
 - **Two kinds of position.** On the ground: `{ x, z, y, a }` in line coordinates, as now. Aboard:
-  `{ train, x, z, a, seat }` in the train's frame (`seat` true while seated). Everyone computes that
+  `{ tr, x, z, a, s }` (the local's number, its frame, the yaw, seated) in the train's frame (`seat` true while seated). Everyone computes that
   train's pose from the shared clock and draws the rider inside it. So the platform watches you pull out
   into the tunnel, and CANAL ST sees you arrive.
 - **The server** (`server/rules.js`) checks station positions against the old map's bounds. It gets the
