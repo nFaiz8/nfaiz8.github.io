@@ -110,7 +110,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     // A station is hidden while the camera is away from it.
     const maps = [map, parseStation(canalText)];
     stations[0] = world; groups[0] = museum;
-    const stationNear = (i, x) => x > STOPS[i].x - 140 && x < STOPS[i].x + STOPS[i].cols + 140;
+    // Near: within 60 of its ends (the fog closes at 34 underground); further off, its lights would still cost every pixel.
+    const stationNear = (i, x) => x > STOPS[i].x - 60 && x < STOPS[i].x + STOPS[i].cols + 60;
     const rider = createRider(0);
     // The turnstiles: shut from the hall without a ticket, the emergency gate shut from the hall always (gates.js);
     // the walker collides with the map as gated.
@@ -229,6 +230,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const where = () => (rider.frame.kind === 'train'
       ? { tr: rider.frame.k, x: walker.x, z: walker.z, a: pose.yaw, s: rider.seat ? 1 : 0 }
       : { x: feet.x, z: feet.z, y: feet.y, a: pose.yaw });
+    // The script's time each frame, the last 60 (the e2e reads it; headless can't time the GPU).
+    const cpu = new Float32Array(60);
     let last = performance.now(), t0 = last, leaving = false, frames = 0, pinned = false;
     const time = () => (performance.now() - t0) / 1000;
     // The train's clock: shared by everyone (Multiplayer), or this station's own once setTime pins it (tests).
@@ -237,6 +240,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     function frame(now) {
       raf = requestAnimationFrame(frame);
       if (document.hidden) { last = now; return; } // paused while hidden (spec §5)
+      const f0 = performance.now();
       const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
       const t = (now - t0) / 1000;
@@ -382,6 +386,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       }
       v.set(feet.x, feet.y + 0.8, feet.z).project(camera);
       post.setFocus((v.y + 1) / 2);
+      cpu[frames % 60] = performance.now() - f0; // the script, not the drawing (SwiftShader draws on the CPU too)
       post.render();
       frames++;
     }
@@ -397,6 +402,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       tunnelShown: () => tunnel.shown(),
       env: () => ({ bridge: sunK }),
       ridersShown: () => ridersShown,
+      perf: () => ({ cpu: cpu.reduce((a, b) => a + b, 0) / 60, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles, lights: (() => { let n = 0; scene.traverseVisible((o) => { if (o.isPointLight) n++; }); return n; })() }),
       clock,
       setTime(s) { t0 = performance.now() - s * 1000; pinned = true; },
       others: () => (others ? others.shown() : []),

@@ -2,7 +2,6 @@
 // a resize, a portrait phone, many trips, and staying in the gallery when the station can't load.
 // Usage: node e2e/station.mjs
 import { withBrowser, ready, sleep, SHOTS } from './lib.mjs';
-import { startOf } from '../src/rpg/train.js';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 
@@ -297,6 +296,15 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.screenshot({ path: 'e2e/shots/station-bridge.png' });
   });
 
+  await check('frame time: the script stays well inside a 60 fps frame on the platform, in the tunnel and on the bridge', async () => {
+    const at = async (setup) => { await page.evaluate(setup); await nFrames(page, 70); const p = await page.evaluate(() => window.__station.perf()); console.log('  ', JSON.stringify(p)); return p.cpu; };
+    const platform = await at(() => { window.__station.setTime(20 + 5); window.__station.teleport(60, 6.5); });
+    const tunnel = await at(() => { window.__station.setTime(20 + 18 + 8); window.__station.board(0, 30, 0); });
+    const bridge = await at(() => { window.__station.setTime(20 + 18 + 28); window.__station.board(0, 30, 0); });
+    console.log(`  cpu ms/frame: platform ${platform.toFixed(2)}, tunnel ${tunnel.toFixed(2)}, bridge ${bridge.toFixed(2)}`);
+    for (const ms of [platform, tunnel, bridge]) assert.ok(ms < 6, `${ms} ms of script a frame`);
+  });
+
   await check('staying on past the last stop brings you back on the next train the other way', async () => {
     // L1 (westbound) ends at MUSEUM at 80 and leaves at 98; still aboard at 106, you're on L2 (eastbound), ~30 s out.
     await page.evaluate(() => { window.__station.setTime(80 + 18 + 7); window.__station.board(1, 30, 0); });
@@ -309,17 +317,15 @@ await withBrowser(async ({ page, url, errors }) => {
   });
 
 
-  await check('a train comes out of the tunnel and passes', async () => {
-    await page.evaluate((s) => { window.__station.teleport(30.5, 9.5); window.__station.setTime(s); }, startOf(0) - 2);
-    await page.waitForFunction(() => window.__station.train()?.phase === 'warn', { timeout: 10000 });
-    // 1.3 s out of its tunnel the train's nose is mid-platform (x ≈ 30.5); set and read in one go, so a slow
-    // frame can't skip past it.
-    const t = await page.evaluate((s) => { window.__station.setTime(s); const t = window.__station.train(); return t && { phase: t.phase, head: t.head }; }, startOf(0) + 1.3);
-    assert.equal(t?.phase, 'pass');
-    assert.ok(Math.abs(t.head - 30) < 6, `head at ${t.head}`);
-    await nFrames(page, 2);
-    await page.screenshot({ path: `${SHOTS}/station-train.png` });
-    await page.waitForFunction(() => !window.__station.train(), { timeout: 10000 });
+  await check('an express comes out of the tunnel and passes MUSEUM', async () => {
+    const T = await page.evaluate(() => {
+      for (let s = 0; s < 120; s += 0.25) { window.__station.setTime(s); if (window.__station.trains().some((x) => x.kind === 'express' && Math.min(x.head, x.tail) < 60 && Math.max(x.head, x.tail) > 60)) return s; }
+      return null;
+    });
+    assert.notEqual(T, null);
+    await page.evaluate(() => window.__station.teleport(60, 6.5));
+    await nFrames(page, 10);
+    await page.screenshot({ path: 'e2e/shots/station-express.png' });
   });
 
   await check('resizing keeps the station filling the window', async () => {

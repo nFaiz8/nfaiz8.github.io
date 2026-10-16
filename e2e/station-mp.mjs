@@ -97,6 +97,19 @@ try {
       assert.equal(ta, tb, 'the same run');
     });
 
+    await check('someone riding away is seen inside the departing train from the platform', async () => {
+      // Wait for a local standing at MUSEUM (one every minute on the shared clock).
+      await a.waitForFunction(() => window.__station.trains().some((l) => l.kind === 'local' && l.at === 0 && l.doors === 1), { timeout: 70000, polling: 250 });
+      const k = await a.evaluate(() => window.__station.trains().find((l) => l.kind === 'local' && l.at === 0).k);
+      await a.evaluate((k) => window.__station.board(k, 30, 0), k);
+      await b.evaluate(() => window.__station.teleport(60, 6.5));
+      await b.waitForFunction((k) => {
+        const tr = window.__station.trains().find((l) => l.k === k), me = window.__station.others()[0];
+        return tr && me && me.x > Math.min(tr.head, tr.tail) && me.x < Math.max(tr.head, tr.tail);
+      }, { timeout: 15000, polling: 100 }, k);
+      await a.evaluate(() => window.__station.teleport(30.5, 9.5));
+    });
+
     await check('one goes up: the other sees them leave, the gallery sees them arrive, and the count goes down', async () => {
       await b.evaluate(() => history.back());
       await b.waitForFunction(() => !window.__station && window.__ascii.station() === 'off', { timeout: 15000 });
