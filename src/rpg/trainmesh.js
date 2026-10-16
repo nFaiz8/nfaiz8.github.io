@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TRAIN, LENGTH } from './schedule.js';
 import { CAR, PITCH, POLES, trainOrigin } from './car.js';
-import { trussShade, sunAt, lampAt, STOPS, pieceAt } from './line.js';
+import { trussShade, sunAt, STOPS } from './line.js';
 import { LEVEL } from './map.js';
 
 const F = LEVEL.platform; // the car's floor, level with the platforms
@@ -77,6 +77,14 @@ function chromeGeo() {
   return mergeGeometries(p);
 }
 
+// A patch of light: bright in the middle, fading to nothing at its edges.
+function softTexture() {
+  return canvasTexture(64, 64, (g, w, h) => {
+    const r = g.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2);
+    r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.6, 'rgba(255,255,255,0.45)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = r; g.fillRect(0, 0, w, h);
+  });
+}
 function canvasTexture(w, h, draw) {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -165,7 +173,8 @@ export function createTrains(scene, { reducedMotion = false } = {}) {
     chrome: own(new THREE.MeshStandardMaterial({ color: '#d8dde6', metalness: 0.9, roughness: 0.2 })),
     bogie: own(new THREE.MeshStandardMaterial({ color: '#1b1c1f', roughness: 0.8 })),
     leaf: own(new THREE.MeshStandardMaterial({ map: steelTex, metalness: 0.5, roughness: 0.4, color: '#c8ccd4' })),
-    shaft: own(new THREE.MeshBasicMaterial({ color: '#ffcf8a', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })),
+    // Sunlight on the floor: soft-edged (a hard rectangle reads as a white block), and faint.
+    shaft: own(new THREE.MeshBasicMaterial({ color: '#ffcf8a', map: own(softTexture()), transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false })),
   };
 
   function build() {
@@ -228,7 +237,7 @@ export function createTrains(scene, { reducedMotion = false } = {}) {
   }
 
   const pool = [];
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
   const FLAT = new THREE.Quaternion();
   const shown = [];
 
@@ -289,12 +298,14 @@ export function createTrains(scene, { reducedMotion = false } = {}) {
     let p = 0;
     for (let c = 0; c < TRAIN.cars; c++) for (const [a, b] of WINDOWS) {
       const wx = o.x + c * PITCH + (a + b) / 2;
-      const k = Math.min(1, (ctx.sun ?? 1) * sunAt(wx) * trussShade(wx) + (pieceAt(wx).kind === 'tunnel' ? 0.5 * lampAt(wx) : 0));
+      const k = Math.min(1, (ctx.sun ?? 1) * sunAt(wx) * trussShade(wx)); // (no lamp bands in the tunnels: Faiz saw white blocks)
       v.set(c * PITCH + (a + b) / 2 + 0.35, F + 0.01, 0.25);
-      m4.compose(v, FLAT, sc.set(k > 0.01 ? (b - a) * 0.95 : 0, 1, k > 0.01 ? 1.9 * k + 0.2 : 0));
+      m4.compose(v, FLAT, sc.set(k > 0.01 ? (b - a) * 1.1 : 0, 1, k > 0.01 ? 2.1 : 0));
+      model.patches.setColorAt(p, col.setScalar(k));
       model.patches.setMatrixAt(p++, m4);
     }
     model.patches.instanceMatrix.needsUpdate = true;
+    if (model.patches.instanceColor) model.patches.instanceColor.needsUpdate = true;
     shown.push({ id: tr.id, x: o.x, z: o.z, roof: model.cars.map((c) => +c.fade.toFixed(2)) });
   }
 

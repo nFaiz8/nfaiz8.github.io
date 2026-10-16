@@ -147,15 +147,14 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const crowd = people.map((p) => p.c);
 
     // You: the arena's stick figure, posed each frame (rig.js) and drawn as glyphs (figure.js).
-    figure = createFigure(scene, { glow: true });
+    figure = createFigure(scene, { glow: true, lantern: false }); // no lantern (Faiz: too bright)
     const joints = {}, pose = { yaw: 0, phase: 0, gait: 0, t: 0, reducedMotion };
     const feet = { x: 0, y: 0, z: 0 }; // reused each frame
     let targetYaw = 0, walked = walker.walked;
-    const lantern = new THREE.PointLight('#ffb35c', 9, 6.5, 1.8);
     blobGeo = new THREE.CircleGeometry(0.32, 24).rotateX(-Math.PI / 2);
     blobMat = new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.45, depthWrite: false });
     const blob = new THREE.Mesh(blobGeo, blobMat);
-    scene.add(lantern, blob);
+    scene.add(blob);
 
     post = createPost(renderer, scene, camera);
     const cam = createCamera(walker);
@@ -305,14 +304,12 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       feet.x = wx; feet.z = wz;
       feet.y = f.kind === 'station' ? footY(maps[f.stop], walker) : LEVEL.platform;
       blob.position.set(feet.x, feet.y + 0.02, feet.z);
-      lantern.position.set(feet.x + joints.lantern.x, feet.y + joints.lantern.y, feet.z + joints.lantern.z);
-      lantern.intensity = 9 * (reducedMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 13) * Math.sin(t * 5.1));
 
       // The stations, by where the camera is: each is built the first time it comes near, and hidden while it's away.
       const camX = o.x + cam.x;
       sunK = bridge.update(camX, o.z + eyeFor(cam).z, t);
       // Underground nothing is further than 80; out on the bridge the city is hundreds of tiles off.
-      const far = sunK > 0 ? 2400 : 80;
+      const far = sunK > 0 ? 4000 : 80;
       if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
       let museumPass = null;
       for (let i = 0; i < 2; i++) {
@@ -411,8 +408,9 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       setTime(s, { hold = false } = {}) { t0 = performance.now() - s * 1000; pinned = true; held = hold ? s : null; },
       others: () => (others ? others.shown() : []),
       mine: () => (others ? others.mine() : null),
-      teleport(x, z, stop = 0) { rider.frame = { kind: 'station', stop }; rider.seat = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; walker.y = maps[stop].levelAt(x, z) ?? walker.y; },
-      board(k, x, z) { rider.frame = { kind: 'train', k }; rider.seat = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; }, // (the camera jumps with you)
+      teleport(x, z, stop = 0) { rider.frame = { kind: 'station', stop }; rider.seat = null; rider.t = rider.prevT = null; // (no clock history: a test's jump isn't the midnight wrap)
+        walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; walker.y = maps[stop].levelAt(x, z) ?? walker.y; },
+      board(k, x, z) { rider.frame = { kind: 'train', k }; rider.seat = null; rider.t = rider.prevT = null; walker.x = cam.x = x; walker.z = cam.z = z; walker.vx = walker.vz = 0; }, // (the camera jumps with you)
       frame: () => ({ ...rider.frame }),
       aboard: () => (rider.frame.kind === 'train' ? { k: rider.frame.k, x: walker.x, z: walker.z, seat: rider.seat?.i ?? null } : null),
       world: () => ({ x: feet.x, y: feet.y, z: feet.z }),
