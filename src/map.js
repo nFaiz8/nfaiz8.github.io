@@ -1,6 +1,7 @@
 // The map: a small floor plan of the whole gallery with every room as a button. Pick one and you
 // walk there. Opens with M or the HUD button; Esc, M or a click outside closes it.
 import { T } from './layout.js';
+import { creditHTML } from './track-choice.js';
 import { roomTint, C } from './render/palette.js';
 
 export function createMap(map, { onGo, onOpen, onClose }) {
@@ -38,7 +39,7 @@ export function createMap(map, { onGo, onOpen, onClose }) {
   // The museum music's credit (CC BY 4.0 asks for it where it can be seen; station spec §8).
   const credit = document.createElement('p');
   credit.className = 'map-credit';
-  credit.innerHTML = 'music: “Lobby Time” Kevin MacLeod (<a href="https://incompetech.com" target="_blank" rel="noopener">incompetech.com</a>), licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>';
+  credit.innerHTML = creditHTML(); // whichever track ?track= chose
   panel.append(head, plan, list, credit);
   root.append(panel);
   document.body.append(root);

@@ -25,6 +25,7 @@ import { createLighting } from './light.js';
 import { createViewer } from './viewer.js';
 import { parseRoute, photoHash, roomHash, replaceHash, ALL_HASH, STATION_HASH } from './router.js';
 import { createMap } from './map.js';
+import { creditText } from './track-choice.js';
 import { createShots } from './shots.js';
 import { createGrid } from './grid.js';
 import { createAdmin } from './admin.js';
@@ -681,7 +682,7 @@ async function goUp({ fromHistory = false } = {}) {
   // Back to a route (a photo, a room): the hashchange that brought you up is applied now you're here.
   if (fromHistory && location.hash && location.hash !== STATION_HASH) applyRoute(parseRoute(location.hash));
 }
-// Sound (station spec §8): lobby jazz in the museum, from the visitor's first key press or tap. Only then does
+// Sound (station spec §8): noir jazz in the museum, from the visitor's first key press or tap. Only then does
 // music.js load (and the track after it), so the gallery's first load carries none of it; it makes the AudioContext,
 // and each later gesture resumes it if the browser held it back. The station moves the same music (no second copy).
 let music = null, musicLoading = false;
@@ -701,6 +702,7 @@ function whenStill(fn, waited = 0) {
 addEventListener('keydown', unlockAudio, true);
 addEventListener('pointerdown', unlockAudio, true);
 const soundBtn = document.getElementById('sound-btn');
+if (soundBtn) soundBtn.title = `Sound (V) · ${creditText()}`; // the track ?track= chose (index.html names the default)
 function showSound(m) {
   if (!soundBtn) return;
   soundBtn.firstChild.textContent = m ? '[×]' : '[♪]';

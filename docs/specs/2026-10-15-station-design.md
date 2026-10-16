@@ -401,11 +401,16 @@ Added on 2026-10-16 ("start on sound"; then "smooth jazz in the museum and u can
   localStorage (`faiz.sound`, `on`/`off`, every access wrapped; `sound-pref.js`) and shared with the museum's music.
 - **Reduced motion:** everything plays, but the alarm sounds once briefly instead of for its 3 s, and the train is
   softer.
-- **The museum's music** (`src/music.js`): quiet lobby jazz in the gallery (Kevin MacLeod's "Lobby Time": vibraphone,
-  piano, bass and drums; CC BY 4.0, credited under the map and in the sound button's tooltip; it replaced a 46 s CC0
-  smooth-jazz loop on 2026-10-16, "this jazz sucks"), its intro once and then 64 bars looped, from the visitor's
+- **The museum's music** (`src/music.js`): noir jazz in the gallery, one of three CC BY 4.0 tracks picked with
+  `?track=` (`src/track-choice.js`): 1, the default, Shane Ivers' "Signs To Nowhere" (muted trumpet, sax, vibraphone,
+  bass and shuffling drums, 90 bpm); 2, Kevin MacLeod's "Spy Glass" (saxes, trumpet, flute, vibraphone, piano, bass,
+  drums, 110 bpm); 3, his "Covert Affair" (trumpet, electric piano, acoustic bass, drums, slow). Only the chosen file is
+  fetched, and the credit under the map and in the sound button's tooltip names it. They replaced Kevin MacLeod's
+  "Lobby Time" on 2026-10-16 ("art deco 90s noir jazz but make sure its no bs"), which had replaced a 46 s CC0
+  smooth-jazz loop the same day ("this jazz sucks"). Each plays its start once and then loops a stretch that comes
+  round to the same place, from the visitor's
   first key press or tap. That gesture is when `music.js` is imported and the track loads, so the gallery's first
-  load carries only `sound-pref.js` and a few lines in `main.js`. A `[♪] sound` HUD button and `V` (M is the map) mute it, the same
+  load carries only `sound-pref.js`, `track-choice.js` (for the credit) and a few lines in `main.js`. A `[♪] sound` HUD button and `V` (M is the map) mute it, the same
   remembered setting. Paused while the tab is hidden. There's one context and one looping source for the visit: going
   down, the station doesn't start its own copy, it places this one (`stairsMusic`): heard drifting down the exit
   stairs, muffled (low-passed), loud at their foot and gone 7 tiles into the hall; coming back up it eases back to full,

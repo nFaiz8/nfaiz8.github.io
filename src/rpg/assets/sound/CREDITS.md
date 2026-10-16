@@ -23,17 +23,27 @@ machine's bleeps and chime, the emergency alarm and the PA chime and voice) is s
 
 ## CC BY 4.0 (attribution)
 
-| File | Source | Author | Licence |
-| --- | --- | --- | --- |
-| `../music/lobby-time.mp3` | "Lobby Time" (ISRC USUAN1600054), https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1600054 | Kevin MacLeod (incompetech.com) | CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ |
+The museum's music: three noir jazz tracks, one played per visit, chosen with `?track=1` (the default), `2` or `3`
+(`src/track-choice.js`). Only the chosen file is fetched, and the credit under the map (M) and in the sound button's
+tooltip names the one playing.
 
-What was done: the first second of silence cut; the intro kept, then the loop is the 64 bars (120 s, two choruses at
-128 bpm) from the downbeat at 27.12 s, its last 0.3 s crossfaded into the 0.3 s before that downbeat; the ending cut;
-0.15 dB quieter with a peak limiter at -1.5 dB, so it's -17.4 LUFS like the loop it replaced; 96 kbps stereo mp3. The
-licence asks for the credit where it can be seen, so the site shows it under the map (M) and in the sound button's
-tooltip: "Lobby Time" Kevin MacLeod (incompetech.com), Licensed under Creative Commons: By Attribution 4.0 License,
-http://creativecommons.org/licenses/by/4.0/ (incompetech's own credit text, from its FAQ:
-https://incompetech.com/music/royalty-free/faq.html).
+| `?track=` | File | Source | Author | Licence |
+| --- | --- | --- | --- | --- |
+| 1 | `../music/signs-to-nowhere.mp3` | "Signs To Nowhere" (2020, ISRC UKEZT2000010), https://www.silvermansound.com/free-music/signs-to-nowhere | Shane Ivers (silvermansound.com) | CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ |
+| 2 | `../music/spy-glass.mp3` | "Spy Glass" (ISRC USUAN1500058), https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500058 | Kevin MacLeod (incompetech.com) | CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ |
+| 3 | `../music/covert-affair.mp3` | "Covert Affair" (ISRC USUAN1100795), https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1100795 | Kevin MacLeod (incompetech.com) | CC BY 4.0, https://creativecommons.org/licenses/by/4.0/ |
+
+Licences, as checked on 2026-10-16: Silverman Sound's track page offers a free licence under CC BY 4.0 with the credit
+"Music: Signs To Nowhere by Shane Ivers - https://www.silvermansound.com" (also on the Free Music Archive,
+https://freemusicarchive.org/music/shane-ivers/single/signs-to-nowhere/, "Attribution 4.0 International", marked not
+AI-generated); incompetech licenses everything under CC BY 4.0 with the credit text in its FAQ,
+https://incompetech.com/music/royalty-free/faq.html.
+
+What was done to each: the start kept as it is and played once; then a loop to a point where the music comes round to
+the same place (Signs To Nowhere: 48 bars at 90 bpm, 23.32 s to 151.32 s; Spy Glass: 84 bars at 110 bpm, 19.60 s to
+202.88 s, where the head comes back; Covert Affair, played freely around 68 bpm: 5.50 s to 178.44 s), its last 0.3 s
+crossfaded into the 0.3 s before the loop's start, then 0.3 s of what follows the start as a tail, and the ending
+cut; brought to -17.4 LUFS integrated with a limiter at -2.2 dB (true peak at most -2.7 dBTP); 96 kbps stereo mp3.
 
 ## Adobe Audition sound effects
 
