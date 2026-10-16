@@ -7,6 +7,8 @@
 import { STOPS } from './line.js';
 import { local, localsAt, arrivalAtStop, turnaroundDue, turnaround, LOCAL, DOORS, PERIOD } from './schedule.js';
 import { inTrain, trainOrigin, pushIn, seatNear, standFrom } from './car.js';
+import { RADIUS } from './move.js';
+import { ridersFor } from './life.js';
 
 export const FADE = { out: 0.5, in: 0.5 }; // the turnaround's fade, seconds each way
 
@@ -37,21 +39,27 @@ const WRAP = PERIOD / LOCAL.every;
 function unwrap(rider, t) {
   const jump = rider.t == null ? 0 : t - rider.t, shift = jump < -PERIOD / 2 ? -WRAP : jump > PERIOD / 2 ? WRAP : 0;
   rider.t = t;
-  if (!shift) return;
+  if (!shift) return false;
   if (rider.frame.kind === 'train') rider.frame = { kind: 'train', k: rider.frame.k + shift };
   if (rider.seat) rider.seat = { ...rider.seat, k: rider.seat.k + shift };
+  return true;
 }
 
 export function stepRider(rider, w, t) {
-  unwrap(rider, t);
+  // The previous step's time: a door time between it and now happened, even if no frame landed near it (a hidden tab,
+  // a slow frame).
+  const prev = unwrap(rider, t) ? null : rider.prevT ?? null;
+  rider.prevT = t;
   const f = rider.frame;
   if (f.kind === 'station') {
     for (const tr of localsAt(t)) {
-      if (!closing(sinceStop(tr.k, f.stop, t))) continue;
-      const p = inTrain(local(tr.k, arrivalAtStop(tr.k, f.stop)), STOPS[f.stop].x, w.x, w.z); // where it stood
+      const shut = arrivalAtStop(tr.k, f.stop) + DOORS.close[0];
+      if (!closing(sinceStop(tr.k, f.stop, t)) && !(prev != null && prev < shut && t >= shut)) continue;
+      // Where it stood; your circle over its doorway counts (you'd be shut in the door otherwise).
+      const p = inTrain(local(tr.k, arrivalAtStop(tr.k, f.stop)), STOPS[f.stop].x, w.x, w.z, RADIUS);
       if (!p) continue;
-      reframe(rider, w, { kind: 'train', k: tr.k }, t);
-      const q = pushIn({ x: w.x, z: w.z });
+      rider.frame = { kind: 'train', k: tr.k };
+      const q = pushIn(p);
       w.x = q.x; w.z = q.z;
       return 'board';
     }
@@ -59,7 +67,14 @@ export function stepRider(rider, w, t) {
   }
   const k = f.k;
   if (turnaroundDue(k, t)) {
-    rider.frame = { kind: 'train', k: turnaround(k, t) }; // the same spot in the train coming back
+    const j = turnaround(k, t);
+    rider.frame = { kind: 'train', k: j }; // the same spot in the train coming back
+    // Seated, the same seat in it, unless one of its riders has it: then you're standing in front of it.
+    if (rider.seat && ridersFor(j).some((x) => x.seat === rider.seat.i)) {
+      const p = standFrom(rider.seat);
+      w.x = p.x; w.z = p.z;
+      rider.seat = null;
+    } else if (rider.seat) rider.seat = { ...rider.seat, k: j };
     rider.fade = FADE.out + FADE.in;
     return 'turn';
   }

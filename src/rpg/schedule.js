@@ -131,6 +131,12 @@ export function expressesAt(t) {
   return out;
 }
 export const trainsAt = (t) => [...localsAt(t), ...expressesAt(t)];
+// Everything on the line, and your own local k (null: none) even when it's off the line's ends: turned round after a
+// long hidden tab, you can be aboard one still far out in an end tunnel, and it must be drawn.
+export function trainsWith(t, k) {
+  const all = trainsAt(t);
+  return k == null || all.some((tr) => tr.k === k) ? all : [...all, local(k, t)];
+}
 
 // The departures board (§2): the next two locals at stop by arrival, counting down; one standing says NOW, one ending
 // its trip here LAST STOP. From SERVICE seconds before an express reaches the station until it's gone, the express

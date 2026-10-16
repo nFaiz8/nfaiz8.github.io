@@ -4,9 +4,9 @@
 import * as THREE from 'three';
 import stationText from './station.txt?raw';
 import { parseStation } from './map.js';
-import { createWalker, stepWalker, SPEED } from './move.js';
+import { createWalker, stepWalker, unstick, SPEED } from './move.js';
 import { sharedTime } from './train.js';
-import { trainsAt, passFor } from './schedule.js';
+import { trainsAt, trainsWith, passFor } from './schedule.js';
 import { createCamera, followCamera, eyeFor, fovFor, CAM } from './camera.js';
 import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
@@ -244,7 +244,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
       const t = (now - t0) / 1000;
-      const tt = clock(), trains = trainsAt(tt);
+      const tt = clock();
       // Frames (rider.js): board as a standing local's doors close round you, alight as yours open, turn round past the
       // last stop. The camera's spring is kept in your frame, so it moves with you.
       const was = frameOrigin(rider.frame, tt);
@@ -257,6 +257,9 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       if (rider.fade > 0) { rider.fade = Math.max(0, rider.fade - dt); fader.style.opacity = String(Math.min(1, rider.fade / FADE.in)); }
       const f = rider.frame, m = frameMap(tt);
       const mine = f.kind === 'train' ? local(f.k, tt) : null;
+      // Everything on the line, and your own train even out past its ends (turned round after a long hidden tab).
+      const trains = trainsWith(tt, mine ? mine.k : null);
+      unstick(walker, m); // never start a frame inside something solid
       if (ticket.isOpen) finger = null;
       let input = ticket.isOpen ? STILL : finger ? fingerInput() : keys();
       if (rider.seat && (input.x || input.y)) stand(rider, walker, tt);

@@ -96,3 +96,16 @@ test('a finer map: grain 0.25 cells collide at their own size', () => {
   assert.equal(blocked(map, 0.7, 0.1), false);
   assert.equal(blocked(map, 1.1, 0.6), false, 'well clear below it');
 });
+
+test('unstick: a walker caught inside something solid is moved to the nearest free spot', async () => {
+  const { unstick } = await import('../src/rpg/move.js');
+  const map = { grain: 1, solidAt: (x, z) => z < 4, levelAt: () => 0 };
+  const w = { x: 5, z: 3.9 };
+  assert.equal(blocked(map, w.x, w.z), true);
+  unstick(w, map);
+  assert.equal(blocked(map, w.x, w.z), false);
+  assert.ok(w.z >= 4.25 && w.z < 4.6, `nearby: ${w.z}`);
+  const free = { x: 5, z: 6 };
+  unstick(free, map);
+  assert.deepEqual(free, { x: 5, z: 6 });
+});

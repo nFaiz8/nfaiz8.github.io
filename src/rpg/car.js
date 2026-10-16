@@ -94,10 +94,11 @@ export const trainOrigin = (tr) => ({ x: Math.min(tr.head, tr.tail), z: tr.track
 // doors and the south track its north ones.
 export const platformSide = (track) => (track.i === 0 ? 1 : -1);
 
-// Is (x, z), in the station-map coordinates of a stop at stopX on the line, inside the train tr? Then where in its frame.
-export function inTrain(tr, stopX, x, z) {
+// Is (x, z), in the station-map coordinates of a stop at stopX on the line, inside the train tr (or within pad of its
+// sides)? Then where in its frame.
+export function inTrain(tr, stopX, x, z, pad = 0) {
   const o = trainOrigin(tr), lx = x + stopX - o.x, lz = z - o.z;
-  return lx > 0 && lx < LENGTH && Math.abs(lz) < CAR.half ? { x: lx, z: lz } : null;
+  return lx > 0 && lx < LENGTH && Math.abs(lz) < CAR.half + pad ? { x: lx, z: lz } : null;
 }
 
 // A station's map with the trains standing at it (§4): inside a standing local's band, the train's floor plan, its

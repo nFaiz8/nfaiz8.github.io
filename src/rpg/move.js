@@ -43,6 +43,19 @@ export function blocked(map, x, z, r = RADIUS) {
   return false;
 }
 
+// A walker caught inside something solid (a door shut on it, a frame change gone wrong) goes to the nearest free spot,
+// searched outward in rings: nobody is ever stuck in a wall.
+export function unstick(w, map, r = RADIUS) {
+  if (!blocked(map, w.x, w.z, r)) return w;
+  for (let d = 0.05; d <= 3; d += 0.05) {
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * 2 * Math.PI, x = w.x + d * Math.cos(a), z = w.z + d * Math.sin(a);
+      if (!blocked(map, x, z, r)) { w.x = x; w.z = z; w.vx = w.vz = 0; return w; }
+    }
+  }
+  return w;
+}
+
 // Move along one axis. Against a wall that axis stops, and you slide along it on the other. A corner clipped
 // by less than NUDGE eases you sideways round it instead (as the museum does).
 function slide(w, d, axis, map) {

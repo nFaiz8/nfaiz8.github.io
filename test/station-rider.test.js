@@ -94,3 +94,45 @@ test('a slow frame as the doors open (building the next station, say) still lets
   assert.equal(stepRider(r, me, arrivalAtStop(0, 1) + DOORS.open[0] + 3), 'alight');
   assert.deepEqual(r.frame, { kind: 'station', stop: 1 });
 });
+
+test('a hidden tab while you stand in a train at the platform: you come back aboard it, not on the track', () => {
+  const t0 = arrivalAt(0) + 10, tr = local(0, t0), o = trainOrigin(tr);
+  const r = createRider(0), me = w(o.x + 20, o.z); // inside car 1, in MUSEUM's frame
+  assert.equal(stepRider(r, me, t0), null);
+  const t1 = arrivalAt(0) + 40; // the doors closed at +15 while hidden; it's riding now
+  assert.equal(stepRider(r, me, t1), 'board');
+  assert.deepEqual(r.frame, { kind: 'train', k: 0 });
+  assert.ok(Math.abs(me.x - 20) < 1e-9 && Math.abs(me.z) < 1e-9, 'where you stood in it');
+});
+
+test('half in a doorway (your circle over the door, your centre on the platform) as it closes: pushed in', () => {
+  const t0 = arrivalAt(0) + 14, tr = local(0, t0), o = trainOrigin(tr);
+  const r = createRider(0), me = w(o.x + 7.5, o.z + 1.6);
+  stepRider(r, me, t0);
+  assert.equal(stepRider(r, me, arrivalAt(0) + DOORS.close[0] + 0.1), 'board');
+  assert.ok(Math.abs(me.z) < CAR.wall, `inside: ${me.z}`);
+  const r2 = createRider(0), clear = w(o.x + 7.5, o.z + 1.9); // clear of the door
+  stepRider(r2, clear, t0);
+  assert.equal(stepRider(r2, clear, arrivalAt(0) + DOORS.close[0] + 0.1), null);
+});
+
+test('seated through the turnaround: still seated on the new train, and standing up lands you in it', () => {
+  const s0 = SEATS[40], t0 = arrivalAtStop(0, 1) + LOCAL.dwell + 2;
+  const r = { frame: { kind: 'train', k: 0 }, seat: null, fade: 0 }, me = w(s0.x, s0.z - 0.4 * s0.side);
+  sit(r, me, new Set(), t0);
+  const t1 = arrivalAtStop(0, 1) + LOCAL.dwell + 9;
+  assert.equal(stepRider(r, me, t1), 'turn');
+  if (r.seat) assert.equal(r.seat.k, r.frame.k, 'the seat moved to the new train');
+  stand(r, me, t1);
+  assert.ok(me.x > 0 && me.x < 78 && Math.abs(me.z) < CAR.wall, `standing in the car: ${me.x}, ${me.z}`);
+});
+
+test('turned round onto a train whose commuter has your seat: you stand instead', async () => {
+  const { ridersFor } = await import('../src/rpg/life.js');
+  const t1 = arrivalAtStop(0, 1) + LOCAL.dwell + 9, j = turnaround(0, t1);
+  const theirs = ridersFor(j).find((x) => x.seat != null).seat, s0 = SEATS[theirs];
+  const r = { frame: { kind: 'train', k: 0 }, seat: { ...s0, k: 0 }, fade: 0, t: t1 - 0.1 }, me = w(s0.x, s0.z);
+  stepRider(r, me, t1);
+  assert.equal(r.seat, null);
+  assert.ok(Math.abs(me.z) < CAR.bench, 'stood up in front of it');
+});

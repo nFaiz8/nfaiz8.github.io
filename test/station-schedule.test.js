@@ -144,3 +144,11 @@ test('passFor: the station\'s view of the nearest train, in its own coordinates 
   for (let s = 0; s < 120; s += 0.1) { const q = passFor(trainsAt(s), 0, map); if (q && q.phase === 'warn') { warned = true; assert.ok(q.warn > 0 && q.warn <= 1); } }
   assert.ok(warned);
 });
+
+test('trainsWith: your own train is always in the list, even off the line (turned round far out)', async () => {
+  const { trainsWith } = await import('../src/rpg/schedule.js');
+  const t = arrivalAtStop(0, 1) + 70, j = turnaround(0, t);
+  assert.ok(!trainsAt(t).some((x) => x.id === `L${j}`), 'off the line');
+  assert.ok(trainsWith(t, j).some((x) => x.id === `L${j}`));
+  assert.equal(trainsWith(t, null).length, trainsAt(t).length);
+});
