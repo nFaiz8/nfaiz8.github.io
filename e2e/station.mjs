@@ -47,6 +47,69 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(b.x > a.x + 1, `moved east ${a.x.toFixed(2)} → ${b.x.toFixed(2)}`);
   });
 
+  // The turnstiles (station spec, "Life and props (round 2)"): shut from the hall until you buy a ticket.
+  const gates = () => page.evaluate(() => window.__station.gates());
+  const popup = () => page.evaluate(() => { const t = document.querySelector('.ticket'); return !!t && !t.hidden; });
+  const hold = async (key, until, ms = 4000) => {
+    await page.keyboard.down(key);
+    try { await page.waitForFunction(until, { timeout: ms }); } finally { await page.keyboard.up(key); }
+  };
+  await check('walking into a turnstile from the hall opens the ticket machine, and you stay in the hall', async () => {
+    await page.evaluate(() => window.__station.teleport(10.5, 8.5));
+    await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
+    await sleep(300);
+    const w = await page.evaluate(() => ({ ...window.__station.walker }));
+    assert.ok(w.x < 12, `stopped at the gate: x ${w.x.toFixed(2)}`);
+    assert.match(await page.evaluate(() => document.querySelector('.ticket').innerText), /TICKETS[\s\S]*single[\s\S]*day pass[\s\S]*BUY \+ TAP[\s\S]*wallet \$20\.00/);
+    await page.screenshot({ path: `${SHOTS}/station-ticket.png` });
+  });
+
+  await check('Esc closes the ticket machine', async () => {
+    await page.keyboard.press('Escape');
+    assert.equal(await popup(), false);
+    assert.equal((await gates()).pass, null);
+    // Held keys don't walk you while it's open, and it doesn't come straight back until you push the gate again.
+    await sleep(300);
+    assert.equal(await popup(), false);
+  });
+
+  await check('a single lets you through once; the next time from the hall it asks again', async () => {
+    await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
+    const x0 = await page.evaluate(() => window.__station.walker.x);
+    await page.keyboard.press('Enter'); // single is chosen first
+    await page.waitForFunction(() => document.querySelector('.ticket').hidden, { timeout: 3000 });
+    let g = await gates();
+    assert.equal(g.pass, 'single');
+    assert.equal(g.wallet, 2000 - 290);
+    assert.ok(Math.abs((await page.evaluate(() => window.__station.walker.x)) - x0) < 0.05, 'you stood still while it was open');
+    await hold('KeyD', () => window.__station.walker.x > 13.6);
+    g = await gates();
+    assert.equal(g.pass, null, 'the single is used up');
+    assert.equal(g.used, 1);
+    // Back to the hall is free...
+    await hold('KeyA', () => window.__station.walker.x < 11);
+    assert.equal(await popup(), false, 'no ticket needed going out');
+    // ...and going in again asks again.
+    await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
+    assert.ok((await page.evaluate(() => window.__station.walker.x)) < 12);
+  });
+
+  await check('a day pass lets you through again and again', async () => {
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('.ticket').hidden, { timeout: 3000 });
+    assert.equal((await gates()).pass, 'day');
+    for (let i = 0; i < 2; i++) {
+      await hold('KeyD', () => window.__station.walker.x > 13.6);
+      await hold('KeyA', () => window.__station.walker.x < 11);
+    }
+    const g = await gates();
+    assert.equal(g.pass, 'day');
+    assert.equal(g.wallet, 2000 - 290 - 700);
+    assert.equal(await popup(), false);
+    assert.match(await page.evaluate(() => document.querySelector('.ticket-chip').innerText), /DAY PASS/);
+  });
+
   await check('the platform has its commuters, pigeons and rats', async () => {
     await page.evaluate(() => { window.__station.setTime(20); window.__station.teleport(30.5, 9.5); });
     await sleep(800);
@@ -94,6 +157,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(800);
     assert.equal(await page.evaluate(() => window.__ascii.station()), 'off', 'still in the gallery');
     assert.equal(await page.evaluate(() => document.querySelectorAll('canvas.station').length), 0, 'the station canvas is gone');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.ticket, .ticket-chip').length), 0, 'the ticket machine is gone');
   });
 
   await check('the back button brings you up', async () => {
@@ -119,6 +183,21 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.goto('about:blank');
     await page.goto(`${url}#/station`);
     await inStation(page);
+  });
+
+  await check('short of money the machine says so and offers a top-up', async () => {
+    await page.evaluate(() => { window.__station.setWallet(250); window.__station.teleport(10.5, 10.5); });
+    await hold('KeyD', () => { const t = document.querySelector('.ticket'); return t && !t.hidden; });
+    await page.keyboard.press('Enter');
+    assert.match(await page.evaluate(() => document.querySelector('.ticket').innerText), /insufficient funds[\s\S]*top up \+\$20/);
+    assert.equal((await gates()).pass, null);
+    await page.keyboard.press('KeyT');
+    assert.equal((await gates()).wallet, 2250);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('.ticket').hidden, { timeout: 3000 });
+    const g = await gates();
+    assert.equal(g.pass, 'single');
+    assert.equal(g.wallet, 2250 - 290);
   });
 
   await check('on a portrait phone the station starts and draws the station, not the dark', async () => {

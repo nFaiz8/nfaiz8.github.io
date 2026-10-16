@@ -213,3 +213,20 @@ body.in-station .viewer, body.in-station .grid, body.in-station .map, body.in-st
 #stage canvas.station { z-index: 1; }
 #stage.impact canvas.station { filter: none; }
 @media (prefers-reduced-motion: reduce) { .fade { transition: none; } }
+/* The station's ticket machine (src/rpg/ticket.js): an ASCII box over the station; in-game money only. */
+.ticket { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px; background: #05060899; }
+.ticket[hidden], .ticket-chip[hidden] { display: none; }
+.ticket-box { font: 16px/1.2 var(--mono); color: #ffcf7a; background: #0b0a08f2; padding: 12px 14px; border: 1px solid #3a2f1c;
+  box-shadow: 0 0 24px #ffb34022; max-width: 100%; }
+.ticket-line { white-space: pre; letter-spacing: 0; font-variant-ligatures: none; }
+.ticket-line:last-child { margin-top: 6px; color: var(--mute); }
+.ticket button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; white-space: pre;
+  letter-spacing: 0; }
+.ticket-opt[aria-pressed="true"] { color: #fff3d6; background: #3a2a10; }
+.ticket button:hover, .ticket button:focus-visible { color: #fff3d6; outline: none; background: #2a1f0e; }
+.ticket-buy { color: #9fffb0 !important; }
+.ticket-topup { color: #7fc4ff !important; }
+.ticket-close { color: var(--mute) !important; }
+.ticket-chip { position: fixed; top: 12px; right: 16px; z-index: 30; padding: 3px 8px; font: 12px/1.4 var(--mono); color: #ffcf7a;
+  background: #0b0a08d9; border: 1px solid #3a2f1c; pointer-events: none; }
+@media (max-width: 360px) { .ticket-box { font-size: 13px; padding: 10px; } }

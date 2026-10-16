@@ -25,7 +25,7 @@ The player is about 0.5 wide and 1.6 tall.
 | `|` | pillar | – | no |
 | `b` | bench | as the floor around it | no |
 | `t` | turnstile post | 0 | no |
-| `:` | turnstile gate | 0 | yes |
+| `:` | turnstile gate: shut coming from the west without a ticket, free from the east (see below) | 0 | yes |
 | `k` | kiosk (closed) | 0 | no |
 | `n` | wall with the station's name sign on its face | – | no |
 | `~` | puddle, with drips | as the floor around it | yes |
@@ -34,6 +34,14 @@ The player is about 0.5 wide and 1.6 tall.
 
 Fluorescent tubes are placed for you: along the middle row of each platform band every 5 columns, and on a
 4-tile grid over the hall. A track row that reaches the map's edge goes into a tunnel there.
+
+## Turnstiles
+
+A column of `:` gates (with `t` posts between them) is a ticket line. The game treats **west as outside**:
+walking east into a gate without a ticket stops you there and opens the ticket machine; walking west through
+one is always free. So put the gates with the way in on their west side and the paid area to the east, and
+leave a tile of floor on both sides of each gate. A single is used up once you come out of a gate on its east
+side; a day pass lasts the visit (`src/rpg/gates.js`).
 
 ## What the checker wants
 

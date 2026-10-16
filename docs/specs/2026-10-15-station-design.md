@@ -47,6 +47,9 @@ tested.
 | `move.js` | `stepWalker(w, dt, input, map)`: tight free movement, collision and stairs (§4). | none |
 | `train.js` | `trainAt(t, map)` gives where the passing train is, or null (§5). | none |
 | `camera.js` | The follow spring, the clamp and the field of view (§4). | none |
+| `gates.js` | The turnstiles: shut or open for you, the ticket, the wallet (§5b). | none |
+| `life.js` | Pigeons, rats and commuters as small seeded state machines, and pushing you out of people (§5b). | none |
+| `ticket.js` | The ticket machine pop-up (DOM) (§5b). | none |
 | `scene.js` | Builds the station's meshes, lights and glyph textures from the map. | yes |
 | `sprites.js` | ASCII art turned into upright billboard sprites: canvas textures on planes. | yes |
 | `post.js` | Bloom and tilt-shift depth of field. | yes |
@@ -181,6 +184,61 @@ The look is the chosen mockup ("Octopath, ASCII world"), rebuilt in three.js:
 - **Frame rate:** the target is 60 fps on a laptop and 30 or more on a recent phone.
 - **When hidden:** the loop pauses while the tab is hidden.
 
+## 5b. Life and props (round 2)
+
+Added on 2026-10-15 after the user said "make it more lively, the things on the wall make no sense" and
+"make the turnstiles actually work with a pop up for payment". People are now in scope: **commuters only**
+(no dialogue, no story).
+
+- **Wall things that read as what they are** (`sprites.js` PROPS, placed in `scene.js`):
+  - the hall's north wall: the kiosk with a `CLOSED` sign on its shutter and a buzzing lamp over it, the
+    **line map** (`MUSEUM ● ━ ● ARCADE ━ ● DARKROOM ━ ● GORGE`, `▲ YOU ARE HERE` under MUSEUM), and the
+    **drinks machine** (`DRINKS`, shelves of coloured cans, `$1.50`, a lit coin slot) beside the turnstiles;
+  - on the stair wall over the turnstiles: a **wall clock** (real local time, `HH:MM` LED, the colon ticking;
+    steady with reduced motion) and the **departures board** over the stair head: amber LED text on black that
+    blooms, redrawn only when its text changes (looked at four times a second). It shows `NEXT TRAIN` and `THEN`
+    counting down in whole minutes, then `<1 MIN`, from `train.js`'s schedule (`departures(t, map)`); from 5 s
+    before a train until it has gone it shows `NOT IN SERVICE` / `STAND BACK` (blinking; steady with reduced
+    motion);
+  - on the far wall across the north track, facing the platform: a `faiz.pics — NOW SHOWING` poster with a
+    small ASCII photo frame, a yellow `MIND THE GAP` notice, and a torn `LIVE AT THE GORGE` poster whose loose
+    corner flaps in a north-track train's wind;
+  - the bins read `TRASH`; the `▲ MUSEUM` way-out sign stays.
+  - **Lights and signs in front of you fade, never vanish**: a tube bar, sign, poster, board, bin or other
+    prop between the camera and you (the walls' rule) eases to the walls' 20% opacity with its colour dimmed
+    (so bloom can't blow a faded tube back to white), writes no depth and draws after you, like the faded walls.
+    The hall's tubes hang over rows 7 and 11, so none sits in front of the north wall's signs.
+  - The tilt-shift's sharp band is wider and its top blur lighter (band 0.18, top 2.0) so the signs a few
+    tiles north of you are readable.
+- **Life** (`life.js`, pure and seeded; drawn by `scene.js`):
+  - **pigeons** (4) on the platform peck (the head bobs), hop a little, and flutter off (up and away, fading)
+    when you come within 1.5 or a train's tunnel starts to glow; they glide back to their spot 8–14 s later;
+  - **rats** (2) nose about on the track beds and run into the nearer tunnel when a train is about 3 s off,
+    coming out a little after it has gone;
+  - an **LED ticker** hung between two pillars scrolls "THE NEXT TRAIN DOES NOT STOP AT THIS STATION · PLEASE
+    STAND BEHIND THE YELLOW LINE · …" a whole character at a time (one texture, scrolled by its offset); it
+    hides when it hangs between the camera and you;
+  - a **steam vent** in the hall floor puffs soft steam; the **kiosk lamp** buzzes and dips.
+  - Reduced motion: no wing strobe, no kiosk flicker, a slower ticker, fewer and slower puffs.
+- **Turnstiles** (`gates.js`, pure; `ticket.js`, the DOM): the `:` gates are shut coming from the hall side
+  (moving east) until you hold a ticket; each gate has a red-and-white arm hinged on its north post that swings
+  open the way you're going, and a red/green lamp. Coming from the platform side is free. Walking into a shut
+  gate stops you and opens the **ticket machine**, an ASCII pop-up (`TICKETS`: single $2.90, day pass $7.00,
+  `[ BUY + TAP ]`, `wallet $20.00`, `esc ✕`). ↑/↓ choose, Enter buys, Esc closes; a tap picks or presses, a tap
+  outside closes. While it's open you don't move and keys go to it alone (a capture listener). Buying takes the
+  price from an in-game wallet (starting at $20.00, per visit), shows `✓ beep`, closes, and the arm opens. A
+  single is used up when you come out of the gate on the platform side; a day pass lasts the visit, shown by a
+  small `▣ DAY PASS` chip. Short of money: `insufficient funds` and a `[ top up +$20 ]` button. No real payment
+  fields of any kind. It doesn't reopen until you stop pushing the gate. It's created and removed with the
+  station. The walker collides with `gatedMap(map, gates, walker)`, the map with the shut gates solid.
+- **Commuters** (4; `life.js` behaviour, `rig.js` + `figure.js` drawing): the same stick figure in muted
+  colours (cool greys, a teal coat, a dusty red) with no lantern; one holds a phone (`rig.js`'s `phone` pose,
+  a small lit screen and a faint light). They breathe, shift their weight (`shift`), turn to look down the
+  track now and then, and when a train passes they turn to watch it, the ones by its track stepping back 0.5
+  from the edge, then settle. One paces slowly between two spots and waits rather than walk into you. They're
+  solid (a 0.25 circle you're pushed out of) and never leave the platform. Their figures are disposed with
+  the station.
+
 ## 6. Testing
 
 - **Unit** (`node --test`, as for the rest of the site):
@@ -204,6 +262,6 @@ The look is the chosen mockup ("Octopath, ASCII world"), rebuilt in three.js:
 
 ## 7. Not in this slice
 
-People, dialogue, quests, items, saving, fighting, boarding the train, other areas, multiplayer in the
+Dialogue, people other than the commuters, quests, items, saving, fighting, boarding the train, other areas, multiplayer in the
 station, and sound. The station's code is kept in `src/rpg/` so the next areas reuse `map.js`,
 `move.js`, `sprites.js`, `post.js` and the camera.

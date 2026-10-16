@@ -11,6 +11,8 @@ import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
 import { poseFigure, turnToward, advancePhase } from './rig.js';
 import { createPost } from './post.js';
+import { createGates, gatedMap, trackGates, bumped, easeArms } from './gates.js';
+import { createTicketMachine } from './ticket.js';
 import { STATION_LIFE, createCommuter, stepCommuter, pushOut } from './life.js';
 
 const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
@@ -18,6 +20,7 @@ const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
 // dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
 // the screen shows the far wall instead.
 const PORTRAIT_CROP = 1.25;
+const STILL = { x: 0, y: 0, run: false }; // the walker's input while the ticket machine is open
 
 // Where your feet go: the floor, or on a stair the top of the tread you're over. The ramp you walk on runs
 // through the treads' front edges (scene.js), so it's above a tread everywhere else and you'd float.
@@ -33,11 +36,12 @@ function footY(map, w) {
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
-  let canvas, renderer, world, figure, blobGeo, blobMat, post, raf = 0, resize = null, hook = null;
+  let canvas, renderer, world, figure, blobGeo, blobMat, post, ticket, raf = 0, resize = null, hook = null;
   const people = []; // the commuters' figures
   const teardown = () => {
     cancelAnimationFrame(raf);
     if (resize) removeEventListener('resize', resize);
+    ticket?.destroy();
     world?.dispose();
     figure?.dispose();
     for (const p of people) p.figure.dispose();
@@ -63,6 +67,10 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
     world = buildScene(scene, map, { reducedMotion });
     const walker = createWalker(map);
+    // The turnstiles: shut from the hall without a ticket (gates.js); the walker collides with the map as gated.
+    const gates = createGates(map), gated = gatedMap(map, gates, walker);
+    let armed = true, lastPass = null; // armed: the machine may open on the next bump (not again until you stop pushing)
+    ticket = createTicketMachine(gates, { onClose: () => { armed = false; walker.vx = walker.vz = 0; } });
 
     // Commuters: the same stick figure, muted, without a lantern; one on the phone (its screen lights its face).
     const phoneLight = new THREE.PointLight('#9fd0ff', 0, 1.4, 2);
@@ -132,8 +140,17 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
       const t = (now - t0) / 1000;
-      stepWalker(walker, dt, finger ? fingerInput() : keys(), map);
-      pushOut(walker, crowd, map);
+      if (ticket.isOpen) finger = null;
+      const input = ticket.isOpen ? STILL : finger ? fingerInput() : keys();
+      stepWalker(walker, dt, input, gated);
+      pushOut(walker, crowd, gated);
+      trackGates(gates, walker);
+      if (!ticket.isOpen) {
+        const bump = bumped(gates, walker, input);
+        if (bump && armed) { armed = false; walker.vx = walker.vz = 0; ticket.open(); } else if (!bump) armed = true;
+      }
+      easeArms(gates, walker, dt);
+      if (gates.pass !== lastPass) { lastPass = gates.pass; ticket.update(); }
       if (!leaving && map.at(Math.floor(walker.x), Math.floor(walker.z))?.ch === 'E') { leaving = true; onExit(); }
 
       // Face where you walk (keeping the last facing when you stop); the stride follows the ground covered,
@@ -152,7 +169,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       lantern.intensity = 9 * (reducedMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 13) * Math.sin(t * 5.1));
 
       const train = trainAt(t, map);
-      world.update(t, dt, walker, train);
+      world.update(t, dt, walker, train, gates);
       for (const p of people) {
         const c = stepCommuter(p.c, dt, { train, walker }, map);
         p.pose.yaw = c.yaw; p.pose.shift = c.shift; p.pose.t = t + c.home.x; // desynchronised breathing
@@ -188,6 +205,8 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       train: () => trainAt(time(), map),
       setTime(s) { t0 = performance.now() - s * 1000; },
       teleport(x, z) { walker.x = x; walker.z = z; walker.vx = walker.vz = 0; walker.y = map.levelAt(x, z) ?? walker.y; },
+      setWallet(cents) { gates.wallet = cents; },
+      gates: () => ({ wallet: gates.wallet, pass: gates.pass, used: gates.used, open: gates.gates.map((g) => g.open), popup: ticket.isOpen }),
       life: () => ({ pigeons: world.pigeons.map((p) => p.s.state), rats: world.rats.map((r) => r.s.state), commuters: crowd.map((c) => ({ x: c.x, z: c.z, yaw: c.yaw })) }),
     };
     window.__station = hook;

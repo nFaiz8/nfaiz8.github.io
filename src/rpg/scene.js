@@ -287,6 +287,23 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   scene.add(tickerBox, tickerFace);
   fadeable([tickerBox, tickerFace], ticker.x, ticker.z, ticker.w / 2 + 0.6);
 
+  // The turnstile arms: a bar across each gate, hinged at its north post, that swings open toward the way you go;
+  // a lamp on the hinge shows red (shut) or green (open).
+  const armGeo = own(new THREE.BoxGeometry(0.07, 0.07, 0.86).translate(0, 0, 0.43));
+  const armMat = own(new THREE.MeshStandardMaterial({ map: own(stripeTexture()), roughness: 0.5, metalness: 0.2, emissive: '#3a1210' }));
+  const lampGeo2 = own(new THREE.BoxGeometry(0.12, 0.08, 0.12));
+  const RED = new THREE.Color(2.2, 0.25, 0.18), GREEN = new THREE.Color(0.3, 2.2, 0.6);
+  const arms = map.cells.filter((cell) => cell.ch === ':').map((cell) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(cell.c + 0.5, LEVEL.hall + 0.82, cell.r + 0.06);
+    const arm = new THREE.Mesh(armGeo, armMat);
+    pivot.add(arm);
+    const lamp = new THREE.Mesh(lampGeo2, own(new THREE.MeshBasicMaterial({ color: RED.clone(), toneMapped: false })));
+    lamp.position.set(cell.c + 0.5, LEVEL.hall + 1.02, cell.r + 0.08);
+    scene.add(pivot, lamp);
+    return { c: cell.c, r: cell.r, pivot, lamp, side: 1 };
+  });
+
   // The buzzing lamp over the kiosk: a short tube on the shutter's lintel that never quite settles.
   const kioskBar = new THREE.Mesh(own(new THREE.BoxGeometry(1.1, 0.05, 0.1)), own(new THREE.MeshBasicMaterial({ color: '#fff1d6', toneMapped: false })));
   kioskBar.position.set(4.5, 2.0, 7.1);
@@ -427,8 +444,8 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // float mid-screen as solid slabs, so they fade.
   for (const t of tubes) fadeable(t.bar, t.x, t.z, Infinity);
 
-  // Everything added in round 2 (station spec, "Life and props"): signs, the ticker, the vent, the creatures.
-  const updateLife = (time, dt, walker, pass) => {
+  // Everything added in round 2 (station spec, "Life and props"): signs, the ticker, the arms, the vent, the creatures.
+  const updateLife = (time, dt, walker, pass, gates) => {
     // The clock: real local time, its colon ticking each second (steady with reduced motion).
     const now = Date.now(), tick = reducedMotion || Math.floor(now / 500) % 2 === 0;
     const key = `${Math.floor(now / 60000)}${tick}`;
@@ -443,6 +460,15 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     // The ticker: a character every 0.18 s (slower with reduced motion); dimmed when it hangs between the camera and you.
     const step = Math.floor(time / (reducedMotion ? 0.4 : 0.18));
     tickerTex.offset.x = (step % TICKER.length) / TICKER.length;
+    // Turnstile arms.
+    if (gates) {
+      for (let i = 0; i < arms.length; i++) {
+        const a = arms[i], g = gates.gates[i];
+        if (g.open < 0.02) a.side = walker.x > a.c + 0.5 ? -1 : 1; // it swings the way you're going
+        a.pivot.rotation.y = a.side * g.open * (Math.PI / 2) * 0.95;
+        a.lamp.material.color.copy(g.open > 0.5 ? GREEN : RED);
+      }
+    }
     // The kiosk lamp buzzes: mostly on, with a quick dip now and then (steady with reduced motion).
     let kk = 1;
     if (!reducedMotion) {
@@ -479,9 +505,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
 
   return {
     tubes, owned, pigeons, rats,
-    update(time, dt, walker, pass) {
+    update(time, dt, walker, pass, gates = null) {
       placeWalls(walker);
-      updateLife(time, dt, walker, pass);
+      updateLife(time, dt, walker, pass, gates);
       stepFaders(walker, dt);
       const passing = !!pass && pass.phase === 'pass';
       // Tubes: steady, but one has a fault, and the ones near a passing train shudder (spec §5; neither with
