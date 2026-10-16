@@ -88,3 +88,11 @@ test('remembers which way you face, and how far you walked', () => {
   assert.equal(w.facing, -1, 'walking south keeps the facing');
   assert.ok(w.walked > before + 0.5);
 });
+
+test('a finer map: grain 0.25 cells collide at their own size', () => {
+  // A single solid quarter-cell at (1.0…1.25, 0…0.25) in an open field.
+  const map = { grain: 0.25, solidAt: (x, z) => x > 1 && x < 1.25 && z > 0 && z < 0.25, levelAt: () => 0 };
+  assert.equal(blocked(map, 0.8, 0.1), true, 'a 0.25 radius reaches it from 0.8');
+  assert.equal(blocked(map, 0.7, 0.1), false);
+  assert.equal(blocked(map, 1.1, 0.6), false, 'well clear below it');
+});

@@ -29,12 +29,14 @@ export function stepWalker(w, dt, input, map) {
   return w;
 }
 
-// Does a circle at (x, z) overlap a solid tile or leave the map?
+// Does a circle at (x, z) overlap a solid cell or leave the map? Cells are 1 × 1 tiles, or map.grain on a side (a
+// train's floor plan is finer than a station's tiles).
 export function blocked(map, x, z, r = RADIUS) {
-  for (let row = Math.floor(z - r); row <= Math.floor(z + r); row++) {
-    for (let col = Math.floor(x - r); col <= Math.floor(x + r); col++) {
-      if (!map.solidAt(col + 0.5, row + 0.5)) continue;
-      const nx = Math.max(col, Math.min(x, col + 1)), nz = Math.max(row, Math.min(z, row + 1));
+  const g = map.grain || 1;
+  for (let row = Math.floor((z - r) / g); row <= Math.floor((z + r) / g); row++) {
+    for (let col = Math.floor((x - r) / g); col <= Math.floor((x + r) / g); col++) {
+      if (!map.solidAt((col + 0.5) * g, (row + 0.5) * g)) continue;
+      const nx = Math.max(col * g, Math.min(x, (col + 1) * g)), nz = Math.max(row * g, Math.min(z, (row + 1) * g));
       if ((x - nx) ** 2 + (z - nz) ** 2 < r * r - 1e-9) return true;
     }
   }
