@@ -175,8 +175,6 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // Tubes: a bright bar each (it blooms) and a cool point light under it.
   const tubeGeo = own(new THREE.BoxGeometry(1.4, 0.06, 0.16));
   const tubeMat = own(new THREE.MeshBasicMaterial({ color: '#e8f4ff', toneMapped: false }));
-  // A tube between the camera and you would sit right over your head, so it dims and goes see-through.
-  const tubeFadeMat = own(new THREE.MeshBasicMaterial({ color: '#e8f4ff', transparent: true, opacity: 0.2, depthWrite: false }));
   const tubes = map.tubes.map((t) => {
     const bar = new THREE.Mesh(tubeGeo, tubeMat);
     bar.position.set(t.x, t.y, t.z);
@@ -198,7 +196,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
     scene.add(warm, up.mesh);
   }
 
-  // Props, as sprites against walls and pillars.
+  // Props, as sprites against walls and pillars. Each is tall only where there's no floor behind it (north of it,
+  // away from the camera): a prop writes depth, so it would hide you there. So the tall ones stand on the north
+  // walls, and the bins in front of pillars.
   const prop = (name, x, z) => {
     const p = PROPS[name], s = makeSprite(p.lines, p.colors, p.h);
     s.mesh.position.set(x, map.levelAt(x, z) ?? 0, z);
@@ -208,7 +208,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   };
   prop('board', 8.5, 5.15);
   prop('bin', 10.6, 5.15);
-  prop('vending', 6.5, 12.8);
+  prop('vending', 6.8, 5.15);
   for (const c of [23, 35]) prop('bin', c + 0.5, 10.1);
 
   // The passing train (spec §5): 4 cars with ASCII panels and lit windows, headlights that bloom, and a light
@@ -295,7 +295,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   if (tubes.length) {
     const t = tubes[flicker];
     t.base = 4;
-    t.bar.material = t.onMat = own(new THREE.MeshBasicMaterial({ color: '#b9d6c8', toneMapped: false }));
+    t.bar.material = own(new THREE.MeshBasicMaterial({ color: '#b9d6c8', toneMapped: false }));
   }
 
   return {
@@ -314,8 +314,8 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         }
         if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 0.55 + 0.45 * Math.abs(Math.sin(time * 53 + i));
         t.light.intensity = t.base * k;
-        t.bar.visible = k > 0.3;
-        t.bar.material = nearCamera(t.x, t.z, walker, 1.6) ? tubeFadeMat : t.onMat || tubeMat;
+        // A tube between the camera and you would sit right over your head, so its bar goes (its light stays).
+        t.bar.visible = k > 0.3 && !nearCamera(t.x, t.z, walker, 1.6);
       }
       // The tunnel the train comes out of glows for the warning, and stays lit while it passes.
       let glow = 0;

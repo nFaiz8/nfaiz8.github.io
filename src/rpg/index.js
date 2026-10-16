@@ -13,6 +13,10 @@ import { poseFigure, turnToward, advancePhase } from './rig.js';
 import { createPost } from './post.js';
 
 const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
+// A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
+// dark. The camera renders a view PORTRAIT_CROP times as tall and shows only its bottom part, so the top of
+// the screen shows the far wall instead.
+const PORTRAIT_CROP = 1.25;
 
 // Where your feet go: the floor, or on a stair the top of the tread you're over. The ramp you walk on runs
 // through the treads' front edges (scene.js), so it's above a tread everywhere else and you'd float.
@@ -94,9 +98,14 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const dpr = Math.min(phone ? 1.5 : 2, devicePixelRatio || 1);
       renderer.setPixelRatio(dpr);
       renderer.setSize(W, H, false);
-      camera.aspect = W / H;
-      camera.fov = fovFor(camera.aspect);
-      camera.updateProjectionMatrix();
+      if (W < H) {
+        camera.fov = fovFor(W / (H * PORTRAIT_CROP));
+        camera.setViewOffset(W, H * PORTRAIT_CROP, 0, H * (PORTRAIT_CROP - 1), W, H); // sets the aspect too
+      } else {
+        camera.aspect = W / H;
+        camera.fov = fovFor(camera.aspect);
+        camera.clearViewOffset(); // updates the projection
+      }
       post.setSize(W, H, dpr);
     };
     resize();
