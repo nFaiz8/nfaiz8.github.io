@@ -27,9 +27,13 @@ export function createDoubleTap(gap = 0.25) {
 
 const ROLL_DIR = { ArrowLeft: -1, KeyA: -1, ArrowRight: 1, KeyD: 1 };
 
-export function createInput(target, { onTap, onKey, arena = () => false, now = () => performance.now() / 1000 }) {
+const SAME = (code) => code;
+
+// keys() → translate (src/keys.js): in the arena, what each key stands for.
+export function createInput(target, { onTap, onKey, arena = () => false, keys = () => SAME, now = () => performance.now() / 1000 }) {
   const win = globalThis.window;
   const held = new Set();
+  const as = new Map(); // a key down: the code it stands for, so it lets go of that whatever changes meanwhile
   const pad = new Set(); // on-screen buttons held down
   let run = false; // Shift held: sprint instead of walking
   let strikes = 0, roll = 0, hooks = 0;
@@ -41,19 +45,24 @@ export function createInput(target, { onTap, onKey, arena = () => false, now = (
   const editable = (e) => e.target.closest && e.target.closest('input, textarea, [contenteditable]');
   win.addEventListener('keydown', (e) => {
     if (editable(e)) return;
-    if (CROUCH.includes(e.code)) { if (arena()) { held.add(e.code); e.preventDefault(); } return; }
-    if (e.metaKey || e.altKey || (e.ctrlKey && !(arena() && PLAY.has(e.code)))) return;
+    // A rebound default (null) is no action here, only the page's own key; a bound key is only its action.
+    const to = arena() ? keys()(e.code) : e.code;
+    const act = to !== null, code = act ? to : e.code, bound = act && code !== e.code;
+    if (act) as.set(e.code, code);
+    if (act && CROUCH.includes(code)) { if (arena()) { held.add(code); e.preventDefault(); } return; }
+    if (e.metaKey || e.altKey || (e.ctrlKey && !(arena() && PLAY.has(code)))) return;
     run = e.shiftKey;
-    if (e.code === 'KeyJ') { held.add('KeyJ'); mouse.on = false; e.preventDefault(); return; }
-    if (e.code === 'KeyK') { if (!e.repeat && arena()) strikes++; e.preventDefault(); return; }
-    if (e.code === 'KeyG' && arena()) { if (!e.repeat) hooks++; e.preventDefault(); return; }
-    if (ROLL_DIR[e.code] && !e.repeat) tapRoll(e.code);
-    if (KEYS[e.code]) { held.add(e.code); e.preventDefault(); return; }
-    if (e.code === 'Space') held.add('Space'); // a jump in the arena; onKey decides what else it does
+    if (act && code === 'KeyJ') { held.add('KeyJ'); mouse.on = false; e.preventDefault(); return; }
+    if (act && code === 'KeyK') { if (!e.repeat && arena()) strikes++; e.preventDefault(); return; }
+    if (act && code === 'KeyG' && arena()) { if (!e.repeat) hooks++; e.preventDefault(); return; }
+    if (act && ROLL_DIR[code] && !e.repeat) tapRoll(code);
+    if (act && KEYS[code]) { held.add(code); e.preventDefault(); return; }
+    if (act && code === 'Space') held.add('Space'); // a jump in the arena; onKey decides what else it does
+    if (bound) { e.preventDefault(); return; }
     if (onKey(e)) e.preventDefault();
   });
-  win.addEventListener('keyup', (e) => { held.delete(e.code); run = e.shiftKey; });
-  const clear = () => { held.clear(); pad.clear(); mouseFire = false; strikes = 0; roll = 0; hooks = 0; mouse.on = false; dtap.reset(); };
+  win.addEventListener('keyup', (e) => { held.delete(as.get(e.code) ?? e.code); as.delete(e.code); run = e.shiftKey; });
+  const clear = () => { held.clear(); as.clear(); pad.clear(); mouseFire = false; strikes = 0; roll = 0; hooks = 0; mouse.on = false; dtap.reset(); };
   win.addEventListener('blur', clear);
 
   // The mouse aims, left fires, right strikes (arena only; touch never does)

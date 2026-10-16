@@ -158,3 +158,33 @@ test('Ctrl crouches in the arena only; with it held ← and J still play; outsid
   s = input.state();
   assert.deepEqual([s.crouch, s.x], [false, 0]);
 });
+
+test('rebound keys: L shoots, C crouches and J does nothing in the arena; outside it every key is itself', async () => {
+  const win = fakeTarget(), stage = fakeTarget();
+  globalThis.window = win;
+  const { createInput } = await import('../src/input.js?rebind');
+  const { translate } = await import('../src/keys.js');
+  let arena = true;
+  const told = [];
+  const input = createInput(stage, { onTap() {}, onKey: (e) => { told.push(e.code); return false; }, arena: () => arena, keys: () => translate({ fire: 'KeyL', crouch: 'KeyC', hit: 'KeyE' }) });
+  const key = (type, code) => win.fire(type, { code, target: {}, preventDefault() {}, shiftKey: false });
+  key('keydown', 'KeyL');
+  assert.equal(input.state().fire, true);
+  key('keyup', 'KeyL');
+  assert.equal(input.state().fire, false);
+  key('keydown', 'KeyJ');
+  assert.equal(input.state().fire, false, 'J is free now');
+  key('keyup', 'KeyJ');
+  key('keydown', 'KeyC');
+  assert.equal(input.state().crouch, true);
+  key('keyup', 'KeyC');
+  assert.equal(input.state().crouch, false);
+  key('keydown', 'KeyE');
+  assert.equal(input.takeStrikes(), 1);
+  assert.deepEqual(told, ['KeyJ'], 'a bound key never reaches the page\'s keys (E would open a frame); a freed one does');
+  // Held when the arena ends: the key still lets go.
+  key('keydown', 'KeyL'); arena = false; key('keyup', 'KeyL');
+  assert.equal(input.state().fire, false);
+  key('keydown', 'KeyL');
+  assert.equal(input.state().fire, false, 'outside the arena L is L');
+});

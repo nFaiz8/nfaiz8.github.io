@@ -8,6 +8,8 @@ import { levelHash, parseMap, mapName, MAP_NAMES } from './level.js';
 import { FIGHT_VERSION } from './fight.js';
 import { createPvp } from './pvp.js';
 import { createFightHud } from './fighthud.js';
+import { createKeyScreen } from './keyscreen.js';
+import { loadKeys, saveKeys, translate, keyOf, keyName } from './keys.js';
 import { createLive, peerEntities, heartEntities, localEcho, peerColor, fetchArenaMap } from './live.js';
 import { EMOTES_ORDER, EMOTE_GLYPH, followCell } from './peers.js';
 import { cleanName, cleanText, hasSlur, LIMITS, adminOk } from '../server/rules.js';
@@ -37,6 +39,7 @@ const noteEl = document.getElementById('note');
 const fightSr = document.getElementById('fight-sr');
 const rendererBtn = document.getElementById('renderer-btn');
 const shotsBtn = document.getElementById('shots-btn');
+const keysBtn = document.getElementById('keys-btn');
 const debugEl = document.getElementById('debug');
 document.getElementById('hud-name').textContent = SITE.name;
 
@@ -300,6 +303,7 @@ function onKey(e) {
   if (e.code === 'Escape' && following) { stopFollowing(); return true; }
   if (e.code === 'KeyM') { mapView.toggle(); return true; }
   if (e.code === 'KeyI' && shots && !shotsBtn.hidden) { shots.toggle(); return true; }
+  if (e.code === 'Slash' && keyScreen && world.mode === 'side') { keyScreen.toggle(); return true; }
   if (e.code === 'Backquote' && ARENA.enabled) { admin.toggle(arenaMap); return true; }
   if (e.code === 'KeyF') { toggleFullscreen(); return true; }
   if (e.code === 'KeyV' && !e.repeat) { setMuted(!isMuted()); return true; } // sound (M is the map)
@@ -378,16 +382,19 @@ let padJump = false; // the pad's JUMP is held
 let exitAsks = 0; // world.exit.asks already noted
 // In the fight while the side view is up and nothing covers it (PvP spec §8). The tilt out, a photo, the map,
 // the grid or a hidden tab take me out (al); coming back puts me in again (ae, with fresh health).
+// The arena's keys as you've bound them (keys.js), and the screen to bind them (/).
+let keyMap = loadKeys(), keysNow = translate(keyMap), keyScreen = null;
+const keyLabel = (id) => keyName(keyOf(keyMap, id));
 let keysNoted = false, linkUp = false; // linkUp: this connection's welcome came (so fightOk is its own)
 const fightOnline = () => !!live && linkUp && live.state === 'live' && live.fightOk;
 function syncFight(t) {
-  const want = world.mode === 'side' && !tilting && !world.want && !viewer.isOpen && !mapView.isOpen && !grid.isOpen && !shots?.isOpen && !document.hidden;
+  const want = world.mode === 'side' && !tilting && !world.want && !viewer.isOpen && !mapView.isOpen && !grid.isOpen && !shots?.isOpen && !keyScreen?.isOpen && !document.hidden;
   if (want && !pvp.entered) {
     // A last p first, from in here: arriving by a link or teleport, the last one went out somewhere else,
     // and the gallery would keep drawing me there while I fight.
     if (live) live.tick(world.player);
     pvp.enter(t, fightOnline());
-    if (!touch && !keysNoted) { keysNoted = true; note(`J shoot · K hit · Ctrl crouch${map.arena.level.hook ? ' · G hook' : ''} · mouse aims`, 4000); }
+    if (!touch && !keysNoted) { keysNoted = true; note(`${keyLabel('fire')} shoot · ${keyLabel('hit')} hit · ${keyLabel('crouch')} crouch${map.arena.level.hook ? ` · ${keyLabel('hook')} hook` : ''} · mouse aims · / keys`, 4000); }
   } else if (!want && pvp.entered) leaveFight(t);
 }
 function leaveFight(t) {
@@ -577,6 +584,7 @@ let shots = null, shotsNoted = false; // the impact frames kept (shots.js)
 function showShotsBtn() {
   if (!shots) return;
   shotsBtn.hidden = !(world.mode === 'side' || shots.count > 0);
+  keysBtn.hidden = world.mode !== 'side';
   shotsBtn.querySelector('.n').textContent = shots.count ? ` ${shots.count}` : '';
 }
 let lightingTop = null, tilting = false, lastMode = 'top';
@@ -880,7 +888,7 @@ async function boot() {
   decor = DECOR[arenaMap];
   train = map.arena ? decor.build(map.arena.level) : null;
   world.lighting = lightingTop;
-  input = createInput(stage, { onTap, onKey, arena: () => !!pvp && world.mode === 'side' });
+  input = createInput(stage, { onTap, onKey, arena: () => !!pvp && world.mode === 'side', keys: () => keysNow });
   if (PVP && map.arena) {
     const myId = () => (live && live.peers.myId) || 'me';
     pvp = createPvp({
@@ -907,6 +915,13 @@ async function boot() {
       },
     });
     shotsBtn.addEventListener('click', () => shots.toggle());
+    keyScreen = createKeyScreen({
+      get: () => keyMap,
+      set: (b) => { keyMap = b; keysNow = translate(b); saveKeys(b); input.clear(); },
+      onOpen: () => { input.clear(); stopFollowing(); },
+      onClose: () => stage.focus({ preventScroll: true }),
+    });
+    keysBtn.addEventListener('click', () => keyScreen.toggle());
     fightHud = createFightHud({
       root: document.getElementById('fight'), hp: document.getElementById('fight-hp'),
       board: document.getElementById('fight-board'), feed: document.getElementById('fight-feed'),

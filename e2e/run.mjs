@@ -247,6 +247,51 @@ await withBrowser(async ({ page, url, errors }) => {
     await sleep(800);
     assert.ok(Math.abs(await page.evaluate(() => window.__ascii.world.player.y) - spot.y) < 0.01, 'back on the floor');
   });
+  await check('arena: / opens the keys screen; jump moved to L jumps on L, not Space, and stays after a reload', async () => {
+    await page.goto(`${url}#/room/arena`); await ready(page);
+    await page.evaluate(() => localStorage.removeItem('arena-keys'));
+    await page.keyboard.press('Slash');
+    await page.waitForSelector('.keys:not([hidden])');
+    const jumpBtn = async () => (await page.$$('.keys-key'))[4];
+    await (await jumpBtn()).click();
+    assert.equal(await page.evaluate((b) => b.textContent, await jumpBtn()), 'press a key…');
+    await page.keyboard.press('KeyL');
+    assert.equal(await page.evaluate((b) => b.textContent, await jumpBtn()), 'L');
+    await page.screenshot({ path: 'e2e/shots/arena-keys.png' });
+    await page.keyboard.press('Escape');
+    assert.ok(await page.$eval('.keys', (k) => k.hidden), 'Esc closes it');
+    assert.equal(await page.evaluate(() => localStorage.getItem('arena-keys')), '{"jump":"KeyL"}');
+    const spot = await page.evaluate(() => {
+      const a = window.__ascii.map.arena, L = a.level, r = L.door.r + 1;
+      for (let c = 2; c < L.cols - 2; c++) {
+        const run = [-1, 0, 1].every((d) => L.cells[r * L.cols + c + d] !== 0);
+        const clear = [...Array(15)].every((_, k) => [-1, 0, 1].every((d) => !L.cells[(r - 1 - k) * L.cols + c + d]));
+        if (run && clear) return { x: a.x + 1 + c + 0.5, y: a.y + 1 + r - 1.5 };
+      }
+      return null;
+    });
+    const rise = async (code) => {
+      await page.evaluate((s) => window.__ascii.teleport(s.x, s.y), spot);
+      await sleep(400);
+      const y0 = await page.evaluate(() => window.__ascii.world.player.y);
+      const seen = page.evaluate(() => new Promise((resolve) => {
+        const p = window.__ascii.world.player, t0 = performance.now();
+        let top = Infinity;
+        const tick = () => { top = Math.min(top, p.y); if (performance.now() - t0 < 900) requestAnimationFrame(tick); else resolve(top); };
+        tick();
+      }));
+      await page.keyboard.down(code); await sleep(150); await page.keyboard.up(code);
+      return y0 - (await seen);
+    };
+    assert.ok((await rise('KeyL')) > 1, 'L jumps');
+    assert.ok((await rise('Space')) < 0.1, 'Space no longer does');
+    await page.reload(); await ready(page);
+    await page.click('#keys-btn');
+    assert.equal(await page.evaluate((b) => b.textContent, await jumpBtn()), 'L', 'kept after a reload');
+    await page.click('.keys-foot .vbtn');
+    assert.equal(await page.evaluate(() => localStorage.getItem('arena-keys')), '{}', 'reset');
+    await page.keyboard.press('Escape');
+  });
   await check('arena: a double jump (Space, then Space again in the air) reaches higher than a single jump', async () => {
     await page.goto(`${url}#/room/arena`); await ready(page);
     // A spot on a car's floor with 15 clear rows above it (up to the roof), so neither jump meets anything.
@@ -609,7 +654,7 @@ await withBrowser(async ({ page, url, errors }) => {
     await page.goto(`${url}#/room/arena`); await ready(page);
     const entered = () => page.evaluate(() => window.__ascii.pvp().entered);
     await page.waitForFunction(() => window.__ascii.pvp().entered, { timeout: 3000 });
-    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · Ctrl crouch · mouse aims');
+    assert.equal(await page.$eval('#note', (e) => e.textContent), 'J shoot · K hit · ctrl crouch · mouse aims · / keys');
     // A photo.
     await page.keyboard.press('KeyE');
     await page.waitForFunction(() => window.__ascii.viewer.state === 'open', { timeout: 20000 });

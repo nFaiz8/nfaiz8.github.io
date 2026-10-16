@@ -23,6 +23,15 @@ html { touch-action: manipulation; }
 .shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line); }
 .shot figcaption { margin-top: 6px; color: var(--mute); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .shots-none { margin: 8px 0; color: var(--mute); }
+/* The arena's keys (src/keyscreen.js), in the map's dialog: an action, its key, and the arrow that also does it. */
+.map-panel.keys-panel { width: min(480px, 100%); }
+.keys-list { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 12px; align-items: center; }
+.keys-row { display: contents; }
+.keys-key { min-width: 9em; text-align: center; }
+.keys-key.moved { color: rgb(233 162 59); }
+.keys-also, .keys-said { color: var(--mute); }
+.keys-also { white-space: nowrap; min-width: 5ch; }
+.keys-foot { display: flex; gap: 12px; align-items: center; }
 
 .hud { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center;
   padding: 12px 16px; pointer-events: none; }
