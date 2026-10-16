@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { peerEntities, heartEntities, peerColor, arenaTicker, createLive } from '../src/live.js';
+import { peerEntities, heartEntities, peerColor, arenaTicker, createLive, stationTicker } from '../src/live.js';
 
 test('a peer is an @ with its name centred below and its emote above', () => {
   const es = peerEntities([{ id: 'abc', name: 'Sam', x: 10.5, y: 5.5, alpha: 1, emote: '~o/', emoteAge: 0.1 }], { reducedMotion: true });
@@ -269,15 +269,85 @@ test('inside the arena no position goes out; after leftArena the next tick sends
   });
 });
 
-test('away: the tab coming back does not rejoin the net; back from away it does', () => {
-  withLive({}, ({ live, socks, fire }) => {
-    assert.equal(socks.length, 1);
-    live.away(true);
+test('area: going below asks the server to move; until its answer the gallery\'s messages are dropped; then the station\'s go to station', () => {
+  withLive({ getStationPos: () => ({ x: 2.504, z: 9.5, y: 0, a: 0.3 }) }, ({ live, say, sock }) => {
+    say({ t: 'welcome', id: 'me', peers: [{ id: 'g1', name: 'Gal', x: 1, y: 1 }], area: 'gallery', now: Date.now(), station: 1 });
+    assert.equal(live.peers.count(), 1);
+    assert.equal(live.stationCount, 1);
+    live.area('station');
+    assert.equal(live.peers.count(), 0, 'the gallery\'s people go at once');
+    assert.deepEqual(sock.sent.at(-1), { t: 'z', area: 'station', x: 2.5, z: 9.5, y: 0, a: 0.3 });
+    say({ t: 'join', id: 'g2', name: 'Late', x: 3, y: 3 }); // from the gallery, before the answer
+    say({ t: 'c', id: 'g1', text: 'hi' });
+    assert.equal(live.peers.count(), 0);
+    assert.equal(live.station.count(), 0);
+    say({ t: 'zw', area: 'station', peers: [{ id: 's1', name: 'Sta', x: 10, z: 9, y: -3 }] });
+    assert.deepEqual(live.station.list(performance.now() + 1000).map((p) => [p.id, p.x, p.z]), [['s1', 10, 9]]);
+    say({ t: 'q', id: 's1', x: 11, z: 9 });
+    say({ t: 'c', id: 's1', text: 'down here' });
+    say({ t: 'zc', station: 2 });
+    assert.equal(live.stationCount, 2);
+    const [p] = live.station.list(performance.now() + 1000);
+    assert.equal(p.x, 11);
+    assert.equal(p.say, 'down here');
+    assert.equal(live.peers.count(), 0, 'nothing below reaches the gallery\'s peers');
+    // Positions: q below, never p.
+    live.tick({ x: 5, y: 5 });
+    assert.equal(sock.sent.filter((m) => m.t === 'p').length, 0);
+    live.area('gallery');
+    assert.equal(live.station.count(), 0);
+    say({ t: 'zw', area: 'gallery', peers: [{ id: 'g1', name: 'Gal', x: 1, y: 1 }] });
+    assert.equal(live.peers.count(), 1);
+  });
+});
+
+test('area: an old server (no area in its welcome) puts the station off the net, as before; the tab coming back does not rejoin below', () => {
+  withLive({}, ({ live, socks, fire, say }) => {
+    say({ t: 'welcome', id: 'me', peers: [] });
+    live.area('station');
     assert.equal(live.net.state, 'idle');
-    fire('visibilitychange'); // the tab is visible again
-    assert.equal(socks.length, 1, 'no new connection while away');
-    assert.equal(live.net.state, 'idle');
-    live.away(false);
+    fire('visibilitychange');
+    assert.equal(socks.length, 1, 'no new connection below');
+    live.area('gallery');
     assert.equal(socks.length, 2, 'rejoins on the way back up');
   });
+});
+
+test('area: with a new server the tab coming back rejoins, and the hi says the area', () => {
+  withLive({ getStationPos: () => ({ x: 4, z: 5 }) }, ({ live, socks, fire, say }) => {
+    say({ t: 'welcome', id: 'me', peers: [], area: 'gallery', now: 0, station: 0 });
+    live.area('station');
+    assert.equal(live.net.state, 'live', 'still on the net below');
+    live.net.pause();
+    fire('visibilitychange');
+    assert.equal(socks.length, 2);
+    socks[1].onopen();
+    assert.deepEqual(socks[1].sent[0], { t: 'hi', name: '', area: 'station', x: 4, z: 5 });
+  });
+});
+
+test('the server clock: welcome\'s now, less half the round trip, is serverNow\'s offset', () => {
+  withLive({}, ({ live, say }) => {
+    const before = live.serverNow();
+    assert.ok(Math.abs(before - Date.now()) < 1000, 'this machine\'s clock until told');
+    say({ t: 'welcome', id: 'me', peers: [], area: 'gallery', now: Date.now() + 60000, station: 0 });
+    assert.ok(Math.abs(live.serverNow() - (Date.now() + 60000)) < 1000);
+  });
+});
+
+test('the station ticker sends q to 0.01 when it changes, yaw by 0.05, and retries a send that failed', () => {
+  const sent = [];
+  let ok = false;
+  const tick = stationTicker((m) => { if (ok) sent.push(m); return ok; });
+  tick({ x: 1.234, z: 2, y: 0, a: 0 });
+  assert.equal(sent.length, 0);
+  ok = true;
+  tick({ x: 1.234, z: 2, y: 0, a: 0 });
+  assert.deepEqual(sent, [{ t: 'q', x: 1.23, z: 2, y: 0, a: 0 }]);
+  tick({ x: 1.231, z: 2, y: 0, a: 0.02 });
+  assert.equal(sent.length, 1, 'too small a change');
+  tick({ x: 1.231, z: 2, y: 0, a: 0.1 });
+  assert.equal(sent.length, 2);
+  tick({ x: 1, z: 2, y: 0, a: 7 });
+  assert.ok(Math.abs(sent.at(-1).a - (7 - 2 * Math.PI)) < 0.01, 'the yaw wrapped');
 });

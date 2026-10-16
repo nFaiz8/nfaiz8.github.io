@@ -2,6 +2,8 @@
 import { MULTIPLAYER } from './config.js';
 import { createNet } from './net.js';
 import { createPeers } from './peers.js';
+import { createPeers3d, wirePos } from './rpg/peers3d.js';
+import { clockOffset } from './rpg/train.js';
 
 const BG = [7, 8, 11];
 const mix = (c, a) => c.map((v, i) => Math.round(BG[i] + (v - BG[i]) * a));
@@ -97,6 +99,21 @@ export function arenaTicker(send, { every = 67, gap = 30, cap = 20 } = {}) {
   return tick;
 }
 
+// Where I am in the station, sent whenever it changes (by 0.01, or the yaw by 0.05), through the same throttle.
+export function stationTicker(send) {
+  let sent = null;
+  const tick = (pos) => {
+    const w = wirePos(pos);
+    if (sent && sent.x === w.x && sent.z === w.z && sent.y === w.y && Math.abs((sent.a ?? 0) - (w.a ?? 0)) < 0.05) return;
+    if (send({ t: 'q', ...w })) sent = w;
+  };
+  tick.reset = () => { sent = null; };
+  return tick;
+}
+
+// Messages about the people in my area (station spec, Multiplayer): between asking to move and the server's
+// answer (zw), any of these still come from the area I've left, and are dropped.
+const AREA_T = new Set(['join', 'leave', 'p', 'q', 'e', 'r', 'c', 'n']);
 const ARENA_T = new Set(['aw', 'aj', 'ax', 'a', 's', 'pk', 'w', 'mm', 'h', 'k', 'sp']);
 
 // Where the multiplayer server is: local dev and tests never join the real gallery (on localhost only
@@ -121,20 +138,54 @@ export async function fetchArenaMap(ms = 1500) {
 
 // onMap(name): the server's arena map, from the welcome and whenever an admin switches it. onAdmin(ok,
 // map): the answer to admin().
-export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onChatMuted = () => {}, onState = () => {}, fightHash = '', onArena = () => {}, inArena = () => false, onMap = () => {}, onAdmin = () => {} }) {
+// Areas (station spec, Multiplayer): one connection, in the gallery or the station. area(name) moves it; the
+// station's people are in `station` (peers3d.js) and the gallery's in `peers`. getStationPos() is where I am
+// below; onStation(n) hears how many are down there (for the lobby's sign). An old server (its welcome has no
+// area) knows nothing of areas: then the station is off the net, as before.
+export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, getStationPos = () => null, onStation = () => {}, onAnnounce, onCount, onRejected, onChat = () => {}, onChatRejected = () => {}, onChatMuted = () => {}, onState = () => {}, fightHash = '', onArena = () => {}, inArena = () => false, onMap = () => {}, onAdmin = () => {} }) {
   const target = liveTarget(url);
   if (!target) return null;
-  const peers = createPeers();
-  let count = 0, fightOk = false, away = false;
+  const peers = createPeers(), station = createPeers3d();
+  let count = 0, fightOk = false, area = 'gallery', waiting = false, areas = null, offset = 0, below = 0;
+  const setBelow = (n) => { n = Math.max(0, n | 0); if (n !== below) { below = n; onStation(n); } };
+  const recount = () => { count = peers.count(); onCount(count); };
   const net = createNet({
-    url: target, version, name: getName(), getPos,
+    url: target, version, name: getName(),
+    getPos: (a) => (a === 'station' ? (() => { const p = getStationPos(); return p && wirePos(p); })() : getPos()),
     onState: (s) => {
-      // Without a connection nobody is really here any more: fade them out and hide the count.
-      if (s !== 'live' && s !== 'connecting' && peers.count()) { peers.dropAll(performance.now()); onCount(0); }
+      // Without a connection nobody is really here any more: fade them out and hide the counts.
+      if (s !== 'live' && s !== 'connecting') {
+        if (peers.count()) { peers.dropAll(performance.now()); onCount(0); }
+        station.clear();
+        setBelow(0);
+      }
       onState(s);
     },
     onMessage: (m) => {
       const now = performance.now();
+      if (m.t === 'welcome') {
+        areas = m.area !== undefined;
+        if (Number.isFinite(m.now)) offset = clockOffset(m.now, net.ping, epoch());
+        setBelow(m.station || 0);
+        const where = m.area || 'gallery';
+        waiting = where !== area; // the net moves me on now (a move asked for while the hi was out)
+        if (!areas && area === 'station') { net.pause(); return; } // an old server: off the net below
+        // Its peers are the hi's area's: the gallery's, the station's, or (moving on) neither.
+        if (where === 'station' && !waiting) station.reset(m.peers, now); else station.clear();
+        if (where !== 'gallery' || waiting) m = { ...m, peers: [] };
+      }
+      if (m.t === 'zw') {
+        if (m.area !== area) return; // an answer to a move I've since changed my mind about
+        waiting = false;
+        if (area === 'station') station.reset(m.peers, now);
+        else { peers.apply({ t: 'welcome', id: peers.myId, peers: m.peers }, now); recount(); }
+        return;
+      }
+      if (m.t === 'zc') return setBelow(m.station);
+      if (AREA_T.has(m.t) && (waiting || area === 'station')) {
+        if (!waiting) station.apply(m, now);
+        return;
+      }
       if (m.t === 'name-rejected') return onRejected();
       if (m.t === 'chat-rejected') return onChatRejected();
       if (m.t === 'chat-muted') return onChatMuted(Number(m.s) || 0);
@@ -150,20 +201,29 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
       }
       if (ARENA_T.has(m.t)) onArena(m);
       if (m.t === 'c') { const p = peers.get(m.id); if (p) onChat({ id: m.id, name: p.name, text: m.text }); }
-      if (m.t === 'welcome' || m.t === 'join' || m.t === 'leave') { count = peers.count(); onCount(count); }
+      if (m.t === 'welcome' || m.t === 'join' || m.t === 'leave') recount();
     },
   });
+  // Hidden for 30 s: off the net. Back: the hi rejoins the area I'm in (not below on an old server).
   addEventListener('visibilitychange', () => {
     clearTimeout(createLive.hideTimer);
-    if (document.hidden) createLive.hideTimer = setTimeout(() => { net.pause(); peers.clear(); onCount(0); }, 30000);
-    else if (!away) net.resume(); // away (in the station): to the gallery you've left, so the tab coming back doesn't rejoin
+    if (document.hidden) createLive.hideTimer = setTimeout(() => { net.pause(); peers.clear(); station.clear(); onCount(0); setBelow(0); }, 30000);
+    else if (!(areas === false && area === 'station')) net.resume();
   });
   const tick = positionTicker((m) => net.send(m));
+  const tickBelow = stationTicker((m) => net.send(m));
   return {
     net, peers,
     get fightOk() { return fightOk; },
     // Called every frame. Inside the arena the arena stream replaces position messages.
-    tick: (player) => { if (!inArena()) tick(player); },
+    tick: (player) => { if (area === 'gallery' && !inArena()) tick(player); },
+    // Called every frame in the station: where I am there ({ x, z, y, a }).
+    tickStation: (pos) => { if (area === 'station') tickBelow(pos); },
+    station,
+    get areaName() { return area; },
+    get stationCount() { return below; },
+    // The server's clock now, in ms since 1970 (this machine's until a welcome has said).
+    serverNow: () => epoch() + offset,
     send: (m) => net.send(m),
     leftArena: () => tick.reset(),
     get rtt() { return net.ping; },
@@ -172,11 +232,21 @@ export function createLive({ version, url = MULTIPLAYER.url, getName, getPos, on
     chat: (text) => net.send({ t: 'c', text }),
     admin: (map, pw) => net.send({ t: 'am', map, pw }),
     setName: (n) => net.setName(n),
-    // Away from the gallery (the station): off the net, and the tab coming back doesn't rejoin. false: back on.
-    away(on) { away = !!on; if (on) { clearTimeout(createLive.hideTimer); net.pause(); } else net.resume(); },
+    // To another area: the people I could see go at once, the new area's come with the server's answer.
+    area(a) {
+      if (a === area) return;
+      area = a;
+      waiting = true;
+      if (a === 'station') { peers.apply({ t: 'welcome', id: peers.myId, peers: [] }, performance.now()); onCount(0); tickBelow.reset(); }
+      else { station.clear(); tick.reset(); }
+      if (areas === false) { if (a === 'station') { clearTimeout(createLive.hideTimer); net.pause(); } else net.resume(); return; }
+      net.setArea(a);
+    },
     get state() { return net.state; },
   };
 }
+
+const epoch = () => performance.timeOrigin + performance.now();
 
 // What I do shows on my own screen straight away, with the same limits the server enforces.
 export function localEcho() {
