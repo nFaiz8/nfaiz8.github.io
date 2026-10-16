@@ -236,17 +236,25 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   }));
   const MOUTH_DARK = new THREE.Color('#05060a'), MOUTH_LIT = new THREE.Color('#2e2212');
 
-  // Dust in the light, blown along when a train passes.
-  const DUST = reducedMotion ? 80 : 160;
+  // Dust in the light, blown along when a train passes. The motes hang in world space and you walk through them;
+  // one that falls outside a box around you wraps to the box's far side (x ±7, z −6…+4 with more room to the
+  // north, where the camera looks, y from your floor to 3.2 over it), out at the dim, blurred edges of the view.
+  const DUST_X = 7, DUST_N = 6, DUST_S = 4, DUST_H = 3.2;
+  const wrap = (v, lo, size) => lo + ((((v - lo) % size) + size) % size);
+  // Few and faint: an occasional glint drifting through a tube's light, not a field of dots. Additive, so a mote's
+  // colour is its brightness; it goes dark more than DUST_LIT from the nearest tube.
+  const DUST = reducedMotion ? 20 : 40, DUST_LIT = 3;
   const dustPos = new Float32Array(DUST * 3), dustVel = new Float32Array(DUST);
   let seed = 11;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < DUST; i++) { dustPos[i * 3] = rnd() * 14 - 7; dustPos[i * 3 + 1] = rnd() * 3.2; dustPos[i * 3 + 2] = rnd() * 10 - 5; dustVel[i] = 0.05 + rnd() * 0.1; }
   const dustGeo = own(new THREE.BufferGeometry());
+  const dustCol = new Float32Array(DUST * 3);
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
-  const dustMat = own(new THREE.PointsMaterial({ color: '#cdd6ea', size: 0.05, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+  dustGeo.setAttribute('color', new THREE.BufferAttribute(dustCol, 3));
+  const dustMat = own(new THREE.PointsMaterial({ color: '#cdd6ea', vertexColors: true, size: 0.04, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
   const dust = new THREE.Points(dustGeo, dustMat);
-  dust.frustumCulled = false; // it follows you, and its bounding sphere is computed once
+  dust.frustumCulled = false; // its motes wrap around you, and its bounding sphere is computed once
   scene.add(dust);
 
   // Drips into each puddle, with a ripple.
@@ -303,15 +311,24 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         // Off while the nose is still inside the tunnel, so it doesn't light the walls from the void.
         headlight.intensity = pass.head > 0 && pass.head < map.cols ? 18 : 0;
       }
-      // Dust follows the view, drifting; a passing train blows it along, and it stirs before.
+      // Dust drifts; a passing train blows it along, and it stirs before. Motes outside the box around you wrap
+      // in (all at once on the frame you arrive somewhere new, which is as good as a cut).
       const wind = passing ? pass.dir * 6 * Math.max(0, 1 - Math.abs(pass.head - walker.x) / 25) : pass && pass.phase === 'warn' ? 0.6 * pass.dir : 0;
       const slow = reducedMotion ? 0.4 : 1;
       for (let i = 0; i < DUST; i++) {
-        dustPos[i * 3] += (wind + Math.sin(time * 0.3 + i) * 0.05) * dt * slow;
-        dustPos[i * 3 + 1] += dustVel[i] * Math.sin(time * 0.5 + i * 1.7) * dt * slow;
-        if (dustPos[i * 3] > 7) dustPos[i * 3] -= 14; else if (dustPos[i * 3] < -7) dustPos[i * 3] += 14;
+        const j = i * 3;
+        dustPos[j] = wrap(dustPos[j] + (wind + Math.sin(time * 0.3 + i) * 0.05) * dt * slow, walker.x - DUST_X, 2 * DUST_X);
+        dustPos[j + 1] = wrap(dustPos[j + 1] + dustVel[i] * Math.sin(time * 0.5 + i * 1.7) * dt * slow, walker.y, DUST_H);
+        dustPos[j + 2] = wrap(dustPos[j + 2], walker.z - DUST_N, DUST_N + DUST_S);
+        let near = Infinity;
+        for (let k = 0; k < tubes.length; k++) {
+          const t = tubes[k], dx = t.x - dustPos[j], dy = t.y - dustPos[j + 1], dz = t.z - dustPos[j + 2];
+          near = Math.min(near, dx * dx + dy * dy + dz * dz);
+        }
+        const lit = Math.max(0, 1 - Math.sqrt(near) / DUST_LIT);
+        dustCol[j] = dustCol[j + 1] = dustCol[j + 2] = lit * lit;
       }
-      dust.position.set(walker.x, walker.y, walker.z - 1);
+      dustGeo.attributes.color.needsUpdate = true;
       dustGeo.attributes.position.needsUpdate = true;
       // Drips: 0.6 s falling from the ceiling, then a ripple for 0.8 s.
       for (let i = 0; i < puddles.length; i++) {
