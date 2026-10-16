@@ -14,6 +14,17 @@ import { createPost } from './post.js';
 
 const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
 
+// Where your feet go: the floor, or on a stair the top of the tread you're over. The ramp you walk on runs
+// through the treads' front edges (scene.js), so it's above a tread everywhere else and you'd float.
+const TREAD = 0.5;
+function footY(map, w) {
+  const s = map.at(Math.floor(w.x), Math.floor(w.z))?.stair;
+  if (!s || s.from == null || s.to == null) return w.y;
+  const along = s.dx ? (w.x - s.start) * s.dx : (w.z - s.start) * s.dz;
+  const front = Math.min(s.len, (Math.floor(along / TREAD + 1e-6) + 1) * TREAD);
+  return s.from + ((s.to - s.from) * front) / s.len;
+}
+
 export function startStation(stage, { onExit, keys, reducedMotion = false, phone = false }) {
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
@@ -49,6 +60,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     // You: the arena's stick figure, posed each frame (rig.js) and drawn as glyphs (figure.js).
     figure = createFigure(scene, { glow: true });
     const joints = {}, pose = { yaw: 0, phase: 0, gait: 0, t: 0, reducedMotion };
+    const feet = { x: 0, y: 0, z: 0 }; // reused each frame
     let targetYaw = 0, walked = walker.walked;
     const lantern = new THREE.PointLight('#ffb35c', 9, 6.5, 1.8);
     blobGeo = new THREE.CircleGeometry(0.32, 24).rotateX(-Math.PI / 2);
@@ -111,8 +123,9 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       walked = walker.walked;
       pose.t = t;
       poseFigure(pose, joints);
-      blob.position.set(walker.x, walker.y + 0.02, walker.z);
-      lantern.position.set(walker.x + joints.lantern.x, walker.y + joints.lantern.y, walker.z + joints.lantern.z);
+      feet.x = walker.x; feet.y = footY(map, walker); feet.z = walker.z;
+      blob.position.set(feet.x, feet.y + 0.02, feet.z);
+      lantern.position.set(feet.x + joints.lantern.x, feet.y + joints.lantern.y, feet.z + joints.lantern.z);
       lantern.intensity = 9 * (reducedMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 13) * Math.sin(t * 5.1));
 
       const train = trainAt(t, map);
@@ -122,7 +135,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       const eye = eyeFor(cam), shake = world.shake ? world.shake(t, walker, train) : { x: 0, y: 0 };
       camera.position.set(eye.x + shake.x, eye.y + shake.y, eye.z);
       camera.lookAt(cam.x + shake.x, cam.y + shake.y, cam.z);
-      figure.update(joints, camera, walker);
+      figure.update(joints, camera, feet);
       v.set(walker.x, walker.y + 0.8, walker.z).project(camera);
       post.setFocus((v.y + 1) / 2);
       post.render();

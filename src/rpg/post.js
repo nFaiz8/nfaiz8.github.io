@@ -34,7 +34,7 @@ const TiltShift = {
 export function createPost(renderer, scene, camera) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.45, 0.85); // strength, radius, threshold
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.35, 0.88); // strength, radius, threshold
   composer.addPass(bloom);
   const across = new ShaderPass(TiltShift), down = new ShaderPass(TiltShift);
   down.uniforms.dir.value.set(0, 1);

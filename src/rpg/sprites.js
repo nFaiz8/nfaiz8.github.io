@@ -35,7 +35,8 @@ export function makeSprite(lines, colors, height, { glow = false, centre = null 
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   // Glowing sprites (the way-out sign) skip tone mapping, so they stay the brightest, crispest thing on screen.
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.05, depthWrite: false, side: THREE.DoubleSide, toneMapped: !glow });
+  // A sprite writes depth where it has ink (alphaTest drops the rest), so you go behind a prop that's in front.
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.05, depthWrite: true, side: THREE.DoubleSide, toneMapped: !glow });
   const geo = new THREE.PlaneGeometry((height * canvas.width) / canvas.height, height);
   geo.translate(0, height / 2, 0);
   const mesh = new THREE.Mesh(geo, mat);

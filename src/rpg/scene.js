@@ -13,6 +13,7 @@ export const WALL_HEIGHT = 4; // over the highest floor beside a wall
 // solid between the eye and you (a black screen walking north past z ≈ 11.5 on the platform).
 const FADE_REACH = 10;
 const TUNNEL = 3.4; // a tunnel mouth's height over the track
+const FADE_OPACITY = 0.2; // a faded wall's or pillar's nearest face
 
 // A tile texture: a base colour with one faint glyph over it.
 function glyphTexture([base, ink, glyph], alpha = 0.35, size = 64) {
@@ -56,8 +57,15 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
 
   // Wall cubes and pillars, kept apart so the ones between the camera and you can fade (spec §4).
   const fading = { wall: [], pillar: [] };
-  const fadeBox = (kind, c, r, y, s = 1) => fading[kind].push({ c, r, m: new THREE.Matrix4().compose(new THREE.Vector3(c + 0.5, y + 0.5, r + 0.5), new THREE.Quaternion(), new THREE.Vector3(s, 1, s)) });
-  const wallCube = (c, r, y) => fadeBox('wall', c, r, y);
+  const fadeBox = (kind, c, r, y, s = 1, h = 1) => fading[kind].push({ c, r, m: new THREE.Matrix4().compose(new THREE.Vector3(c + 0.5, y + h / 2, r + 0.5), new THREE.Quaternion(), new THREE.Vector3(s, h, s)) });
+  // A wall column from lo up to top, stacked down from its top so every wall's top (and its ┼ grid) lines up.
+  // The bottom cube reaches under lo, out of sight beside the floor, unless the column's foot shows (the wall
+  // over a tunnel mouth), when it's cut to end at lo.
+  const wallColumn = (c, r, lo, top, exact = false) => {
+    for (let y = top - 1; y > lo - 1 + 1e-6; y -= 1) {
+      if (exact && y < lo) fadeBox('wall', c, r, lo, 1, y + 1 - lo); else fadeBox('wall', c, r, y);
+    }
+  };
   // The map's outer walls all rise to the highest floor + WALL_HEIGHT: at 35° the camera sees ~15 north of you,
   // and a wall only 4 over the track would let it see over into the void.
   const roof = Math.max(...map.cells.filter((cell) => cell.level != null).map((cell) => cell.level)) + WALL_HEIGHT;
@@ -68,13 +76,13 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       const ls = levels(c, r);
       if (!ls.length) continue; // buried in other walls
       const lo = Math.min(...ls) - 0.4, top = edge(c, r) ? roof : Math.max(...ls) + WALL_HEIGHT;
-      for (let y = lo; y < top - 1e-6; y += 1) wallCube(c, r, y);
+      wallColumn(c, r, lo, top);
       continue;
     }
     if (ch === '=') {
       box('track', x, LEVEL.track - 0.1, z, 1, 0.2, 1);
       // Where a track leaves the map (a tunnel), the end wall carries on over it, so the mouth is a dark opening.
-      if (c === 0 || c === map.cols - 1) for (let y = LEVEL.track + TUNNEL; y < roof - 1e-6; y += 1) wallCube(c, r, y);
+      if (c === 0 || c === map.cols - 1) wallColumn(c, r, LEVEL.track + TUNNEL, roof, true);
       continue;
     }
     if (cell.stair) {
@@ -113,27 +121,34 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // Between the camera and you: south of you, within reach, and within `side` of you across (walls block a wide
   // view; pillars and tubes only fade when they're nearly in line with you).
   const nearCamera = (x, z, w, side = FADE_REACH) => z > w.z + 0.5 && z < w.z + FADE_REACH && Math.abs(x - w.x) < side;
+  // Faded walls draw only their nearest face: a depth-only pass first, then the colour where it's nearest, so you
+  // see one clean pane of wall, not every stacked cube's inside faces. Both draw after everything else (you
+  // included), so a faded wall only ever tints you, never hides you.
+  const depthOnly = own(new THREE.MeshBasicMaterial({ colorWrite: false, transparent: true }));
   const fadeSets = Object.entries(fading).filter(([, list]) => list.length).map(([kind, list]) => {
     const fadeMat = own(mats[kind].clone());
-    fadeMat.transparent = true; fadeMat.opacity = 0.25; fadeMat.depthWrite = false;
+    fadeMat.transparent = true; fadeMat.opacity = FADE_OPACITY; fadeMat.depthWrite = false; fadeMat.depthFunc = THREE.LessEqualDepth;
     const solid = new THREE.InstancedMesh(unit, mats[kind], list.length), faded = new THREE.InstancedMesh(unit, fadeMat, list.length);
+    const mask = new THREE.InstancedMesh(unit, depthOnly, list.length);
+    mask.instanceMatrix = faded.instanceMatrix; // the same instances
+    mask.renderOrder = 8; faded.renderOrder = 9;
     // placeWalls moves instances between these two every few steps, and three.js computes an InstancedMesh's
     // bounding sphere once, from the instances it had then; culling against that stale sphere would drop them.
-    solid.frustumCulled = faded.frustumCulled = false;
-    scene.add(solid, faded);
-    return { side: kind === 'wall' ? FADE_REACH : 1.6, list, solid, faded };
+    solid.frustumCulled = faded.frustumCulled = mask.frustumCulled = false;
+    scene.add(solid, mask, faded);
+    return { side: kind === 'wall' ? FADE_REACH : 1.6, list, solid, faded, mask };
   });
   let fadedFor = '';
   const placeWalls = (w) => {
     const key = `${Math.floor(w.x)},${Math.floor(w.z)}`;
     if (key === fadedFor) return;
     fadedFor = key;
-    for (const { side, list, solid, faded } of fadeSets) {
+    for (const { side, list, solid, faded, mask } of fadeSets) {
       let a = 0, b = 0;
       for (const wl of list) {
         if (nearCamera(wl.c + 0.5, wl.r + 0.5, w, side)) faded.setMatrixAt(b++, wl.m); else solid.setMatrixAt(a++, wl.m);
       }
-      solid.count = a; faded.count = b;
+      solid.count = a; faded.count = mask.count = b;
       solid.instanceMatrix.needsUpdate = faded.instanceMatrix.needsUpdate = true;
     }
   };
@@ -201,10 +216,12 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   const carTex = own(trainTexture(false)), carGlow = own(trainTexture(true));
   const carMat = own(new THREE.MeshStandardMaterial({ map: carTex, emissiveMap: carGlow, emissive: '#ffffff', emissiveIntensity: 1, roughness: 0.6, metalness: 0.3 }));
   // The panels go on the long sides only; the camera looks down on the roofs, and the ends meet the next car.
-  const roofTex = own(glyphTexture(['#5a606c', '#a9afc2', '▤'], 0.3));
+  // A train on the south track shows you mostly its roof, so the roof is a lighter grey with its ▤ panels
+  // plain, and faintly lit, to read as a train from above.
+  const roofTex = own(glyphTexture(['#7d8592', '#dfe4ee', '▤'], 0.5));
   roofTex.wrapS = roofTex.wrapT = THREE.RepeatWrapping;
   roofTex.repeat.set(TRAIN.car / 1.5, 2);
-  const roofMat = own(new THREE.MeshStandardMaterial({ map: roofTex, emissive: '#1c2028', roughness: 0.7, metalness: 0.4 })); // a faint shape in the dark
+  const roofMat = own(new THREE.MeshStandardMaterial({ map: roofTex, emissive: '#2c323e', roughness: 0.7, metalness: 0.3 })); // a faint shape in the dark
   const carGeo = own(new THREE.BoxGeometry(TRAIN.car, 2.6, 2.3));
   const carMats = [roofMat, roofMat, roofMat, roofMat, carMat, carMat]; // +x, -x, +y, -y, +z, -z
   const train = new THREE.Group();
@@ -217,7 +234,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   train.visible = false;
   // The headlight and the tunnel glow are single lights that stay in the scene at intensity 0 between trains:
   // adding or hiding a light changes the light count, which recompiles every material (a hitch).
-  const headlight = new THREE.PointLight('#fff1cc', 0, 14, 1.4);
+  const headlight = new THREE.PointLight('#fff1cc', 0, 10, 1.4);
   // Only one train runs at a time, so one light serves every tunnel mouth: it moves to the one a train is coming
   // out of, and glows for the 3 s of warning.
   const mouthLight = new THREE.PointLight('#ffd9a0', 0, 12, 1.5);
@@ -241,9 +258,9 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   // north, where the camera looks, y from your floor to 3.2 over it), out at the dim, blurred edges of the view.
   const DUST_X = 7, DUST_N = 6, DUST_S = 4, DUST_H = 3.2;
   const wrap = (v, lo, size) => lo + ((((v - lo) % size) + size) % size);
-  // Few and faint: an occasional glint drifting through a tube's light, not a field of dots. Additive, so a mote's
-  // colour is its brightness; it goes dark more than DUST_LIT from the nearest tube.
-  const DUST = reducedMotion ? 20 : 40, DUST_LIT = 3;
+  // A light haze of specks in the light, not a field of dots. Additive, so a mote's colour is its brightness: it
+  // fades over DUST_LIT from the nearest tube or your lantern, to a dim DUST_FLOOR away from both.
+  const DUST = reducedMotion ? 45 : 90, DUST_LIT = 5, DUST_FLOOR = 0.25, DUST_LANTERN = 2.5;
   const dustPos = new Float32Array(DUST * 3), dustVel = new Float32Array(DUST);
   let seed = 11;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -252,7 +269,7 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   const dustCol = new Float32Array(DUST * 3);
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
   dustGeo.setAttribute('color', new THREE.BufferAttribute(dustCol, 3));
-  const dustMat = own(new THREE.PointsMaterial({ color: '#cdd6ea', vertexColors: true, size: 0.04, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const dustMat = own(new THREE.PointsMaterial({ color: '#cdd6ea', vertexColors: true, size: 0.055, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
   const dust = new THREE.Points(dustGeo, dustMat);
   dust.frustumCulled = false; // its motes wrap around you, and its bounding sphere is computed once
   scene.add(dust);
@@ -272,7 +289,14 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
   owned.push(news);
   news.mesh.position.set(30.5, LEVEL.platform, 12.4);
   scene.add(news.mesh);
-  const flicker = tubes.length > 3 ? 3 : 0; // the one tube with a fault
+  // The one tube with a fault: dimmer and a little green all the time (so it reads with reduced motion too), and
+  // every few seconds it stutters, a burst of on-off at about 4 a second.
+  const flicker = tubes.length > 3 ? 3 : 0;
+  if (tubes.length) {
+    const t = tubes[flicker];
+    t.base = 4;
+    t.bar.material = t.onMat = own(new THREE.MeshBasicMaterial({ color: '#b9d6c8', toneMapped: false }));
+  }
 
   return {
     tubes, owned,
@@ -284,11 +308,14 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
       for (let i = 0; i < tubes.length; i++) {
         const t = tubes[i];
         let k = 1;
-        if (i === flicker && !reducedMotion) k = Math.sin(time * 31) + Math.sin(time * 7.3) > 1.3 ? 0.15 : 1;
+        if (i === flicker && !reducedMotion) {
+          const ph = (time + 1.3) % 4.1; // a 0.9 s stutter every 4.1 s, and a flick now and then between
+          k = ph < 0.9 ? (Math.sin(time * 26) > -0.2 ? 0.1 : 1) : Math.sin(time * 31) + Math.sin(time * 7.3) > 1.75 ? 0.1 : 1;
+        }
         if (passing && !reducedMotion && Math.abs(t.x - pass.head) < 4) k *= 0.55 + 0.45 * Math.abs(Math.sin(time * 53 + i));
         t.light.intensity = t.base * k;
         t.bar.visible = k > 0.3;
-        t.bar.material = nearCamera(t.x, t.z, walker, 1.6) ? tubeFadeMat : tubeMat;
+        t.bar.material = nearCamera(t.x, t.z, walker, 1.6) ? tubeFadeMat : t.onMat || tubeMat;
       }
       // The tunnel the train comes out of glows for the warning, and stays lit while it passes.
       let glow = 0;
@@ -307,9 +334,10 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
         for (let i = 0; i < cars.length; i++) cars[i].position.set(pass.head - pass.dir * (TRAIN.car / 2 + i * (TRAIN.car + TRAIN.gap)), y, t.z);
         lamps[0].position.set(pass.head + pass.dir * 0.02, y - 0.6, t.z - 0.7);
         lamps[1].position.set(pass.head + pass.dir * 0.02, y - 0.6, t.z + 0.7);
-        headlight.position.set(pass.head + pass.dir * 3, y - 0.4, t.z);
+        // Ahead of the nose and over the platform's edge, away from the outer wall, which it would wash out.
+        headlight.position.set(pass.head + pass.dir * 3, y - 0.4, t.z + (t.z < map.rows / 2 ? 1.6 : -1.6));
         // Off while the nose is still inside the tunnel, so it doesn't light the walls from the void.
-        headlight.intensity = pass.head > 0 && pass.head < map.cols ? 18 : 0;
+        headlight.intensity = pass.head > 0 && pass.head < map.cols ? 10 : 0;
       }
       // Dust drifts; a passing train blows it along, and it stirs before. Motes outside the box around you wrap
       // in (all at once on the frame you arrive somewhere new, which is as good as a cut).
@@ -325,8 +353,11 @@ export function buildScene(scene, map, { reducedMotion = false } = {}) {
           const t = tubes[k], dx = t.x - dustPos[j], dy = t.y - dustPos[j + 1], dz = t.z - dustPos[j + 2];
           near = Math.min(near, dx * dx + dy * dy + dz * dz);
         }
-        const lit = Math.max(0, 1 - Math.sqrt(near) / DUST_LIT);
-        dustCol[j] = dustCol[j + 1] = dustCol[j + 2] = lit * lit;
+        const ldx = walker.x - dustPos[j], ldy = walker.y + 0.6 - dustPos[j + 1], ldz = walker.z - dustPos[j + 2];
+        const tube = Math.max(0, 1 - Math.sqrt(near) / DUST_LIT);
+        const lamp = Math.max(0, 1 - Math.sqrt(ldx * ldx + ldy * ldy + ldz * ldz) / DUST_LANTERN);
+        const lit = Math.max(tube, lamp);
+        dustCol[j] = dustCol[j + 1] = dustCol[j + 2] = DUST_FLOOR + (1 - DUST_FLOOR) * lit * lit;
       }
       dustGeo.attributes.color.needsUpdate = true;
       dustGeo.attributes.position.needsUpdate = true;
