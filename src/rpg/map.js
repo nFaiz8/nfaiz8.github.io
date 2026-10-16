@@ -82,7 +82,9 @@ export function parseStation(text) {
       if (cell && cell.level != null && (cell.ch === '_' || cell.ch === '|')) tubes.push({ x: c + 0.5, y: cell.level + TUBE, z: mid + 0.5 });
     }
   }
-  for (const cell of cells) if (cell.ch === '.' && cell.c % 4 === 2 && cell.r % 4 === 1) tubes.push({ x: cell.c + 0.5, y: cell.level + TUBE, z: cell.r + 0.5 });
+  // (Rows 3 mod 4: on the shipped map 7 and 11, so seen from the hall no tube hangs in front of the north wall's
+  // signs at their height.)
+  for (const cell of cells) if (cell.ch === '.' && cell.c % 4 === 2 && cell.r % 4 === 3) tubes.push({ x: cell.c + 0.5, y: cell.level + TUBE, z: cell.r + 0.5 });
 
   const tracks = bands((r) => grid[r].includes('='), rows).map((b) => ({ z0: b[0], z1: b.at(-1) + 1, z: (b[0] + b.at(-1) + 1) / 2, y: LEVEL.track }));
   const spawn = cells.find((cell) => cell.ch === 'S');

@@ -132,3 +132,18 @@ test('every value is finite for wild inputs', () => {
   }
   assert.ok(Number.isFinite(turnToward(1e6, -1e6, 0.016)));
 });
+
+test('a commuter can stand on one foot more (shift), and hold a phone up before them', () => {
+  const still = pose({}), left = pose({ shift: 1 }), right = pose({ shift: -1 });
+  assert.ok(left.hip.x > still.hip.x + 0.02 && right.hip.x < still.hip.x - 0.02, 'the hip moves over a foot');
+  assert.ok(Math.abs(left.footL.x - still.footL.x) < 1e-9, 'the feet stay put');
+  for (const k of JOINTS) assert.ok(Number.isFinite(left[k].x + left[k].y + left[k].z), k);
+  const phone = pose({ phone: true });
+  assert.ok(phone.handR.y > still.handR.y + 0.15, 'the hand comes up');
+  assert.ok(phone.handR.z > still.handR.z, 'in front');
+  assert.ok(Math.abs(phone.handR.x - phone.neck.x) < 0.15, 'before the body');
+  assert.ok(phone.lantern.y > phone.handR.y, 'the screen just above the hand');
+  // Bones keep their lengths.
+  assert.ok(Math.abs(dist(phone.shoulder, phone.elbowR) - BONES.upperArm) < 1e-6);
+  assert.ok(Math.abs(dist(phone.elbowR, phone.handR) - BONES.foreArm) < 1e-6);
+});

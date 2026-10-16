@@ -35,6 +35,8 @@ const FEET_W = { idle: 0.3 * U, walk: 0.28 * U }; // each foot out from the midd
 const HAND_L = { idle: [0.45, 1.72, -0.3], walk: [0.35, 1.7, -0.1], swing: 0.6, raise: 0.25 };
 const HAND_R = { idle: [0.45, 1.2, 0.6], walk: [0.45, 1.15, 0.6], swing: 0.22 };
 const RUN_SWING = 0.5; // the arms swing this much more when you run
+const SHIFT = { x: 0.045, drop: 0.012 };
+const PHONE = [0.1, 0.35, 0.65]; // phone: the right hand held up before the chest [out, down, forward], in u
 const BREATH = { period: 2.4, h: 0.012 }; // the arena's breath: a slow, tiny rise
 const LANTERN = { below: 0.075, sway: 0.015, swing: 0.03 };
 const REACH = 0.999; // a target out of reach is pulled in to this much of the limb (as stick.js)
@@ -88,7 +90,7 @@ const KNEE_POLE = v(0, 0, 1);
 const ELBOW_POLE_L = v(0.6, 0, -1), ELBOW_POLE_R = v(-0.6, 0, -1); // back, and a little out
 const JOINTS = ['hip', 'neck', 'head', 'shoulder', 'elbowL', 'handL', 'elbowR', 'handR', 'kneeL', 'footL', 'kneeR', 'footR', 'lantern'];
 
-// state = { yaw, phase, gait, t, reducedMotion }; out gets each joint as { x, y, z } in world units, relative
+// state = { yaw, phase, gait, t, reducedMotion, shift, phone }; out gets each joint as { x, y, z } in world units, relative
 // to the feet point. gait: 0 standing, 1 walking, SPRINT running (a smoothed speed / walking speed).
 export function poseFigure(state, out = {}) {
   for (const k of JOINTS) out[k] ??= v();
@@ -100,7 +102,9 @@ export function poseFigure(state, out = {}) {
   // The hip drops into the walk, bobs (lowest when the feet are furthest apart) and sways over the planted foot.
   const breath = rm ? 0 : BREATH.h * Math.sin((TAU * t) / BREATH.period);
   const hipY = HIP_H * U - g * WALK.drop - r * WALK.runDrop + g * WALK.bob * (1 + r) * Math.cos(2 * p) + breath;
-  const hip = set(S.hip, -g * WALK.sway * Math.cos(p), hipY, 0);
+  // shift (−1…1): standing with your weight on one foot, the hip over it and a touch lower (commuters do this).
+  const shift = clamp(fin(state.shift, 0), -1, 1) * (1 - g);
+  const hip = set(S.hip, -g * WALK.sway * Math.cos(p) + SHIFT.x * shift, hipY - SHIFT.drop * Math.abs(shift), 0);
   const lean = g * WALK.lean + r * WALK.runLean;
   const ux = 0, uy = Math.cos(lean), uz = Math.sin(lean); // up the torso
   const neck = set(S.neck, hip.x + ux * BONES.torso, hip.y + uy * BONES.torso, hip.z + uz * BONES.torso);
@@ -120,13 +124,16 @@ export function poseFigure(state, out = {}) {
   const hl = (i) => lerp(HAND_L.idle[i], HAND_L.walk[i], g) * U;
   const hr = (i) => lerp(HAND_R.idle[i], HAND_R.walk[i], g) * U;
   set(S.tL, sh.x + hl(0), sh.y - hl(1) + sw * HAND_L.raise * U * Math.max(0, -s), sh.z + hl(2) - sw * HAND_L.swing * U * s);
-  set(S.tR, sh.x - hr(0), sh.y - hr(1), sh.z + hr(2) + sw * HAND_R.swing * U * s);
+  if (state.phone) set(S.tR, sh.x - PHONE[0] * U, sh.y - PHONE[1] * U, sh.z + PHONE[2] * U);
+  else set(S.tR, sh.x - hr(0), sh.y - hr(1), sh.z + hr(2) + sw * HAND_R.swing * U * s);
   twoBone(sh, S.tL, BONES.upperArm, BONES.foreArm, ELBOW_POLE_L, out.elbowL, out.handL);
   twoBone(sh, S.tR, BONES.upperArm, BONES.foreArm, ELBOW_POLE_R, out.elbowR, out.handR);
 
   // The lantern hangs just below the right hand, swaying a little and lagging the arm's swing.
   const sway = rm ? 0 : LANTERN.sway * Math.sin(t * 1.9) + LANTERN.swing * g * Math.sin(p - 0.6);
-  set(out.lantern, out.handR.x, out.handR.y - LANTERN.below, out.handR.z + sway);
+  // (Holding a phone, this is the phone: just above the hand, toward the face.)
+  if (state.phone) set(out.lantern, out.handR.x, out.handR.y + 0.035, out.handR.z + 0.01);
+  else set(out.lantern, out.handR.x, out.handR.y - LANTERN.below, out.handR.z + sway);
 
   set(out.hip, hip.x, hip.y, hip.z);
   set(out.neck, neck.x, neck.y, neck.z);

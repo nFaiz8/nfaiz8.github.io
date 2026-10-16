@@ -47,6 +47,16 @@ await withBrowser(async ({ page, url, errors }) => {
     assert.ok(b.x > a.x + 1, `moved east ${a.x.toFixed(2)} → ${b.x.toFixed(2)}`);
   });
 
+  await check('the platform has its commuters, pigeons and rats', async () => {
+    await page.evaluate(() => { window.__station.setTime(20); window.__station.teleport(30.5, 9.5); });
+    await sleep(800);
+    const life = await page.evaluate(() => window.__station.life());
+    assert.equal(life.commuters.length, 4);
+    assert.equal(life.pigeons.length, 4);
+    assert.equal(life.rats.length, 2);
+    await page.screenshot({ path: `${SHOTS}/station-platform.png` });
+  });
+
   await check('a train comes out of the tunnel and passes', async () => {
     await page.evaluate((s) => { window.__station.teleport(30.5, 9.5); window.__station.setTime(s); }, startOf(0) - 2);
     await page.waitForFunction(() => window.__station.train()?.phase === 'warn', { timeout: 10000 });

@@ -11,6 +11,7 @@ import { buildScene } from './scene.js';
 import { createFigure } from './figure.js';
 import { poseFigure, turnToward, advancePhase } from './rig.js';
 import { createPost } from './post.js';
+import { STATION_LIFE, createCommuter, stepCommuter, pushOut } from './life.js';
 
 const GAIT_EASE = 0.12; // seconds for the gait to follow your speed
 // A phone held upright: 8 tiles across makes the view very tall, and its top looks over the far wall into the
@@ -33,11 +34,13 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
   // Everything that needs tearing down, so a throw anywhere in setup (no WebGL, a failed build) leaves nothing
   // behind: stop() and a failed start share teardown().
   let canvas, renderer, world, figure, blobGeo, blobMat, post, raf = 0, resize = null, hook = null;
+  const people = []; // the commuters' figures
   const teardown = () => {
     cancelAnimationFrame(raf);
     if (resize) removeEventListener('resize', resize);
     world?.dispose();
     figure?.dispose();
+    for (const p of people) p.figure.dispose();
     blobGeo?.dispose();
     blobMat?.dispose();
     post?.dispose();
@@ -60,6 +63,16 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
     world = buildScene(scene, map, { reducedMotion });
     const walker = createWalker(map);
+
+    // Commuters: the same stick figure, muted, without a lantern; one on the phone (its screen lights its face).
+    const phoneLight = new THREE.PointLight('#9fd0ff', 0, 1.4, 2);
+    scene.add(phoneLight);
+    STATION_LIFE.commuters.forEach((spec, i) => {
+      const c = createCommuter(spec, i);
+      people.push({ c, figure: createFigure(scene, { glow: false, color: spec.color, lantern: false, phone: !!spec.phone }), joints: {}, at: { x: 0, y: 0, z: 0 },
+        pose: { yaw: c.yaw, phase: 0, gait: 0, t: 0, reducedMotion, shift: 0, phone: !!spec.phone }, walked: 0 });
+    });
+    const crowd = people.map((p) => p.c);
 
     // You: the arena's stick figure, posed each frame (rig.js) and drawn as glyphs (figure.js).
     figure = createFigure(scene, { glow: true });
@@ -120,6 +133,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       last = now;
       const t = (now - t0) / 1000;
       stepWalker(walker, dt, finger ? fingerInput() : keys(), map);
+      pushOut(walker, crowd, map);
       if (!leaving && map.at(Math.floor(walker.x), Math.floor(walker.z))?.ch === 'E') { leaving = true; onExit(); }
 
       // Face where you walk (keeping the last facing when you stop); the stride follows the ground covered,
@@ -139,12 +153,27 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
 
       const train = trainAt(t, map);
       world.update(t, dt, walker, train);
+      for (const p of people) {
+        const c = stepCommuter(p.c, dt, { train, walker }, map);
+        p.pose.yaw = c.yaw; p.pose.shift = c.shift; p.pose.t = t + c.home.x; // desynchronised breathing
+        p.pose.gait += (Math.min(1, c.speed / 1.1) * 0.8 - p.pose.gait) * (1 - Math.exp(-dt / 0.2));
+        p.pose.phase = advancePhase(p.pose.phase, c.walked - p.walked, p.pose.gait);
+        p.walked = c.walked;
+        poseFigure(p.pose, p.joints);
+        p.at.x = c.x; p.at.y = map.levelAt(c.x, c.z) ?? 0; p.at.z = c.z;
+        if (c.phone) {
+          const j = p.joints.lantern;
+          phoneLight.position.set(c.x + j.x, p.at.y + j.y + 0.05, c.z + j.z + 0.1);
+          phoneLight.intensity = 0.45;
+        }
+      }
 
       followCamera(cam, walker, dt, map, camera.aspect);
       const eye = eyeFor(cam), shake = world.shake ? world.shake(t, walker, train) : { x: 0, y: 0 };
       camera.position.set(eye.x + shake.x, eye.y + shake.y, eye.z);
       camera.lookAt(cam.x + shake.x, cam.y + shake.y, cam.z);
       figure.update(joints, camera, feet);
+      for (const p of people) p.figure.update(p.joints, camera, p.at);
       v.set(walker.x, walker.y + 0.8, walker.z).project(camera);
       post.setFocus((v.y + 1) / 2);
       post.render();
@@ -159,6 +188,7 @@ export function startStation(stage, { onExit, keys, reducedMotion = false, phone
       train: () => trainAt(time(), map),
       setTime(s) { t0 = performance.now() - s * 1000; },
       teleport(x, z) { walker.x = x; walker.z = z; walker.vx = walker.vz = 0; walker.y = map.levelAt(x, z) ?? walker.y; },
+      life: () => ({ pigeons: world.pigeons.map((p) => p.s.state), rats: world.rats.map((r) => r.s.state), commuters: crowd.map((c) => ({ x: c.x, z: c.z, yaw: c.yaw })) }),
     };
     window.__station = hook;
 

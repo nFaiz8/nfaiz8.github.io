@@ -77,7 +77,7 @@ test('the shipped station', () => {
   assert.equal(m.exits.length, 3);
   assert.equal(m.signs.length, 4);
   assert.deepEqual(m.tracks.map((t) => [t.z0, t.z1]), [[1, 4], [15, 18]]);
-  assert.equal(m.tubes.length, 13, 'five over the platform, eight over the hall');
+  assert.equal(m.tubes.length, 11, 'five over the platform, six over the hall');
   assert.equal(m.levelAt(14.0, 9.5), 0, 'top of the stairs');
   assert.equal(m.levelAt(20.0, 9.5), -3, 'foot of the stairs');
   for (const t of m.tubes) assert.ok(!m.solidAt(t.x, t.z) || m.at(Math.floor(t.x), Math.floor(t.z)).ch === '|', 'tubes hang over floor');

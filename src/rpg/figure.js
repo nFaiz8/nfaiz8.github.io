@@ -73,7 +73,9 @@ export function createFigure(scene, opts = {}) {
   }
 }
 
-function build(scene, { glow = true }, made, meshes, free) {
+// opts: glow (you: bright, past tone mapping), color (the bones and head), lantern (the ¤; commuters have none),
+// phone (a small lit screen at the hand, for a commuter on the phone).
+function build(scene, { glow = true, color = COLOR, lantern: hasLantern = true, phone = false }, made, meshes, free) {
   const own = (x) => (made.push(x), x);
   const tint = (hex) => (glow ? throughAces(hex) : new THREE.Color(hex));
   const mat = (map, color, alphaTest = 0.05) => own(new THREE.MeshBasicMaterial({ map, color: tint(color), transparent: true, alphaTest, depthWrite: false, side: THREE.DoubleSide, toneMapped: !glow }));
@@ -92,7 +94,7 @@ function build(scene, { glow = true }, made, meshes, free) {
   // little bigger, under it.
   const bar = glyph('|');
   own(bar.tex);
-  const barFill = mat(bar.tex, COLOR), barEdge = mat(bar.tex, INK);
+  const barFill = mat(bar.tex, color), barEdge = mat(bar.tex, INK);
   const bones = BONES.map(([a, b]) => ({ a, b, edge: mesh(barEdge, 2), fill: mesh(barFill, 3) }));
 
   // A round joint where bones bend, a bone's width across: two bars meeting at an angle leave a notch at the
@@ -102,7 +104,7 @@ function build(scene, { glow = true }, made, meshes, free) {
   dc.fillStyle = '#fff';
   dc.beginPath(); dc.arc(32, 32, 31, 0, 2 * Math.PI); dc.fill();
   const dotTex = own(new THREE.CanvasTexture(dc.canvas));
-  const dotFill = mat(dotTex, COLOR, 0.5), dotEdge = mat(dotTex, INK, 0.5); // hard-edged: a soft rim showed as a ring
+  const dotFill = mat(dotTex, color, 0.5), dotEdge = mat(dotTex, INK, 0.5); // hard-edged: a soft rim showed as a ring
   const dots = JOINTS.map((k) => ({ k, edge: mesh(dotEdge, 2), fill: mesh(dotFill, 3) }));
   const ROUND = { w: BAR_W, h: BAR_W }, ROUND_EDGE = { w: BAR_W + 2 * EDGE, h: BAR_W + 2 * EDGE };
 
@@ -115,8 +117,15 @@ function build(scene, { glow = true }, made, meshes, free) {
     const k = inkH / fill.inkH;
     return { w: fill.w * k * squash.w, h: fill.h * k * squash.h, edge: mesh(mat(edge.tex, INK), 2), fill: mesh(mat(fill.tex, color), 3) };
   };
-  const head = sprite('O', 2 * HEAD.r, COLOR, HEAD_SQUASH);
-  const lantern = sprite('¤', LANTERN_H, LANTERN);
+  const head = sprite('O', 2 * HEAD.r, color, HEAD_SQUASH);
+  const lantern = hasLantern ? sprite('¤', LANTERN_H, LANTERN) : null;
+  // The phone: a small pale-blue screen, past tone mapping so it reads as lit, square to the camera.
+  let screen = null;
+  if (phone) {
+    const m = own(new THREE.MeshBasicMaterial({ color: new THREE.Color(0.75, 0.95, 1.3), toneMapped: false, depthWrite: false, transparent: true }));
+    const ink = own(new THREE.MeshBasicMaterial({ color: INK, depthWrite: false, transparent: true }));
+    screen = { w: 0.07, h: 0.1, rim: { w: 0.09, h: 0.12 }, edge: mesh(ink, 2), fill: mesh(m, 4) };
+  }
 
   // Scratch, reused every frame.
   const pa = new THREE.Vector3(), pb = new THREE.Vector3(), mid = new THREE.Vector3(), dir = new THREE.Vector3();
@@ -161,7 +170,8 @@ function build(scene, { glow = true }, made, meshes, free) {
       }
       for (const d of dots) { square(d.edge, ROUND_EDGE, joints[d.k], at); square(d.fill, ROUND, joints[d.k], at); }
       face(head, joints.head, at);
-      face(lantern, joints.lantern, at);
+      if (lantern) face(lantern, joints.lantern, at);
+      if (screen) { square(screen.edge, screen.rim, joints.lantern, at); square(screen.fill, screen, joints.lantern, at); }
     },
     dispose: free,
   };

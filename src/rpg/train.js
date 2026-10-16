@@ -29,3 +29,21 @@ export function trainAt(t, map) {
   }
   return null;
 }
+
+// The departures board over the stairs: the next two trains, counting down in whole minutes, then `<1 MIN`. From
+// SERVICE seconds before a train until it has gone, it warns instead (none of them stop here). Pure, so the board
+// only redraws when this text changes.
+export const SERVICE = 5;
+export const minutes = (s) => (s < 30 ? '<1 MIN' : `${Math.max(1, Math.round(s / 60))} MIN`);
+const row = (label, right, w = 20) => label + ' '.repeat(Math.max(1, w - label.length - right.length)) + right;
+export function departures(t, map, blink = true) {
+  const travel = (map.cols + LENGTH + 4) / TRAIN.speed;
+  let n = Math.max(0, Math.floor((t - TRAIN.first) / TRAIN.every) - 1);
+  while (startOf(n) + travel <= t) n++;
+  const start = startOf(n);
+  if (t >= start - SERVICE) {
+    const on = !blink || Math.floor(t * 2) % 2 === 0;
+    return { warn: true, lines: [row(' NOT IN SERVICE', ''), on ? row('   STAND BACK', '') : row('', '')] };
+  }
+  return { warn: false, lines: [row('NEXT TRAIN', minutes(start - t)), row('THEN', minutes(startOf(n + 1) - t))] };
+}

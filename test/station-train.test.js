@@ -49,3 +49,28 @@ test('one train at a time, and the same every time', () => {
 test('a map with no tracks has no train', () => {
   assert.equal(trainAt(20, parseStation('###\n#S#\n###')), null);
 });
+
+test('the departures board counts down to the next two trains, then warns', async () => {
+  const { departures, minutes, SERVICE } = await import('../src/rpg/train.js');
+  assert.equal(minutes(10), '<1 MIN');
+  assert.equal(minutes(45), '1 MIN');
+  assert.equal(minutes(130), '2 MIN');
+  const s0 = startOf(0), s1 = startOf(1);
+  const d = departures(s0 - SERVICE - 1, MAP);
+  assert.equal(d.warn, false);
+  assert.match(d.lines[0], /^NEXT TRAIN +<1 MIN$/);
+  assert.match(d.lines[1], new RegExp(`^THEN +${minutes(s1 - (s0 - SERVICE - 1))}$`));
+  assert.equal(d.lines[0].length, d.lines[1].length, 'right-aligned');
+  // From SERVICE seconds before it until it has gone: not in service, stand back (blinking, or steady).
+  const w = departures(s0 - 1, MAP, false);
+  assert.equal(w.warn, true);
+  assert.match(w.lines.join('|'), /NOT IN SERVICE.*\|.*STAND BACK/);
+  assert.equal(departures(s0 + travel / 2, MAP).warn, true);
+  const after = departures(s0 + travel + 0.1, MAP);
+  assert.equal(after.warn, false);
+  assert.match(after.lines[0], /NEXT TRAIN/);
+  // The text only changes now and then, so the board seldom redraws.
+  let changes = 0, last = '';
+  for (let t = 0; t < 120; t += 0.25) { const k = departures(t, MAP).lines.join('|'); if (k !== last) changes++; last = k; }
+  assert.ok(changes < 120 * 2.5, `${changes} redraws in two minutes`);
+});
