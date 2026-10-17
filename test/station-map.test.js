@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseStation, LEVEL } from '../src/rpg/map.js';
+import { parseStation, LEVEL, ceilings } from '../src/rpg/map.js';
 
 // A hall, two stair tiles down to the platform, its edge and a track.
 const TINY = [
@@ -101,4 +101,18 @@ test('CANAL ST parses: no spawn, no exits, two tracks at MUSEUM\'s z, the tape s
   assert.deepEqual(map.tracks.map((t) => t.z), [2.5, 16.5]);
   const tape = map.cells.find((c) => c.ch === 'x');
   assert.ok(map.solidAt(tape.c + 0.5, tape.r + 0.5));
+});
+
+test('the ceiling: 4 over the floor below it (over the track, the platform\'s), up to the higher floor beside it', () => {
+  const m = parseStation(fs.readFileSync(new URL('../src/rpg/station.txt', import.meta.url), 'utf8'));
+  const h = ceilings(m, 4);
+  const find = (ch) => m.cells.find((c) => c.ch === ch && N4ok(m, c, ch));
+  const N4ok = (map, c, ch) => [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]].every(([dc, dr]) => map.at(c.c + dc, c.r + dr)?.ch === ch);
+  assert.equal(h(find('.').c, find('.').r), LEVEL.hall + 4, 'the hall');
+  assert.equal(h(find('_').c, find('_').r), LEVEL.platform + 4, 'the platform');
+  const track = m.cells.find((c) => c.ch === '=');
+  assert.equal(h(track.c, track.r), LEVEL.platform + 4, 'over the track: as over the platform');
+  const wall = m.cells.find((c) => c.ch === '#');
+  assert.equal(h(wall.c, wall.r), null, 'none over a wall');
+  for (const c of m.cells) if (c.stair) assert.ok(h(c.c, c.r) >= LEVEL.platform + 4, 'over a stair, never under the platform\'s');
 });

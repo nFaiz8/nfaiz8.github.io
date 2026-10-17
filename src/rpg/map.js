@@ -107,3 +107,17 @@ function bands(test, rows) {
   if (cur) out.push(cur);
   return out;
 }
+
+// The ceiling over each open tile (first person sees it): rise over the floor (a track counts as the platform beside
+// it), taken from the highest of the tile and its eight neighbours, so it steps down from the hall's height only past
+// the hall's last tile. null over a wall (its own top closes it).
+export function ceilings(map, rise) {
+  const floor = (cell) => (cell && cell.level != null ? Math.max(cell.level, LEVEL.platform) : null);
+  return (c, r) => {
+    const cell = map.at(c, r);
+    if (floor(cell) == null || cell.ch === '#' || cell.ch === 'n') return null;
+    let top = -Infinity;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) { const f = floor(map.at(c + dc, r + dr)); if (f != null) top = Math.max(top, f); }
+    return top + rise;
+  };
+}

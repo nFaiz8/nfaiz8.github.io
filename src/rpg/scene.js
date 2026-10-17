@@ -2,7 +2,7 @@
 // Walls, floors, stairs, pillars, benches and the kiosk are instanced unit boxes, one per tile (walls stacked a box
 // per unit of height), so the texture repeats once per world unit. The turnstiles are turnstiles.js's.
 import * as THREE from 'three';
-import { LEVEL } from './map.js';
+import { LEVEL, ceilings } from './map.js';
 import { makeSprite, PROPS, FONT, boxed } from './sprites.js';
 import { departures } from './schedule.js';
 import { DECOR } from './decor.js';
@@ -39,6 +39,8 @@ const SURF = {
   tape: ['#2a2410', '#f2c230', '╱'],
 };
 
+const CEILING = ['#2c3039', '#6a7184', '┼']; // a little darker than the walls; the lamps hang 0.6 under it
+
 // scene: a THREE.Group the caller places at the station's x on the line; the scene's background, fog and sky light are
 // the caller's too (index.js), since the line has more than one station.
 export function buildScene(scene, map, { reducedMotion = false, decor = DECOR[map.name] } = {}) {
@@ -73,6 +75,39 @@ export function buildScene(scene, map, { reducedMotion = false, decor = DECOR[ma
   // and a wall only 4 over the track would let it see over into the void.
   const roof = Math.max(...map.cells.filter((cell) => cell.level != null).map((cell) => cell.level)) + WALL_HEIGHT;
   const edge = (c, r) => c === 0 || r === 0 || c === map.cols - 1 || r === map.rows - 1;
+  // The ceiling (seen in first person, firstperson.js): WALL_HEIGHT over the floor below (map.js's ceilings), a
+  // down-facing tile per open tile, and a face where it steps between heights. Down-facing only, so the camera over
+  // your shoulder, up above it, sees straight through.
+  const ceilAt = ceilings(map, WALL_HEIGHT), pos = [], uv = [];
+  const quad = (a, b, c, d, w, h) => { // corners in order round the face, seen from its front
+    pos.push(...a, ...b, ...c, ...a, ...c, ...d);
+    uv.push(0, 0, w, 0, w, h, 0, 0, w, h, 0, h);
+  };
+  for (let r = 0; r < map.rows; r++) for (let c = 0; c < map.cols; c++) {
+    const y = ceilAt(c, r);
+    if (y == null) continue;
+    quad([c, y, r], [c + 1, y, r], [c + 1, y, r + 1], [c, y, r + 1], 1, 1);
+    // A step up to the east or south neighbour's ceiling (or down from it): a face from the lower to the higher, toward the lower.
+    for (const [dc, dr] of [[1, 0], [0, 1]]) {
+      const y2 = ceilAt(c + dc, r + dr);
+      if (y2 == null || y2 === y) continue;
+      const lo = Math.min(y, y2), hi = Math.max(y, y2), x = c + dc, z = r + dr;
+      const pts = dc ? [[x, lo, r], [x, lo, r + 1], [x, hi, r + 1], [x, hi, r]] : [[c, lo, z], [c + 1, lo, z], [c + 1, hi, z], [c, hi, z]];
+      // Wound to face the lower side: this tile's if it's the lower, the neighbour's otherwise.
+      const towardNext = y2 < y;
+      const [a, b, cc, d] = (dc ? !towardNext : towardNext) ? pts : [pts[1], pts[0], pts[3], pts[2]];
+      quad(a, b, cc, d, 1, hi - lo);
+    }
+  }
+  const ceilGeo = own(new THREE.BufferGeometry());
+  ceilGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  ceilGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  ceilGeo.computeVertexNormals();
+  const ceilTex = own(glyphTexture(CEILING, 0.3));
+  ceilTex.wrapS = ceilTex.wrapT = THREE.RepeatWrapping;
+  const ceiling = new THREE.Mesh(ceilGeo, own(new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 0.95, metalness: 0, emissive: '#0c0e13' })));
+  ceiling.name = 'ceiling';
+  scene.add(ceiling);
   for (const cell of map.cells) {
     const { c, r, ch } = cell, x = c + 0.5, z = r + 0.5;
     if (ch === '#' || ch === 'n') {
